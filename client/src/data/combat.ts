@@ -1,4 +1,5 @@
 import type { EnemyInstance } from './enemies';
+import { recomputeEnemyStats } from './enemies';
 import type { Stats } from './classes';
 import { applyDR } from './attackResolution';
 
@@ -37,7 +38,7 @@ export function startCombat(playerStats: Stats, aggroedEnemies: EnemyInstance[])
       .map(e => ({
         id: e.id,
         name: e.type.name,
-        initiativeRoll: d20() + e.type.stats.initiative,
+        initiativeRoll: d20() + e.stats.initiative,
         isPlayer: false,
       })),
   ];
@@ -65,7 +66,7 @@ export function joinCombat(state: CombatState, newEnemies: EnemyInstance[]): Com
   const newCombatants: Combatant[] = newEnemies.map(e => ({
     id: e.id,
     name: e.type.name,
-    initiativeRoll: d20() + e.type.stats.initiative,
+    initiativeRoll: d20() + e.stats.initiative,
     isPlayer: false,
   }));
 
@@ -130,15 +131,31 @@ export function applyTopOfRound(enemies: EnemyInstance[]): { enemies: EnemyInsta
   const updated = enemies.map(e => {
     if (e.currentHp <= 0) return e;
 
-    // Regen
-    let hp = Math.min(e.type.stats.hp, e.currentHp + e.type.stats.hpRegen);
-    const mp = Math.min(e.type.stats.mp, e.currentMp + e.type.stats.mpRegen);
+    // Buff expiry — decrement duration, remove expired, recompute stats if anything changed
+    const newBuffs = e.buffs
+      .map(b => ({ ...b, roundsRemaining: b.roundsRemaining - 1 }))
+      .filter(b => b.roundsRemaining > 0);
+    const buffsChanged = newBuffs.length !== e.buffs.length;
+    const s = buffsChanged ? recomputeEnemyStats(e, newBuffs) : e.stats;
+
+    // Regen (using current effective stats)
+    let hp = Math.min(s.hp, e.currentHp + s.hpRegen);
+    const mp = Math.min(s.mp, e.currentMp + s.mpRegen);
+
+    // Tick HoTs
+    const remainingHots = e.hots
+      .map(h => ({ ...h, roundsRemaining: h.roundsRemaining - 1 }))
+      .filter(h => h.roundsRemaining > 0);
+    if (e.hots.length > 0) {
+      const hotHeal = e.hots.reduce((sum, h) => sum + h.healPerRound + Math.floor(s.healing / 2), 0);
+      hp = Math.min(s.hp, hp + hotHeal);
+    }
 
     // Tick DoTs
     let totalDotDamage = 0;
     const remainingDots = e.dots
       .map(dot => {
-        const tickDamage = applyDR(dot.damagePerRound, dot.damageElement, e.type.stats.armor, e.type.stats.magicResistance);
+        const tickDamage = applyDR(dot.damagePerRound, dot.damageElement, s.armor, s.magicResistance);
         totalDotDamage += tickDamage;
         return dot.roundsRemaining > 1
           ? { ...dot, roundsRemaining: dot.roundsRemaining - 1 }
@@ -151,7 +168,7 @@ export function applyTopOfRound(enemies: EnemyInstance[]): { enemies: EnemyInsta
       dotTicks.push({ enemyId: e.id, pos: e.pos, damage: totalDotDamage });
     }
 
-    return { ...e, currentHp: hp, currentMp: mp, dots: remainingDots };
+    return { ...e, currentHp: hp, currentMp: mp, dots: remainingDots, hots: remainingHots, buffs: newBuffs, stats: s };
   });
 
   return { enemies: updated, dotTicks };

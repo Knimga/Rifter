@@ -217,8 +217,8 @@ export const WEAPON_ICON_PATH: Partial<Record<WeaponType, string>> = {
 // 2h weapons (including bows and staves) deal ~1.67x more damage than 1h
 const IS_TWO_HANDED = new Set<WeaponType>(['2h Swords', '2h Maces', '2h Axes', 'Bows', 'Staves']);
 
-const DMG_BASE_1H = 3;
-const DMG_BASE_2H = 5;
+const DMG_BASE_1H = 5;
+const DMG_BASE_2H = 8;
 const DMG_SCALE_EXP = 0.7;  // sublinear power curve: base * level^0.7
 const DMG_SPREAD_1H = 0.20; // min = base × 0.80, max = base × 1.20
 const DMG_SPREAD_2H = 0.35; // min = base × 0.65, max = base × 1.35

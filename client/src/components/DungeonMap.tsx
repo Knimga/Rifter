@@ -167,12 +167,15 @@ export default function DungeonMap({ selectedClass, playerPos, movement, onMove,
                       </div>
                     )}
                     {!isPlayer && enemy && (
-                      <div className="relative w-full h-full flex items-center justify-center">
+                      <div
+                        className="relative w-full h-full flex items-center justify-center cursor-pointer"
+                        onClick={() => console.log(`[${enemy.type.name} lv${enemy.level}]`, { attrs: enemy.attrs, stats: enemy.stats, weapon: enemy.type.weapon })}
+                      >
                         <span className="text-lg leading-none">{enemy.type.token}</span>
                         <div className="absolute bottom-0.5 left-1/2 -translate-x-1/2 w-8 h-1 bg-gray-700 rounded-full overflow-hidden">
                           <div
                             className="h-full bg-red-500 transition-all"
-                            style={{ width: `${(enemy.currentHp / enemy.type.stats.hp) * 100}%` }}
+                            style={{ width: `${(enemy.currentHp / enemy.stats.hp) * 100}%` }}
                           />
                         </div>
                       </div>

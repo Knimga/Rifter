@@ -1,4 +1,5 @@
 import type { EnemyType, EnemyInstance } from './enemies';
+import { generateEnemyInstance } from './enemies';
 
 // ─── Core Types ──────────────────────────────────────────────────────────────
 
@@ -48,6 +49,7 @@ export interface DungeonConfig {
   splitDepth: number;      // BSP recursion depth
   corridorWidth: number;   // corridor width in tiles (1-3)
   maxZones: number;        // maximum number of zones (min 2)
+  baseEnemyLevel: number;  // enemy level in zone 0; zone n gets baseEnemyLevel + n
   enemyGroups: EnemyType[][];  // possible group compositions; one picked at random per room
 }
 
@@ -375,17 +377,9 @@ export function spawnDungeonEnemies(dungeon: DungeonData, config: DungeonConfig)
         if (attempts >= 100) continue;
         occupied.add(key);
 
-        instances.push({
-          id: `${type.id}-${globalIdx++}`,
-          type,
-          pos: { x, y },
-          currentHp: type.stats.hp,
-          currentMp: type.stats.mp,
-          aggroed: false,
-          zoneId: zone.id,
-          groupId,
-          dots: [],
-        });
+        const id = `${type.id}-${globalIdx++}`;
+        const level = config.baseEnemyLevel + zone.id;
+        instances.push(generateEnemyInstance(type, level, id, { x, y }, zone.id, groupId));
       }
     }
   }

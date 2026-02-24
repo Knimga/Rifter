@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import {
   X, Crown, Shirt, Hand, Footprints, Sword, Shield,
 } from 'lucide-react';
@@ -12,6 +12,7 @@ import {
   type GearSlots, type GearSlot
 } from '../data/gear';
 import type { ComponentType } from 'react';
+import { Tooltip, WeaponTooltipContent, ArmorTooltipContent } from './Tooltip';
 
 interface Props {
   characterName: string;
@@ -57,58 +58,38 @@ function Stat({ label, value, color }: { label: string; value: string | number; 
   );
 }
 
-function GearSlotPane({ slot, gear }: { slot: GearSlot; gear: GearSlots }) {
+function GearSlotPane({ slot, gear, stats }: { slot: GearSlot; gear: GearSlots; stats: Stats }) {
   const item = gear[slot];
   const Icon = SLOT_ICON[slot];
-  const [showTooltip, setShowTooltip] = useState(false);
 
-  const tooltipContent = item ? (
-    <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-10 bg-gray-950 border border-gray-600 rounded-lg px-3 py-2 text-xs whitespace-nowrap pointer-events-none">
-      <p className="font-bold text-gray-200 mb-1">{item.name}</p>
-      {isWeaponItem(item) && (
-        <>
-          <p className="text-gray-400">{item.weaponType}</p>
-          <p className="text-gray-400">Damage: {item.minDamage}-{item.maxDamage} {item.damageElement}</p>
-          <p className="text-gray-400">Range: {item.range}</p>
-        </>
-      )}
-      {isArmorItem(item) && (
-        <>
-          <p className="text-gray-400">{item.armorType} armor</p>
-          <p className="text-gray-400">Armor: {item.armorValue}</p>
-        </>
-      )}
-      {isShieldItem(item) && (
-        <>
-          <p className="text-gray-400">{item.armorType} shield</p>
-          <p className="text-gray-400">Armor: {item.armorValue}</p>
-        </>
-      )}
-    </div>
-  ) : null;
+  const tooltipContent = item
+    ? isWeaponItem(item)
+      ? <WeaponTooltipContent item={item} stats={stats} />
+      : (isArmorItem(item) || isShieldItem(item))
+        ? <ArmorTooltipContent item={item} />
+        : null
+    : null;
 
   return (
-    <div
-      className="relative flex flex-col items-center"
+    <Tooltip
+      content={tooltipContent}
+      className="flex flex-col items-center"
       style={{ gridColumn: SLOT_POS[slot].col, gridRow: SLOT_POS[slot].row }}
     >
       <div
-        className={`w-14 h-14 rounded-lg border flex flex-col items-center justify-center ${
-          item
-            ? 'bg-gray-700 border-gray-500'
-            : 'bg-gray-800 border-gray-700'
+        className={`w-14 h-14 rounded-lg border flex flex-col items-center pt-1 ${
+          item ? 'bg-gray-700 border-gray-500' : 'bg-gray-800 border-gray-700'
         }`}
-        onMouseEnter={() => item && setShowTooltip(true)}
-        onMouseLeave={() => setShowTooltip(false)}
       >
-        <span className="text-[9px] font-semibold text-gray-500 leading-none mb-0.5">{SLOT_LABEL[slot]}</span>
-        {item && isWeaponItem(item) && WEAPON_ICON_PATH[item.weaponType]
-          ? <img src={WEAPON_ICON_PATH[item.weaponType]} alt="" className="w-5 h-5" />
-          : <Icon className={`w-5 h-5 ${item ? 'text-gray-200' : 'text-gray-600'}`} />
-        }
+        <span className="text-[9px] font-semibold text-gray-500 leading-none">{SLOT_LABEL[slot]}</span>
+        <div className="flex-1 flex items-center justify-center">
+          {item && isWeaponItem(item) && WEAPON_ICON_PATH[item.weaponType]
+            ? <img src={WEAPON_ICON_PATH[item.weaponType]} alt="" className="w-7 h-7" />
+            : <Icon className={item ? 'w-7 h-7 text-gray-200' : 'w-5 h-5 text-gray-600 opacity-30'} />
+          }
+        </div>
       </div>
-      {showTooltip && tooltipContent}
-    </div>
+    </Tooltip>
   );
 }
 
@@ -148,7 +129,7 @@ export default function CharacterSheet({ characterName, selectedClass, pointsSpe
             <h3 className="text-xs font-bold uppercase tracking-wide text-gray-500 mb-3">Equipment</h3>
             <div className="grid grid-cols-3 gap-2 justify-items-center" style={{ gridTemplateRows: 'repeat(4, auto)' }}>
               {GEAR_SLOTS.map(slot => (
-                <GearSlotPane key={slot} slot={slot} gear={gear} />
+                <GearSlotPane key={slot} slot={slot} gear={gear} stats={stats} />
               ))}
             </div>
           </div>

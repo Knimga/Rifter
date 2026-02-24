@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 
-import { CLASSES, calculateStats, type ClassKey, type AttributeKey } from '../data/classes';
+import { CLASSES, calculateStats, applyStatBuffs, ATTRIBUTE_KEYS, type ClassKey, type AttributeKey, type ActiveBuff, type ActiveHot } from '../data/classes';
 import { getGearArmorBonus, isWeaponItem, type GearSlots, type AttackCategory, type DamageElement } from '../data/gear';
 import type { EnemyInstance } from '../data/enemies';
+import { applyBuffToEnemy } from '../data/enemies';
 import { chebyshev, hasLineOfSight, getAffectedTiles } from '../data/dungeonHelpers';
 import type { AreaType } from '../data/classes';
 import { generateDungeon, spawnDungeonEnemies, type DungeonData } from '../data/dungeonGen';
@@ -50,10 +51,24 @@ export default function GameScreen({ characterName, selectedClass, pointsSpent, 
   const [showCharSheet, setShowCharSheet] = useState(false);
   const [dungeon, setDungeon] = useState<DungeonData | null>(null);
   const [currentZone, setCurrentZone] = useState(0);
+  const [playerBuffs, setPlayerBuffs] = useState<ActiveBuff[]>([]);
+  const [playerHots, setPlayerHots] = useState<ActiveHot[]>([]);
   const nextFloatId = useRef(0);
 
   const classData = CLASSES[selectedClass];
-  const stats = calculateStats(selectedClass, pointsSpent, getGearArmorBonus(gear));
+
+  // Effective player stats: re-run calculateStats with buffed attributes, then apply direct stat buffs
+  const playerAttrBuffs = playerBuffs.reduce((acc, b) => {
+    if ((ATTRIBUTE_KEYS as string[]).includes(b.stat)) {
+      const k = b.stat as AttributeKey;
+      acc[k] = (acc[k] ?? 0) + b.amount;
+    }
+    return acc;
+  }, {} as Partial<Record<AttributeKey, number>>);
+  const stats = applyStatBuffs(
+    calculateStats(selectedClass, pointsSpent, getGearArmorBonus(gear), playerAttrBuffs),
+    playerBuffs,
+  );
   const weapon = gear.mainhand && isWeaponItem(gear.mainhand) ? gear.mainhand : null;
   const activeAbility = activeSlot !== null ? slots[activeSlot] : null;
   const currentCombatant = getCurrentCombatant(combat);
@@ -75,6 +90,10 @@ export default function GameScreen({ characterName, selectedClass, pointsSpent, 
   zoneRef.current = zone;
   const currentZoneRef = useRef(currentZone);
   currentZoneRef.current = currentZone;
+  const playerBuffsRef = useRef(playerBuffs);
+  playerBuffsRef.current = playerBuffs;
+  const playerHotsRef = useRef(playerHots);
+  playerHotsRef.current = playerHots;
 
   // ─── Floating combat text helpers ───────────────────────────────────────
 
@@ -98,13 +117,45 @@ export default function GameScreen({ characterName, selectedClass, pointsSpent, 
     }
   }, [stats.hp, stats.mp, combat.active]);
 
-  // ─── Top-of-round effects (regen, etc.) ────────────────────────────────
+  // Clamp current HP/MP to effective max during combat (e.g. when a buff expires)
+  useEffect(() => {
+    if (combat.active) {
+      setPlayerHp(prev => Math.min(prev, stats.hp));
+      setPlayerMp(prev => Math.min(prev, stats.mp));
+    }
+  }, [stats.hp, stats.mp, combat.active]);
+
+  // ─── Top-of-round effects (regen, buff expiry, DoT ticks) ───────────────
 
   useEffect(() => {
     if (combat.round <= 1) return;
     const s = statsRef.current;
+
+    // Player buff expiry
+    setPlayerBuffs(playerBuffsRef.current
+      .map(b => ({ ...b, roundsRemaining: b.roundsRemaining - 1 }))
+      .filter(b => b.roundsRemaining > 0)
+    );
+
+    // Player HoT ticks
+    const currentHots = playerHotsRef.current;
+    if (currentHots.length > 0) {
+      const totalHotHeal = currentHots.reduce((sum, h) => sum + h.healPerRound + Math.floor(s.healing / 2), 0);
+      if (totalHotHeal > 0) {
+        setPlayerHp(prev => Math.min(s.hp, prev + totalHotHeal));
+        spawnFloat(playerPosRef.current.x, playerPosRef.current.y, `+${totalHotHeal}`, 'green');
+      }
+      setPlayerHots(currentHots
+        .map(h => ({ ...h, roundsRemaining: h.roundsRemaining - 1 }))
+        .filter(h => h.roundsRemaining > 0)
+      );
+    }
+
+    // Player regen
     setPlayerHp(prev => Math.min(s.hp, prev + s.hpRegen));
     setPlayerMp(prev => Math.min(s.mp, prev + s.mpRegen));
+
+    // Enemy regen, buff expiry, DoT ticks
     setEnemies(prev => {
       const { enemies: updated, dotTicks } = applyTopOfRound(prev);
       for (const tick of dotTicks) {
@@ -120,6 +171,8 @@ export default function GameScreen({ characterName, selectedClass, pointsSpent, 
     setLocation(next);
     setCombat(INITIAL_COMBAT);
     setFloatingTexts([]);
+    setPlayerBuffs([]);
+    setPlayerHots([]);
 
     if (next === 'dungeon') {
       const config = DUNGEON_PRESETS.crypt;
@@ -135,6 +188,15 @@ export default function GameScreen({ characterName, selectedClass, pointsSpent, 
       setEnemies([]);
     }
   };
+
+  // ─── Death ────────────────────────────────────────────────────────────────
+
+  useEffect(() => {
+    if (playerHp === 0 && combat.active) {
+      handleLocationChange('sanctum');
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playerHp, combat.active]);
 
   // ─── Aggro detection ─────────────────────────────────────────────────────
 
@@ -260,14 +322,56 @@ export default function GameScreen({ characterName, selectedClass, pointsSpent, 
       range = weapon.range;
     } else if (activeContent && typeof activeContent === 'object') {
       if (playerMp < activeContent.mpCost) return;
-      if (!activeContent.attackCategory) return;
-      if (!activeContent.damage && !activeContent.dot) return; // need at least one effect
-      attackCategory = activeContent.attackCategory;
-      damageElement = activeContent.damage?.damageElement ?? activeContent.dot!.damageElement;
-      minDamage = activeContent.damage?.minDamage ?? 0;
-      maxDamage = activeContent.damage?.maxDamage ?? 0;
-      range = activeContent.range;
-      area = activeContent.area;
+
+      // Self-targeting: heal, buff, and/or HoT applied immediately, no attack roll
+      if (activeContent.target === 'self' && (activeContent.heal || activeContent.buff || activeContent.hot)) {
+        if (activeContent.heal) {
+          const { minHeal, maxHeal } = activeContent.heal;
+          const roll = Math.floor(Math.random() * (maxHeal - minHeal + 1)) + minHeal;
+          const healAmount = Math.max(0, roll + stats.healing);
+          setPlayerHp(prev => Math.min(stats.hp, prev + healAmount));
+          if (healAmount > 0) spawnFloat(playerPos.x, playerPos.y, `+${healAmount}`, 'green');
+        }
+        if (activeContent.buff) {
+          setPlayerBuffs(prev => [...prev, {
+            id: `${activeContent.name}-player`,
+            stat: activeContent.buff!.stat,
+            amount: activeContent.buff!.amount,
+            roundsRemaining: activeContent.buff!.rounds,
+          }]);
+          if (!activeContent.heal) spawnFloat(playerPos.x, playerPos.y, `+${activeContent.buff.stat}`, 'green');
+        }
+        if (activeContent.hot) {
+          setPlayerHots(prev => [...prev, {
+            healPerRound: activeContent.hot!.healPerRound,
+            roundsRemaining: activeContent.hot!.rounds,
+          }]);
+          if (!activeContent.heal) spawnFloat(playerPos.x, playerPos.y, `+HoT`, 'green');
+        }
+        setPlayerMp(prev => prev - activeContent.mpCost);
+        setActiveSlot(null);
+        setCombat(prev => ({ ...prev, playerActedThisTurn: true }));
+        return;
+      }
+
+      if (activeContent.useWeapon) {
+        if (!weapon) return;
+        attackCategory = weapon.attackCategory;
+        damageElement = weapon.damageElement;
+        minDamage = weapon.minDamage;
+        maxDamage = weapon.maxDamage;
+        range = activeContent.range;
+        area = activeContent.area;
+      } else {
+        if (!activeContent.attackCategory) return;
+        if (!activeContent.damage && !activeContent.dot && !activeContent.debuff) return;
+        attackCategory = activeContent.attackCategory;
+        damageElement = activeContent.damage?.damageElement ?? activeContent.dot?.damageElement ?? 'slashing';
+        minDamage = activeContent.damage?.minDamage ?? 0;
+        maxDamage = activeContent.damage?.maxDamage ?? 0;
+        range = activeContent.range;
+        area = activeContent.area;
+      }
     } else {
       return;
     }
@@ -296,8 +400,10 @@ export default function GameScreen({ characterName, selectedClass, pointsSpent, 
     const atkStats = stats[attackCategory];
     const damages: { id: string; damage: number }[] = [];
     const dotTargets: string[] = [];  // enemy ids that should receive DoTs
-    const hasDamage = activeContent === 'weapon-attack' || (typeof activeContent === 'object' && !!activeContent.damage);
+    const debuffTargets: string[] = []; // enemy ids that should receive debuff on hit
+    const hasDamage = activeContent === 'weapon-attack' || (typeof activeContent === 'object' && (!!activeContent.damage || !!activeContent.useWeapon));
     const abilityDot = activeContent !== 'weapon-attack' && typeof activeContent === 'object' ? activeContent.dot : undefined;
+    const abilityDebuff = activeContent !== 'weapon-attack' && typeof activeContent === 'object' ? activeContent.debuff : undefined;
 
     for (const enemy of targets) {
       const result = resolveAttack({
@@ -307,9 +413,9 @@ export default function GameScreen({ characterName, selectedClass, pointsSpent, 
         minDamage,
         maxDamage,
         damageElement,
-        targetDodge: enemy.type.stats.dodge,
-        targetArmor: enemy.type.stats.armor,
-        targetMagicResistance: enemy.type.stats.magicResistance,
+        targetDodge: enemy.stats.dodge,
+        targetArmor: enemy.stats.armor,
+        targetMagicResistance: enemy.stats.magicResistance,
       });
 
       if (!result.hit) {
@@ -327,6 +433,10 @@ export default function GameScreen({ characterName, selectedClass, pointsSpent, 
           dotTargets.push(enemy.id);
           spawnFloat(enemy.pos.x, enemy.pos.y, 'Hit!', 'purple');
         }
+        // Debuff application
+        if (abilityDebuff) {
+          debuffTargets.push(enemy.id);
+        }
       }
 
       if (hasDamage && result.finalDamage > 0) {
@@ -334,15 +444,17 @@ export default function GameScreen({ characterName, selectedClass, pointsSpent, 
       }
     }
 
-    // Apply damage and DoTs
-    if (damages.length > 0 || dotTargets.length > 0) {
+    // Apply damage, DoTs, and debuffs
+    if (damages.length > 0 || dotTargets.length > 0 || debuffTargets.length > 0) {
       const damageMap = new Map(damages.map(d => [d.id, d.damage]));
       const dotSet = new Set(dotTargets);
+      const debuffSet = new Set(debuffTargets);
       setEnemies(prev => prev.map(e => {
         const dmg = damageMap.get(e.id);
         const addDot = dotSet.has(e.id) && abilityDot;
-        if (!dmg && !addDot) return e;
-        return {
+        const addDebuff = debuffSet.has(e.id) && abilityDebuff;
+        if (!dmg && !addDot && !addDebuff) return e;
+        let updated = {
           ...e,
           currentHp: dmg ? Math.max(0, e.currentHp - dmg) : e.currentHp,
           dots: addDot ? [...e.dots, {
@@ -351,6 +463,15 @@ export default function GameScreen({ characterName, selectedClass, pointsSpent, 
             roundsRemaining: abilityDot!.rounds,
           }] : e.dots,
         };
+        if (addDebuff) {
+          updated = applyBuffToEnemy(updated, {
+            id: `${activeContent !== 'weapon-attack' && typeof activeContent === 'object' ? activeContent.name : 'debuff'}-${e.id}`,
+            stat: abilityDebuff!.stat,
+            amount: -Math.abs(abilityDebuff!.amount),
+            roundsRemaining: abilityDebuff!.rounds,
+          });
+        }
+        return updated;
       }));
     }
 
@@ -374,7 +495,7 @@ export default function GameScreen({ characterName, selectedClass, pointsSpent, 
   useEnemyTurn(
     combat, currentCombatant,
     enemyTurnRefs,
-    setEnemies, setPlayerHp, setCombat,
+    setEnemies, setPlayerHp, setPlayerBuffs, setCombat,
   );
 
   // ─── Combat end detection ────────────────────────────────────────────────
@@ -496,6 +617,7 @@ export default function GameScreen({ characterName, selectedClass, pointsSpent, 
             inCombat={combat.active}
             isPlayerTurn={isPlayerTurn}
             playerActedThisTurn={combat.playerActedThisTurn}
+            stats={stats}
           />
           <div className="flex-1 flex justify-end items-center gap-3">
             {combat.active && isPlayerTurn && (

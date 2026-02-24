@@ -14,6 +14,7 @@ export const DUNGEON_PRESETS = {
     splitDepth: 3,
     corridorWidth: 2,
     maxZones: 4,
+    baseEnemyLevel: 1,
     enemyGroups: [
       [S, Z],
       [S, S, S],

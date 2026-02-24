@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { isWeaponItem, WEAPON_ICON_PATH, type GearSlots } from '../data/gear';
-import type { Ability } from '../data/classes';
+import type { Ability, Stats } from '../data/classes';
+import { Tooltip, WeaponTooltipContent, AbilityTooltipContent } from './Tooltip';
 
 // ─── Slot types ─────────────────────────────────────────────────────────────
 
@@ -18,9 +19,10 @@ interface Props {
   inCombat: boolean;
   isPlayerTurn: boolean;
   playerActedThisTurn: boolean;
+  stats: Stats;
 }
 
-export default function ActionBar({ gear, abilities, slots, onSlotsChange, activeSlot, onActiveSlotChange, inCombat, isPlayerTurn, playerActedThisTurn }: Props) {
+export default function ActionBar({ gear, abilities, slots, onSlotsChange, activeSlot, onActiveSlotChange, inCombat, isPlayerTurn, playerActedThisTurn, stats }: Props) {
   const [openMenu, setOpenMenu] = useState<number | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -57,6 +59,12 @@ export default function ActionBar({ gear, abilities, slots, onSlotsChange, activ
     setOpenMenu(null);
   };
 
+  const tooltipContent = (slot: SlotContent) => {
+    if (slot === null) return null;
+    if (slot === 'weapon-attack') return weapon ? <WeaponTooltipContent item={weapon} stats={stats} /> : null;
+    return <AbilityTooltipContent ability={slot} stats={stats} weapon={weapon} />;
+  };
+
   return (
     <div className="flex justify-center gap-3">
       {slots.map((slot, i) => {
@@ -65,7 +73,7 @@ export default function ActionBar({ gear, abilities, slots, onSlotsChange, activ
         const isActive = activeSlot === i && slot !== null;
 
         return (
-          <div key={i} className="relative">
+          <Tooltip key={i} className="relative" content={tooltipContent(slot)}>
 
             {/* Dropup menu */}
             {isOpen && (
@@ -134,7 +142,7 @@ export default function ActionBar({ gear, abilities, slots, onSlotsChange, activ
               )}
             </div>
 
-          </div>
+          </Tooltip>
         );
       })}
     </div>

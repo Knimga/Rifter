@@ -84,7 +84,7 @@ export default function BuilderScreen({
                       {Object.entries(classData.passives)
                         .map(([k, val]) => {
                           const label = k.replace('Bonus', '').replace(/([A-Z])/g, ' $1').trim();
-                          return `+${val}${k.includes('Crit') || k.includes('Dodge') || k.includes('Hit') ? '%' : ''} ${label}`;
+                          return `+${val}${k.includes('Crit') || k.includes('dodge') || k.includes('Hit') ? '%' : ''} ${label}`;
                         })
                         .join(', ')}
                     </div>

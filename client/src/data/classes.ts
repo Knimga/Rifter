@@ -33,13 +33,17 @@ export interface Ability {
     minHeal: number;
     maxHeal: number;
   };
+  hot?: {
+    healPerRound: number;
+    rounds: number;
+  }
   buff?: {
-    stat: string;
+    stat: BuffableStat;
     amount: number;
     rounds: number;
   };
   debuff?: {
-    stat: string;
+    stat: BuffableStat;
     amount: number;
     rounds: number;
   };
@@ -47,6 +51,32 @@ export interface Ability {
 
 export type AttributeKey = 'strength' | 'toughness' | 'finesse' | 'mind' | 'spirit';
 export type ClassKey = 'barbarian' | 'paladin' | 'ranger' | 'mage' | 'shaman';
+
+// ─── Buff / Debuff System ─────────────────────────────────────────────────────
+
+/** Every stat that can be raised or lowered by a buff/debuff. */
+export type BuffableStat =
+  | AttributeKey
+  | 'hpRegen' | 'mpRegen' | 'initiative' | 'movement'
+  | 'armor' | 'dodge' | 'magicResistance' | 'healing'
+  | 'meleeHit' | 'meleeDamage' | 'meleeCrit'
+  | 'rangedHit' | 'rangedDamage' | 'rangedCrit'
+  | 'magicHit' | 'magicDamage' | 'magicCrit';
+
+export interface ActiveBuff {
+  id: string;              // source key — prevents double-applying the same buff source
+  stat: BuffableStat;
+  amount: number;          // positive = buff, negative = debuff
+  roundsRemaining: number;
+}
+
+export interface ActiveHot {
+  healPerRound: number;
+  roundsRemaining: number;
+}
+
+export const ATTRIBUTE_KEYS: AttributeKey[] = ['strength', 'toughness', 'finesse', 'mind', 'spirit'];
+const ATTRIBUTE_KEYS_SET = new Set<string>(ATTRIBUTE_KEYS);
 
 export type ArmorProficiency = 'Light' | 'Medium' | 'Heavy';
 export type WeaponProficiency =
@@ -170,7 +200,8 @@ export const CLASSES: Record<ClassKey, ClassData> = {
 };
 
 export const BASE_ATTRIBUTES = 5;
-export const TOTAL_POINTS = 6;
+export const TOTAL_POINTS = 6;           // attribute points at level 1 (shared by players and enemies)
+export const ATTRIBUTE_POINTS_PER_LEVEL = 3; // additional points per level above 1
 
 const fl = (n: number) => Math.floor(n);
 
@@ -185,14 +216,16 @@ export function getTotalAttribute(
 export function calculateStats(
   selectedClass: ClassKey | null,
   pointsSpent: Record<AttributeKey, number>,
-  gearArmorBonus = 0
+  gearArmorBonus = 0,
+  attrBuffs: Partial<Record<AttributeKey, number>> = {},
 ) {
   const level = 1;
-  const str = getTotalAttribute('strength', pointsSpent, selectedClass);
-  const tou = getTotalAttribute('toughness', pointsSpent, selectedClass);
-  const fin = getTotalAttribute('finesse', pointsSpent, selectedClass);
-  const mnd = getTotalAttribute('mind', pointsSpent, selectedClass);
-  const spr = getTotalAttribute('spirit', pointsSpent, selectedClass);
+  const clampAttr = (n: number) => Math.max(0, n);
+  const str = clampAttr(getTotalAttribute('strength', pointsSpent, selectedClass) + (attrBuffs.strength ?? 0));
+  const tou = clampAttr(getTotalAttribute('toughness', pointsSpent, selectedClass) + (attrBuffs.toughness ?? 0));
+  const fin = clampAttr(getTotalAttribute('finesse', pointsSpent, selectedClass) + (attrBuffs.finesse ?? 0));
+  const mnd = clampAttr(getTotalAttribute('mind', pointsSpent, selectedClass) + (attrBuffs.mind ?? 0));
+  const spr = clampAttr(getTotalAttribute('spirit', pointsSpent, selectedClass) + (attrBuffs.spirit ?? 0));
   const passives = selectedClass ? CLASSES[selectedClass].passives : {};
 
   return {
@@ -226,3 +259,37 @@ export function calculateStats(
 }
 
 export type Stats = ReturnType<typeof calculateStats>;
+
+/**
+ * Apply non-attribute buffs/debuffs additively to a Stats block.
+ * Attribute buffs are handled upstream by passing attrBuffs into calculateStats /
+ * generateEnemyStats so all derived values are recomputed correctly.
+ */
+export function applyStatBuffs(stats: Stats, buffs: ActiveBuff[]): Stats {
+  if (buffs.length === 0) return stats;
+  const s = { ...stats, melee: { ...stats.melee }, ranged: { ...stats.ranged }, magic: { ...stats.magic } };
+  const clamp = (v: number, min = 0) => Math.max(min, v);
+  for (const buff of buffs) {
+    if (ATTRIBUTE_KEYS_SET.has(buff.stat)) continue; // handled upstream
+    switch (buff.stat) {
+      case 'hpRegen':         s.hpRegen         = clamp(s.hpRegen         + buff.amount);    break;
+      case 'mpRegen':         s.mpRegen         = clamp(s.mpRegen         + buff.amount);    break;
+      case 'initiative':      s.initiative      = clamp(s.initiative      + buff.amount);    break;
+      case 'movement':        s.movement        = clamp(s.movement        + buff.amount, 1); break;
+      case 'armor':           s.armor           = clamp(s.armor           + buff.amount);    break;
+      case 'dodge':           s.dodge           = clamp(s.dodge           + buff.amount);    break;
+      case 'magicResistance': s.magicResistance = clamp(s.magicResistance + buff.amount);    break;
+      case 'healing':         s.healing         = clamp(s.healing         + buff.amount);    break;
+      case 'meleeHit':        s.melee.hitBonus  = clamp(s.melee.hitBonus  + buff.amount);    break;
+      case 'meleeDamage':     s.melee.damage    = clamp(s.melee.damage    + buff.amount);    break;
+      case 'meleeCrit':       s.melee.crit      = clamp(s.melee.crit      + buff.amount);    break;
+      case 'rangedHit':       s.ranged.hitBonus = clamp(s.ranged.hitBonus + buff.amount);    break;
+      case 'rangedDamage':    s.ranged.damage   = clamp(s.ranged.damage   + buff.amount);    break;
+      case 'rangedCrit':      s.ranged.crit     = clamp(s.ranged.crit     + buff.amount);    break;
+      case 'magicHit':        s.magic.hitBonus  = clamp(s.magic.hitBonus  + buff.amount);    break;
+      case 'magicDamage':     s.magic.damage    = clamp(s.magic.damage    + buff.amount);    break;
+      case 'magicCrit':       s.magic.crit      = clamp(s.magic.crit      + buff.amount);    break;
+    }
+  }
+  return s;
+}

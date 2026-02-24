@@ -1,4 +1,5 @@
 import type { EnemyInstance } from './enemies';
+import type { Ability } from './classes';
 import { chebyshev, hasLineOfSight } from './dungeonHelpers';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -6,8 +7,9 @@ import { chebyshev, hasLineOfSight } from './dungeonHelpers';
 interface Pos { x: number; y: number }
 
 export interface EnemyAction {
-  moveTo: Pos | null;       // final position after movement (null = stayed put)
-  attackPlayer: boolean;    // whether to attack the player after moving
+  moveTo: Pos | null;           // final position after movement (null = stayed put)
+  attackPlayer: boolean;        // whether to do a weapon attack after moving
+  abilityUsed: Ability | null;  // if non-null, use this ability instead of weapon attack
 }
 
 // ─── BFS Pathfinding ────────────────────────────────────────────────────────
@@ -102,9 +104,31 @@ export function computeEnemyTurn(
   const range = enemy.type.weapon.range;
   let pos = { ...enemy.pos };
 
-  // Already in range + LOS? Attack without moving.
+  // ── Self-targeting ability check (e.g. self-heal when low HP) ────────────
+  const selfAbilities = enemy.type.abilities.filter(
+    a => a.target === 'self' && enemy.currentMp >= a.mpCost
+  );
+  if (selfAbilities.length > 0) {
+    const hpPct = enemy.currentHp / enemy.stats.hp;
+    const healAbility = selfAbilities.find(a => a.heal || a.hot);
+    if (healAbility && hpPct < 0.5) {
+      return { moveTo: null, attackPlayer: false, abilityUsed: healAbility };
+    }
+    // Other self buffs: use on first turn of combat (round 1 effectively = first action)
+    const buffAbility = selfAbilities.find(a => a.buff);
+    if (buffAbility && !enemy.buffs.some(b => b.id.startsWith(buffAbility.name))) {
+      return { moveTo: null, attackPlayer: false, abilityUsed: buffAbility };
+    }
+  }
+
+  // ── Already in weapon range + LOS? Check for ability first, then weapon ──
   if (chebyshev(pos, playerPos) <= range && hasLineOfSight(pos, playerPos, floors)) {
-    return { moveTo: null, attackPlayer: true };
+    const inRangeAbility = enemy.type.abilities.find(
+      a => a.target === 'enemy' && enemy.currentMp >= a.mpCost &&
+           chebyshev(pos, playerPos) <= a.range && hasLineOfSight(pos, playerPos, floors)
+    );
+    if (inRangeAbility) return { moveTo: null, attackPlayer: false, abilityUsed: inRangeAbility };
+    return { moveTo: null, attackPlayer: true, abilityUsed: null };
   }
 
   // Tiles occupied by other living enemies
@@ -118,7 +142,7 @@ export function computeEnemyTurn(
   const path = findPath(pos, playerPos, floors, blocked);
 
   // Follow path up to movement budget, stopping early if we enter attack range
-  const movement = enemy.type.stats.movement;
+  const movement = enemy.stats.movement;
   const steps = Math.min(path.length, movement);
   let lastValidPos = { ...enemy.pos };
   for (let i = 0; i < steps; i++) {
@@ -144,8 +168,15 @@ export function computeEnemyTurn(
     console.log(`[AI] ${enemy.type.name} (mv ${movement}): (${enemy.pos.x},${enemy.pos.y}) → (${pos.x},${pos.y}), dist ${chebyshev(enemy.pos, pos)}`);
   }
 
+  // Check for an in-range enemy-targeting ability after moving
+  const inRangeAbility = canAttack ? enemy.type.abilities.find(
+    a => a.target === 'enemy' && enemy.currentMp >= a.mpCost &&
+         chebyshev(pos, playerPos) <= a.range && hasLineOfSight(pos, playerPos, floors)
+  ) : undefined;
+
   return {
     moveTo: moved ? pos : null,
-    attackPlayer: canAttack,
+    attackPlayer: canAttack && !inRangeAbility,
+    abilityUsed: inRangeAbility ?? null,
   };
 }
