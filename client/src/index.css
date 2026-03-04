@@ -11,6 +11,22 @@
   display: none;
 }
 
+.thin-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: #4b5563 transparent;
+  scrollbar-gutter: stable;
+}
+.thin-scrollbar::-webkit-scrollbar {
+  width: 3px;
+}
+.thin-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.thin-scrollbar::-webkit-scrollbar-thumb {
+  background: #4b5563;
+  border-radius: 2px;
+}
+
 @keyframes floatUp {
   0%   { opacity: 1; transform: translate(-50%, -50%); }
   100% { opacity: 0; transform: translate(-50%, calc(-50% - 30px)); }

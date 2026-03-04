@@ -1,13 +1,18 @@
 import type { WeaponItem, DamageElement } from './gear';
-import type { Ability, AttributeKey, Stats, ActiveBuff, ActiveHot } from './classes';
-import { BASE_ATTRIBUTES, TOTAL_POINTS, ATTRIBUTE_POINTS_PER_LEVEL, ATTRIBUTE_KEYS, applyStatBuffs } from './classes';
+import type { Ability } from './classes';
+import type { AttributeKey, ActiveBuff, ActiveHot } from './stats';
+import { ATTRIBUTE_KEYS } from './stats';
+import type { Stats } from './stats';
+import { BASE_ATTRIBUTES, TOTAL_POINTS, ATTRIBUTE_POINTS_PER_LEVEL, applyStatBuffs } from './stats';
 
 // ─── DoTs ────────────────────────────────────────────────────────────────────
 
 export interface ActiveDot {
+  name?: string;            // ability name that applied this DoT (for display)
   damageElement: DamageElement;
   damagePerRound: number;
   roundsRemaining: number;
+  sourcePartyIdx?: number;  // party member who applied this DoT (for threat attribution)
 }
 
 // ─── Enemy Type Definition (template) ────────────────────────────────────────
@@ -146,6 +151,7 @@ function generateEnemyStats(
     dodge:           fl(5 + (fin / 2)),
     magicResistance: fl(spr + (mnd / 2)),
     healing:         fl(spr / 3),
+    threatMultiplier: 1,
     melee:  { hitBonus: fl((str / 4) + (fin / 3)), damage: fl(str / 3), crit: fl(5 + (fin / 4) + (str / 4)) },
     ranged: { hitBonus: fl(fin / 2),               damage: fl(fin / 3), crit: fl(5 + (fin / 2))               },
     magic:  { hitBonus: fl(mnd / 2),               damage: fl(mnd / 3), crit: fl(5 + (mnd / 2))               },

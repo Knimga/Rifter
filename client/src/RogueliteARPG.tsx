@@ -1,22 +1,21 @@
 import { useState } from 'react';
-import { TOTAL_POINTS, type AttributeKey, type ClassKey, type ArmorProficiency } from './data/classes';
-import { EMPTY_GEAR, generateArmorItem, generateShieldItem, generateWeaponItem, type GearSlots, type WeaponType, type DamageElement } from './data/gear';
+import { type ClassKey, type ArmorProficiency } from './data/classes';
+import { TOTAL_POINTS } from './data/stats';
+import { EMPTY_GEAR, generateArmorItem, generateShieldItem, generateWeaponItem, type WeaponType, type DamageElement } from './data/gear';
+import { createDefaultMember, type PartyMemberConfig } from './data/party';
 import MenuScreen from './screens/MenuScreen';
 import BuilderScreen from './screens/BuilderScreen';
 import GameScreen from './screens/GameScreen';
 
 type Screen = 'menu' | 'builder' | 'game';
 
-const DEFAULT_POINTS: Record<AttributeKey, number> = {
-  strength: 0, toughness: 0, finesse: 0, mind: 0, spirit: 0
-};
-
 const STARTING_CHEST: Record<ClassKey, ArmorProficiency> = {
   barbarian: 'Light',
+  poisonmaster: 'Light',
   paladin:   'Heavy',
   ranger:    'Light',
-  mage:      'Light',
-  shaman:    'Medium',
+  mage:      'Cloth',
+  shaman:    'Medium'
 };
 
 const STARTING_SHIELD: Partial<Record<ClassKey, ArmorProficiency>> = {
@@ -26,6 +25,7 @@ const STARTING_SHIELD: Partial<Record<ClassKey, ArmorProficiency>> = {
 
 const STARTING_WEAPON: Record<ClassKey, WeaponType> = {
   barbarian: '2h Axes',
+  poisonmaster: 'Daggers',
   paladin:   '1h Swords',
   ranger:    'Bows',
   mage:      'Staves',
@@ -37,17 +37,46 @@ const STARTING_ELEMENT: Partial<Record<ClassKey, DamageElement>> = {
   shaman: 'nature',
 };
 
+function isMemberComplete(m: PartyMemberConfig): boolean {
+  return (
+    m.characterName.trim() !== '' &&
+    m.selectedClass !== null &&
+    Object.values(m.pointsSpent).reduce((a, b) => a + b, 0) === TOTAL_POINTS
+  );
+}
+
 export default function RogueliteARPG() {
   const [screen, setScreen] = useState<Screen>('menu');
-  const [characterName, setCharacterName] = useState('');
-  const [selectedClass, setSelectedClass] = useState<ClassKey | null>(null);
-  const [pointsSpent, setPointsSpent] = useState<Record<AttributeKey, number>>(DEFAULT_POINTS);
-  const [gear, setGear] = useState<GearSlots>(EMPTY_GEAR);
+  const [party, setParty] = useState<PartyMemberConfig[]>([
+    createDefaultMember(),
+    createDefaultMember(),
+    createDefaultMember(),
+  ]);
+  const [activePartyIdx, setActivePartyIdx] = useState(0);
 
-  const canStart =
-    characterName.trim() !== '' &&
-    selectedClass !== null &&
-    Object.values(pointsSpent).reduce((a, b) => a + b, 0) === TOTAL_POINTS;
+  const canStart = party.every(isMemberComplete);
+
+  const handleUpdateMember = (idx: number, update: Partial<PartyMemberConfig>) => {
+    setParty(prev => prev.map((m, i) => i === idx ? { ...m, ...update } : m));
+  };
+
+  const handleStart = () => {
+    if (!canStart) return;
+    setParty(prev => prev.map(m => {
+      if (!m.selectedClass) return m;
+      const shieldType = STARTING_SHIELD[m.selectedClass];
+      return {
+        ...m,
+        gear: {
+          ...EMPTY_GEAR,
+          chest:    generateArmorItem('chest', 1, STARTING_CHEST[m.selectedClass]),
+          mainhand: generateWeaponItem(1, STARTING_WEAPON[m.selectedClass], STARTING_ELEMENT[m.selectedClass]),
+          ...(shieldType ? { offhand: generateShieldItem(1, shieldType) } : {}),
+        },
+      };
+    }));
+    setScreen('game');
+  };
 
   return (
     <>
@@ -56,34 +85,18 @@ export default function RogueliteARPG() {
       )}
       {screen === 'builder' && (
         <BuilderScreen
-          characterName={characterName}
-          setCharacterName={setCharacterName}
-          selectedClass={selectedClass}
-          setSelectedClass={setSelectedClass}
-          pointsSpent={pointsSpent}
-          setPointsSpent={setPointsSpent}
-          onStart={() => {
-            if (canStart && selectedClass) {
-              const shieldType = STARTING_SHIELD[selectedClass];
-              setGear({
-                ...EMPTY_GEAR,
-                chest:    generateArmorItem('chest', 1, STARTING_CHEST[selectedClass]),
-                mainhand: generateWeaponItem(1, STARTING_WEAPON[selectedClass], STARTING_ELEMENT[selectedClass]),
-                ...(shieldType ? { offhand: generateShieldItem(1, shieldType) } : {}),
-              });
-              setScreen('game');
-            }
-          }}
+          party={party}
+          activeIdx={activePartyIdx}
+          onSelectMember={setActivePartyIdx}
+          onUpdateMember={handleUpdateMember}
+          onStart={handleStart}
           onBack={() => setScreen('menu')}
         />
       )}
-      {screen === 'game' && selectedClass && (
+      {screen === 'game' && (
         <GameScreen
-          characterName={characterName}
-          selectedClass={selectedClass}
-          pointsSpent={pointsSpent}
-          gear={gear}
-          setGear={setGear}
+          party={party}
+          setParty={setParty}
         />
       )}
     </>

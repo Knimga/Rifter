@@ -1,3 +1,16 @@
+import {
+  // Cloth armor
+  GiHood, GiNinjaArmor, GiSonicShoes,
+  // Light armor
+  GiLightHelm, GiLeatherArmor, GiGloves, GiLeatherBoot,
+  // Medium armor
+  GiBarbute, GiShoulderArmor, GiGauntlet, GiBoots,
+  // Heavy armor
+  GiBlackKnightHelm, GiBreastplate, GiGreaves,
+  // Shield
+  GiEdgedShield ,
+} from 'react-icons/gi';
+import type { IconType } from 'react-icons';
 import type { ArmorProficiency, WeaponProficiency } from './classes';
 
 // ─── Slots ────────────────────────────────────────────────────────────────────
@@ -38,6 +51,11 @@ export type DamageElement =
 export const PHYSICAL_ELEMENTS: ReadonlySet<DamageElement> = new Set([
   'slashing', 'piercing', 'bludgeoning',
 ]);
+
+export const ALL_DAMAGE_ELEMENTS: DamageElement[] = [
+  'slashing', 'piercing', 'bludgeoning',
+  'fire', 'ice', 'lightning', 'shadow', 'poison', 'holy', 'nature',
+];
 
 const MAGIC_ELEMENTS: DamageElement[] = [
   'fire', 'ice', 'lightning', 'shadow', 'poison', 'holy', 'nature',
@@ -92,6 +110,7 @@ export function getGearArmorBonus(gear: GearSlots): number {
 // ─── Armor Generation ─────────────────────────────────────────────────────────
 
 const ARMOR_TYPE_BASE: Record<ArmorProficiency, number> = {
+  Cloth: 2,
   Light: 4,
   Medium: 8,
   Heavy: 12,
@@ -155,6 +174,7 @@ const WEAPON_NAME: Record<WeaponType, string> = {
   '1h Axes':   'Axe',
   'Daggers':   'Dagger',
   'Bows':      'Bow',
+  'Crossbows': 'Crossbow',
   'Staves':    'Staff',
   'Wands':     'Wand',
   'Unarmed':   'Unarmed',
@@ -169,6 +189,7 @@ const WEAPON_ATTACK_CATEGORY: Record<WeaponType, AttackCategory> = {
   '2h Axes':   'melee',
   'Daggers':   'melee',
   'Bows':      'ranged',
+  'Crossbows': 'ranged',
   'Staves':    'magic',
   'Wands':     'magic',
   'Unarmed':   'melee',
@@ -183,6 +204,7 @@ const WEAPON_DEFAULT_ELEMENT: Partial<Record<WeaponType, DamageElement>> = {
   '2h Axes':   'slashing',
   'Daggers':   'piercing',
   'Bows':      'piercing',
+  'Crossbows': 'piercing',
   'Unarmed':   'bludgeoning',
   // Staves and Wands pick a random magic element at generation time
 };
@@ -196,8 +218,9 @@ const WEAPON_RANGE: Record<WeaponType, number> = {
   '2h Axes':   1,
   'Daggers':   1,
   'Bows':      5,
+  'Crossbows': 4,
   'Staves':    5,
-  'Wands':     5,
+  'Wands':     4,
   'Unarmed':   1,
 };
 
@@ -213,6 +236,15 @@ export const WEAPON_ICON_PATH: Partial<Record<WeaponType, string>> = {
   'Staves':    '/gearIcons/weapons/staff.png',
   'Wands':     '/gearIcons/weapons/wand.png',
 };
+
+export const ARMOR_ICON: Record<ArmorProficiency, Record<ArmorSlot, IconType>> = {
+  Cloth:  { helm: GiHood,          chest: GiNinjaArmor, gloves: GiGloves,   boots: GiSonicShoes },
+  Light:  { helm: GiLightHelm,          chest: GiLeatherArmor, gloves: GiGloves,   boots: GiLeatherBoot },
+  Medium: { helm: GiBarbute,        chest: GiShoulderArmor,   gloves: GiGauntlet, boots: GiBoots       },
+  Heavy:  { helm: GiBlackKnightHelm, chest: GiBreastplate, gloves: GiGauntlet, boots: GiGreaves     },
+};
+
+export const SHIELD_ICON: IconType = GiEdgedShield;
 
 // 2h weapons (including bows and staves) deal ~1.67x more damage than 1h
 const IS_TWO_HANDED = new Set<WeaponType>(['2h Swords', '2h Maces', '2h Axes', 'Bows', 'Staves']);

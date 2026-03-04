@@ -1,33 +1,35 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 
-import { CLASSES, calculateStats, applyStatBuffs, ATTRIBUTE_KEYS, type ClassKey, type AttributeKey, type ActiveBuff, type ActiveHot } from '../data/classes';
-import { getGearArmorBonus, isWeaponItem, type GearSlots, type AttackCategory, type DamageElement } from '../data/gear';
+import { CLASSES, type Effect, type AreaType } from '../data/classes';
+import { ATTRIBUTE_KEYS, type AttributeKey, type ActiveBuff, type ActiveHot, type BuffableStat } from '../data/stats';
+import { calculateStats, applyStatBuffs } from '../data/stats';
+import { getGearArmorBonus, isWeaponItem, type AttackCategory, type DamageElement } from '../data/gear';
+import type { PartyMemberConfig } from '../data/party';
 import type { EnemyInstance } from '../data/enemies';
 import { applyBuffToEnemy } from '../data/enemies';
 import { chebyshev, hasLineOfSight, getAffectedTiles } from '../data/dungeonHelpers';
-import type { AreaType } from '../data/classes';
 import { generateDungeon, spawnDungeonEnemies, type DungeonData } from '../data/dungeonGen';
 import { DUNGEON_PRESETS } from '../data/dungeonPresets';
 import { startCombat, joinCombat, advanceTurn, applyTopOfRound, getCurrentCombatant, type CombatState } from '../data/combat';
 import { resolveAttack } from '../data/attackResolution';
+import { findFollowerSpawns, computeFollowerPositions } from '../data/movementHelpers';
 import { useEnemyTurn } from '../hooks/useEnemyTurn';
+import { useFloatingText } from '../hooks/useFloatingText';
 
 import CharacterSheet from '../components/CharacterSheet';
 import SanctumMap from '../components/SanctumMap';
 import DungeonMap from '../components/DungeonMap';
-import TurnOrderBar from '../components/TurnOrderBar';
-import ActionBar, { type SlotContent } from '../components/ActionBar';
-import type { FloatingText } from '../components/FloatingCombatText';
+import TopBar from '../components/TopBar';
+import BottomBar from '../components/BottomBar';
+import { type SlotContent } from '../components/ActionBar';
 
 interface Props {
-  characterName: string;
-  selectedClass: ClassKey;
-  pointsSpent: Record<AttributeKey, number>;
-  gear: GearSlots;
-  setGear: (gear: GearSlots) => void;
+  party: PartyMemberConfig[];
+  setParty: (party: PartyMemberConfig[]) => void;
 }
 
 const AGGRO_RANGE = 5;
+
 
 const INITIAL_COMBAT: CombatState = {
   active: false,
@@ -36,143 +38,230 @@ const INITIAL_COMBAT: CombatState = {
   round: 0,
   playerActedThisTurn: false,
   movementRemaining: 0,
+  partyThreat: [],
 };
 
-export default function GameScreen({ characterName, selectedClass, pointsSpent, gear, setGear: _setGear }: Props) {
+export default function GameScreen({ party, setParty: _setParty }: Props) {
+  // Phase 1: drive gameplay from the leader (party[0])
+  const { selectedClass: selectedClassOrNull, gear } = party[0];
+  const selectedClass = selectedClassOrNull!; // guaranteed non-null by canStart check
   const [location, setLocation] = useState<'sanctum' | 'dungeon'>('sanctum');
   const [playerPos, setPlayerPos] = useState({ x: 5, y: 5 });
-  const [slots, setSlots] = useState<SlotContent[]>(['weapon-attack', null, null, null, null]);
-  const [activeSlot, setActiveSlot] = useState<number | null>(null);
   const [enemies, setEnemies] = useState<EnemyInstance[]>([]);
   const [combat, setCombat] = useState<CombatState>(INITIAL_COMBAT);
-  const [playerHp, setPlayerHp] = useState(0);
-  const [playerMp, setPlayerMp] = useState(0);
-  const [floatingTexts, setFloatingTexts] = useState<FloatingText[]>([]);
+  const { floatingTexts, spawnFloat, removeFloat, clearFloats, spawnFloatRef } = useFloatingText();
   const [showCharSheet, setShowCharSheet] = useState(false);
   const [dungeon, setDungeon] = useState<DungeonData | null>(null);
   const [currentZone, setCurrentZone] = useState(0);
-  const [playerBuffs, setPlayerBuffs] = useState<ActiveBuff[]>([]);
-  const [playerHots, setPlayerHots] = useState<ActiveHot[]>([]);
-  const nextFloatId = useRef(0);
+  const [followerPositions, setFollowerPositions] = useState([{ x: 6, y: 5 }, { x: 7, y: 5 }]);
 
-  const classData = CLASSES[selectedClass];
-
-  // Effective player stats: re-run calculateStats with buffed attributes, then apply direct stat buffs
-  const playerAttrBuffs = playerBuffs.reduce((acc, b) => {
-    if ((ATTRIBUTE_KEYS as string[]).includes(b.stat)) {
-      const k = b.stat as AttributeKey;
-      acc[k] = (acc[k] ?? 0) + b.amount;
-    }
-    return acc;
-  }, {} as Partial<Record<AttributeKey, number>>);
-  const stats = applyStatBuffs(
-    calculateStats(selectedClass, pointsSpent, getGearArmorBonus(gear), playerAttrBuffs),
-    playerBuffs,
+  // ─── Per-member state (Phase 3) ──────────────────────────────────────────
+  const [partyHp, setPartyHp] = useState<number[]>([]);
+  const [partyMp, setPartyMp] = useState<number[]>([]);
+  const [partyBuffs, setPartyBuffs] = useState<ActiveBuff[][]>(() => party.map(() => []));
+  const [partyHots, setPartyHots] = useState<ActiveHot[][]>(() => party.map(() => []));
+  const [partySlots, setPartySlots] = useState<SlotContent[][]>(() =>
+    party.map(m => {
+      const abilities = m.selectedClass ? CLASSES[m.selectedClass].abilities : [];
+      const slots: SlotContent[] = ['weapon-attack', null, null, null, null];
+      abilities.slice(0, 4).forEach((ability, i) => { slots[i + 1] = ability; });
+      return slots;
+    })
   );
-  const weapon = gear.mainhand && isWeaponItem(gear.mainhand) ? gear.mainhand : null;
-  const activeAbility = activeSlot !== null ? slots[activeSlot] : null;
+  const [partyActiveSlot, setPartyActiveSlot] = useState<(number | null)[]>(() => party.map(() => null));
+  const [barViewIdx, setBarViewIdx] = useState(0);
+
+
+  // ─── Per-member stats ────────────────────────────────────────────────────
+
+  const partyAllStats = party.map((m, i) => {
+    const memberBuffs = partyBuffs[i] ?? [];
+    const attrBuffs = memberBuffs.reduce((acc, b) => {
+      if ((ATTRIBUTE_KEYS as string[]).includes(b.stat)) {
+        const k = b.stat as AttributeKey;
+        acc[k] = (acc[k] ?? 0) + b.amount;
+      }
+      return acc;
+    }, {} as Partial<Record<AttributeKey, number>>);
+    return applyStatBuffs(
+      calculateStats(m.selectedClass, m.pointsSpent, getGearArmorBonus(m.gear), attrBuffs),
+      memberBuffs,
+    );
+  });
+
+  // Alias for the leader — keeps most existing code unchanged
+  const stats = partyAllStats[0];
+
+  // Active party member (current turn in combat; always leader out of combat)
   const currentCombatant = getCurrentCombatant(combat);
   const isPlayerTurn = combat.active && currentCombatant?.isPlayer === true;
+  const activePartyIdx = combat.active ? (currentCombatant?.partyIndex ?? 0) : barViewIdx;
+  const activePartyPos = activePartyIdx === 0 ? playerPos : (followerPositions[activePartyIdx - 1] ?? playerPos);
+  const activeStats = partyAllStats[activePartyIdx] ?? stats;
+  const activeGear = party[activePartyIdx]?.gear ?? gear;
+  const activeWeapon = activeGear.mainhand && isWeaponItem(activeGear.mainhand) ? activeGear.mainhand : null;
+  const activeMp = partyMp[activePartyIdx] ?? 0;
+
+  // Active slot / ability for the currently acting member
+  const activeSlot = partyActiveSlot[activePartyIdx] ?? null;
+  const activeAbility = activeSlot !== null ? (partySlots[activePartyIdx]?.[activeSlot] ?? null) : null;
 
   // Current zone data
   const zone = dungeon?.zones[currentZone] ?? null;
   const zoneEnemies = enemies.filter(e => e.zoneId === currentZone);
   const portalPos = dungeon && currentZone === dungeon.endZoneId ? dungeon.portalPos : null;
 
-  // Refs so the enemy-AI effect can read latest values without re-triggering
+  // Follower data for map rendering (Phase 3: real HP from partyHp)
+  const partyFollowers = party.slice(1).map((m, i) => {
+    return {
+      pos: followerPositions[i] ?? followerPositions[0],
+      classKey: m.selectedClass!,
+      hp: partyHp[i + 1] ?? 0,
+      maxHp: partyAllStats[i + 1]?.hp ?? 1,
+      mp: partyMp[i + 1] ?? 0,
+      maxMp: partyAllStats[i + 1]?.mp ?? 1,
+      partyIndex: i + 1,
+    };
+  }).filter(f => f.hp > 0); // hide dead members
+
+  // ─── Refs ────────────────────────────────────────────────────────────────
+
   const enemiesRef = useRef(enemies);
   enemiesRef.current = enemies;
-  const playerPosRef = useRef(playerPos);
-  playerPosRef.current = playerPos;
   const statsRef = useRef(stats);
   statsRef.current = stats;
   const zoneRef = useRef(zone);
   zoneRef.current = zone;
   const currentZoneRef = useRef(currentZone);
   currentZoneRef.current = currentZone;
-  const playerBuffsRef = useRef(playerBuffs);
-  playerBuffsRef.current = playerBuffs;
-  const playerHotsRef = useRef(playerHots);
-  playerHotsRef.current = playerHots;
+  const partyBuffsRef = useRef(partyBuffs);
+  partyBuffsRef.current = partyBuffs;
+  const partyHotsRef = useRef(partyHots);
+  partyHotsRef.current = partyHots;
+  const followerPositionsRef = useRef(followerPositions);
+  followerPositionsRef.current = followerPositions;
 
-  // ─── Floating combat text helpers ───────────────────────────────────────
+  // Party-wide refs for enemy AI targeting
+  const partyPosRef = useRef<{ x: number; y: number }[]>([]);
+  partyPosRef.current = [playerPos, ...followerPositions];
+  const partyStatsRef = useRef(partyAllStats);
+  partyStatsRef.current = partyAllStats;
+  const partyHpRef = useRef(partyHp);
+  partyHpRef.current = partyHp;
+  const partyThreatRef = useRef(combat.partyThreat);
+  partyThreatRef.current = combat.partyThreat;
+  const playerPosRef = useRef(playerPos); // kept for floating text in leader context
+  playerPosRef.current = playerPos;
 
-  const spawnFloat = useCallback((gridX: number, gridY: number, text: string, color: FloatingText['color']) => {
-    const id = nextFloatId.current++;
-    setFloatingTexts(prev => [...prev, { id, gridX, gridY, text, color }]);
+  // ─── HP/MP init ──────────────────────────────────────────────────────────
+
+  const hpKey = partyAllStats.map(s => s.hp).join(',');
+  const mpKey = partyAllStats.map(s => s.mp).join(',');
+
+  // Initialize to full on first load only — no auto-restore on combat end
+  useEffect(() => {
+    setPartyHp(partyAllStats.map(s => s.hp));
+    setPartyMp(partyAllStats.map(s => s.mp));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const removeFloat = useCallback((id: number) => {
-    setFloatingTexts(prev => prev.filter(f => f.id !== id));
-  }, []);
-
-  const spawnFloatRef = useRef(spawnFloat);
-  spawnFloatRef.current = spawnFloat;
-
-  // Initialise HP from stats on first render (and when stats.hp changes out of combat)
+  // Clamp HP/MP to effective max whenever stats change (buff expiry, gear swap)
   useEffect(() => {
-    if (!combat.active) {
-      setPlayerHp(stats.hp);
-      setPlayerMp(stats.mp);
-    }
-  }, [stats.hp, stats.mp, combat.active]);
+    if (partyHp.length === 0) return;
+    setPartyHp(prev => prev.map((hp, i) => Math.min(hp, partyAllStats[i]?.hp ?? hp)));
+    setPartyMp(prev => prev.map((mp, i) => Math.min(mp, partyAllStats[i]?.mp ?? mp)));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hpKey, mpKey]);
 
-  // Clamp current HP/MP to effective max during combat (e.g. when a buff expires)
+  // Sync barViewIdx to active party member during combat
   useEffect(() => {
-    if (combat.active) {
-      setPlayerHp(prev => Math.min(prev, stats.hp));
-      setPlayerMp(prev => Math.min(prev, stats.mp));
-    }
-  }, [stats.hp, stats.mp, combat.active]);
+    if (combat.active) setBarViewIdx(activePartyIdx);
+  }, [combat.active, activePartyIdx]);
 
-  // ─── Top-of-round effects (regen, buff expiry, DoT ticks) ───────────────
+  // ─── Top-of-round effects ─────────────────────────────────────────────────
 
   useEffect(() => {
     if (combat.round <= 1) return;
-    const s = statsRef.current;
 
-    // Player buff expiry
-    setPlayerBuffs(playerBuffsRef.current
-      .map(b => ({ ...b, roundsRemaining: b.roundsRemaining - 1 }))
-      .filter(b => b.roundsRemaining > 0)
-    );
+    // Per-member buff expiry, HoT ticks, regen
+    party.forEach((_, i) => {
+      const s = partyStatsRef.current[i] ?? partyStatsRef.current[0];
+      const memberBuffs = partyBuffsRef.current[i] ?? [];
+      const memberHots = partyHotsRef.current[i] ?? [];
 
-    // Player HoT ticks
-    const currentHots = playerHotsRef.current;
-    if (currentHots.length > 0) {
-      const totalHotHeal = currentHots.reduce((sum, h) => sum + h.healPerRound + Math.floor(s.healing / 2), 0);
-      if (totalHotHeal > 0) {
-        setPlayerHp(prev => Math.min(s.hp, prev + totalHotHeal));
-        spawnFloat(playerPosRef.current.x, playerPosRef.current.y, `+${totalHotHeal}`, 'green');
+      // Buff expiry
+      setPartyBuffs(prev => prev.map((buffs, idx) =>
+        idx === i
+          ? buffs.map(b => ({ ...b, roundsRemaining: b.roundsRemaining - 1 })).filter(b => b.roundsRemaining > 0)
+          : buffs
+      ));
+
+      // HoT ticks
+      if (memberHots.length > 0) {
+        const totalHotHeal = memberHots.reduce((sum, h) => sum + h.healPerRound + Math.floor(s.healing / 2), 0);
+        if (totalHotHeal > 0) {
+          setPartyHp(prev => prev.map((hp, idx) => idx === i ? Math.min(s.hp, hp + totalHotHeal) : hp));
+          const pos = partyPosRef.current[i] ?? partyPosRef.current[0];
+          spawnFloat(pos.x, pos.y, `+${totalHotHeal}`, 'green');
+          // HoT threat
+          const hotThreat = totalHotHeal * 1.5 * (partyStatsRef.current[i]?.threatMultiplier ?? 1);
+          setCombat(prev => ({
+            ...prev,
+            partyThreat: prev.partyThreat.map((t, idx) => idx === i ? t + hotThreat : t),
+          }));
+        }
+        setPartyHots(prev => prev.map((hots, idx) =>
+          idx === i
+            ? hots.map(h => ({ ...h, roundsRemaining: h.roundsRemaining - 1 })).filter(h => h.roundsRemaining > 0)
+            : hots
+        ));
       }
-      setPlayerHots(currentHots
-        .map(h => ({ ...h, roundsRemaining: h.roundsRemaining - 1 }))
-        .filter(h => h.roundsRemaining > 0)
-      );
-    }
 
-    // Player regen
-    setPlayerHp(prev => Math.min(s.hp, prev + s.hpRegen));
-    setPlayerMp(prev => Math.min(s.mp, prev + s.mpRegen));
+      // Regen
+      setPartyHp(prev => prev.map((hp, idx) => idx === i ? Math.min(s.hp, hp + s.hpRegen) : hp));
+      setPartyMp(prev => prev.map((mp, idx) => idx === i ? Math.min(s.mp, mp + s.mpRegen) : mp));
+
+      // Suppress unused-var warnings — memberBuffs consumed by setPartyBuffs above
+      void memberBuffs;
+    });
 
     // Enemy regen, buff expiry, DoT ticks
+    const dotThreatDelta = new Map<number, number>();
     setEnemies(prev => {
       const { enemies: updated, dotTicks } = applyTopOfRound(prev);
       for (const tick of dotTicks) {
         spawnFloat(tick.pos.x, tick.pos.y, `-${tick.damage}`, 'purple');
+        for (const { partyIdx, damage } of tick.threatSources) {
+          dotThreatDelta.set(partyIdx, (dotThreatDelta.get(partyIdx) ?? 0) + damage);
+        }
       }
       return updated;
     });
-  }, [combat.round, spawnFloat]);
+    if (dotThreatDelta.size > 0) {
+      setCombat(prev => ({
+        ...prev,
+        partyThreat: prev.partyThreat.map((t, i) =>
+          t + (dotThreatDelta.get(i) ?? 0) * (partyStatsRef.current[i]?.threatMultiplier ?? 1)
+        ),
+      }));
+    }
+  }, [combat.round, spawnFloat]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ─── Location transitions ──────────────────────────────────────────────
 
   const handleLocationChange = (next: 'sanctum' | 'dungeon') => {
+    // Revive any dead party members to 10% HP/MP (covers TPK and portal return)
+    setPartyHp(prev => prev.map((hp, i) =>
+      hp <= 0 ? Math.max(1, Math.floor((partyStatsRef.current[i]?.hp ?? 10) * 0.1)) : hp
+    ));
+    setPartyMp(prev => prev.map((mp, i) =>
+      mp <= 0 ? Math.max(1, Math.floor((partyStatsRef.current[i]?.mp ?? 10) * 0.1)) : mp
+    ));
     setLocation(next);
     setCombat(INITIAL_COMBAT);
-    setFloatingTexts([]);
-    setPlayerBuffs([]);
-    setPlayerHots([]);
+    clearFloats();
+    setPartyBuffs(party.map(() => []));
+    setPartyHots(party.map(() => []));
 
     if (next === 'dungeon') {
       const config = DUNGEON_PRESETS.crypt;
@@ -181,22 +270,35 @@ export default function GameScreen({ characterName, selectedClass, pointsSpent, 
       setCurrentZone(d.startZoneId);
       setPlayerPos(d.playerStart);
       setEnemies(spawnDungeonEnemies(d, config));
+      setFollowerPositions(findFollowerSpawns(d.playerStart, d.zones[d.startZoneId].floors, 2));
     } else {
       setDungeon(null);
       setCurrentZone(0);
       setPlayerPos({ x: 5, y: 5 });
+      setFollowerPositions([{ x: 6, y: 5 }, { x: 7, y: 5 }]);
       setEnemies([]);
     }
   };
 
-  // ─── Death ────────────────────────────────────────────────────────────────
+  // ─── Death checks ────────────────────────────────────────────────────────
 
   useEffect(() => {
-    if (playerHp === 0 && combat.active) {
+    if (partyHp.length === 0) return;
+    if (partyHp.every(hp => hp <= 0)) {
       handleLocationChange('sanctum');
+      return;
+    }
+    // Out of combat: revive any individual dead members to 10%
+    if (!combat.active && partyHp.some(hp => hp <= 0)) {
+      setPartyHp(prev => prev.map((hp, i) =>
+        hp <= 0 ? Math.max(1, Math.floor((partyStatsRef.current[i]?.hp ?? 10) * 0.1)) : hp
+      ));
+      setPartyMp(prev => prev.map((mp, i) =>
+        mp <= 0 ? Math.max(1, Math.floor((partyStatsRef.current[i]?.mp ?? 10) * 0.1)) : mp
+      ));
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [playerHp, combat.active]);
+  }, [partyHp, combat.active]);
 
   // ─── Aggro detection ─────────────────────────────────────────────────────
 
@@ -220,7 +322,6 @@ export default function GameScreen({ characterName, selectedClass, pointsSpent, 
     const pairedDoor = targetZone.doors.find(d => d.id === door.targetDoorId);
     if (!pairedDoor) return;
 
-    // Find a walkable floor tile adjacent to the paired door
     let spawnPos: { x: number; y: number } | null = null;
     for (let dx = -1; dx <= 1 && !spawnPos; dx++) {
       for (let dy = -1; dy <= 1 && !spawnPos; dy++) {
@@ -233,13 +334,13 @@ export default function GameScreen({ characterName, selectedClass, pointsSpent, 
       }
     }
 
-    if (!spawnPos) return; // shouldn't happen if door placement is correct
+    if (!spawnPos) return;
 
     setCurrentZone(door.targetZoneId);
     setPlayerPos(spawnPos);
-    setFloatingTexts([]);
+    setFollowerPositions(findFollowerSpawns(spawnPos, targetZone.floors, 2));
+    clearFloats();
 
-    // Check aggro in the new zone (state hasn't updated yet, so compute inline)
     const newZoneEnemies = enemies.filter(e => e.zoneId === door.targetZoneId);
     const spotted = findNewAggro(spawnPos, newZoneEnemies, targetZone.floors);
     if (spotted.length > 0) {
@@ -249,32 +350,98 @@ export default function GameScreen({ characterName, selectedClass, pointsSpent, 
       );
       const aggroIds = new Set(newlyAggroed.map(e => e.id));
       setEnemies(prev => prev.map(e => aggroIds.has(e.id) ? { ...e, aggroed: true } : e));
-      setCombat(startCombat(stats, newlyAggroed));
+      setCombat(startCombat(party.map((m, i) => ({ stats: partyAllStats[i], name: m.characterName })), newlyAggroed));
     }
-  }, [zone, dungeon, combat.active, enemies, findNewAggro, stats]);
+  }, [zone, dungeon, combat.active, enemies, findNewAggro, party, partyAllStats]);
 
-  // ─── Movement handler (exploration + combat) ────────────────────────────
+  // ─── Out-of-combat tick (called on each leader step) ─────────────────────
+
+  const applyMoveTick = useCallback(() => {
+    party.forEach((_, i) => {
+      const s = partyStatsRef.current[i] ?? partyStatsRef.current[0];
+      const memberHots = partyHotsRef.current[i] ?? [];
+
+      // Buff expiry
+      setPartyBuffs(prev => prev.map((buffs, idx) =>
+        idx === i
+          ? buffs.map(b => ({ ...b, roundsRemaining: b.roundsRemaining - 1 })).filter(b => b.roundsRemaining > 0)
+          : buffs
+      ));
+
+      // HoT ticks + expiry
+      if (memberHots.length > 0) {
+        const totalHotHeal = memberHots.reduce((sum, h) => sum + h.healPerRound + Math.floor(s.healing / 2), 0);
+        if (totalHotHeal > 0) {
+          setPartyHp(prev => prev.map((hp, idx) => idx === i ? Math.min(s.hp, hp + totalHotHeal) : hp));
+          const pos = partyPosRef.current[i] ?? partyPosRef.current[0];
+          spawnFloat(pos.x, pos.y, `+${totalHotHeal}`, 'green');
+        }
+        setPartyHots(prev => prev.map((hots, idx) =>
+          idx === i
+            ? hots.map(h => ({ ...h, roundsRemaining: h.roundsRemaining - 1 })).filter(h => h.roundsRemaining > 0)
+            : hots
+        ));
+      }
+
+      // HP/MP regen
+      setPartyHp(prev => prev.map((hp, idx) => idx === i ? Math.min(s.hp, hp + s.hpRegen) : hp));
+      setPartyMp(prev => prev.map((mp, idx) => idx === i ? Math.min(s.mp, mp + s.mpRegen) : mp));
+    });
+
+    // Enemy effect ticks (DoTs, buff/debuff expiry)
+    setEnemies(prev => {
+      const { enemies: updated, dotTicks } = applyTopOfRound(prev);
+      for (const tick of dotTicks) {
+        spawnFloat(tick.pos.x, tick.pos.y, `-${tick.damage}`, 'purple');
+      }
+      return updated;
+    });
+  }, [party, spawnFloat]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Out-of-combat tick every 5 seconds
+  useEffect(() => {
+    if (combat.active) return;
+    const id = setInterval(applyMoveTick, 5000);
+    return () => clearInterval(id);
+  }, [combat.active, applyMoveTick]);
+
+  // ─── Movement handler ────────────────────────────────────────────────────
 
   const handleMove = useCallback((newPos: { x: number; y: number }) => {
     if (combat.active) {
       if (!isPlayerTurn) return;
-      const distance = chebyshev(playerPos, newPos);
+      const distance = chebyshev(activePartyPos, newPos);
       if (distance > combat.movementRemaining) return;
-      setPlayerPos(newPos);
+
+      if (activePartyIdx === 0) {
+        setPlayerPos(newPos);
+      } else {
+        setFollowerPositions(prev => prev.map((p, i) => i === activePartyIdx - 1 ? newPos : p));
+      }
+
       setCombat(prev => ({
         ...prev,
         movementRemaining: prev.movementRemaining - distance,
       }));
     } else {
+      const { f1, f2 } = computeFollowerPositions(
+        newPos,
+        playerPos,
+        followerPositionsRef.current[0],
+        followerPositionsRef.current[1],
+        partyStatsRef.current[1]?.movement ?? 3,
+        partyStatsRef.current[2]?.movement ?? 3,
+        zone?.floors ?? null,
+      );
       setPlayerPos(newPos);
+      setFollowerPositions([f1, f2]);
     }
 
-    // Check for newly aggroed enemies (both in and out of combat)
+    // Check for newly aggroed enemies
     if (!zone) return;
     const spotted = findNewAggro(newPos, zoneEnemies, zone.floors);
     if (spotted.length === 0) return;
 
-    // Pull in every member of each spotted enemy's group
     const aggroGroupIds = new Set(spotted.map(e => e.groupId));
     const newlyAggroed = zoneEnemies.filter(e =>
       e.currentHp > 0 && !e.aggroed && aggroGroupIds.has(e.groupId)
@@ -284,28 +451,28 @@ export default function GameScreen({ characterName, selectedClass, pointsSpent, 
     setEnemies(prev => prev.map(e => aggroIds.has(e.id) ? { ...e, aggroed: true } : e));
 
     if (!combat.active) {
-      setCombat(startCombat(stats, newlyAggroed));
+      setCombat(startCombat(party.map((m, i) => ({ stats: partyAllStats[i], name: m.characterName })), newlyAggroed));
     } else {
       setCombat(prev => joinCombat(prev, newlyAggroed));
     }
-  }, [combat.active, combat.movementRemaining, isPlayerTurn, playerPos, zoneEnemies, stats, zone, findNewAggro]);
+  }, [combat.active, combat.movementRemaining, isPlayerTurn, activePartyIdx, activePartyPos, playerPos, zoneEnemies, party, partyAllStats, zone, findNewAggro, applyMoveTick]);
 
   // ─── End turn ────────────────────────────────────────────────────────────
 
   const handleEndTurn = useCallback(() => {
     if (!combat.active || !isPlayerTurn) return;
-    setActiveSlot(null);
-    setCombat(prev => advanceTurn(prev, zoneEnemies, stats.movement));
-  }, [combat.active, isPlayerTurn, zoneEnemies, stats.movement]);
+    setPartyActiveSlot(prev => prev.map((s, i) => i === activePartyIdx ? null : s));
+    const partyMovements = partyAllStats.map(s => s.movement);
+    const deadPartyIndices = new Set(partyHp.map((hp, i) => hp <= 0 ? i : -1).filter(i => i >= 0));
+    setCombat(prev => advanceTurn(prev, zoneEnemies, partyMovements, deadPartyIndices));
+  }, [combat.active, isPlayerTurn, activePartyIdx, zoneEnemies, partyAllStats, partyHp]);
 
   // ─── Player attack ──────────────────────────────────────────────────────
 
   const handlePlayerAttack = useCallback((targetPos: { x: number; y: number }) => {
-    if (!combat.active || !isPlayerTurn || combat.playerActedThisTurn) return;
-    if (!zone) return;
+    if (combat.active && (!isPlayerTurn || combat.playerActedThisTurn)) return;
 
-    // Determine attack source from active slot
-    const activeContent = activeSlot !== null ? slots[activeSlot] : null;
+    const activeContent = partySlots[activePartyIdx]?.[activeSlot ?? -1] ?? null;
     let attackCategory: AttackCategory;
     let damageElement: DamageElement;
     let minDamage: number;
@@ -314,61 +481,96 @@ export default function GameScreen({ characterName, selectedClass, pointsSpent, 
     let area: AreaType | undefined;
 
     if (activeContent === 'weapon-attack') {
-      if (!weapon) return;
-      attackCategory = weapon.attackCategory;
-      damageElement = weapon.damageElement;
-      minDamage = weapon.minDamage;
-      maxDamage = weapon.maxDamage;
-      range = weapon.range;
+      if (!combat.active) { setPartyActiveSlot(prev => prev.map((s, i) => i === activePartyIdx ? null : s)); return; }
+      if (!activeWeapon) return;
+      if (!zone) return;
+      attackCategory = activeWeapon.attackCategory;
+      damageElement = activeWeapon.damageElement;
+      minDamage = activeWeapon.minDamage;
+      maxDamage = activeWeapon.maxDamage;
+      range = activeWeapon.range;
     } else if (activeContent && typeof activeContent === 'object') {
-      if (playerMp < activeContent.mpCost) return;
+      if (activeMp < activeContent.mpCost) return;
 
-      // Self-targeting: heal, buff, and/or HoT applied immediately, no attack roll
-      if (activeContent.target === 'self' && (activeContent.heal || activeContent.buff || activeContent.hot)) {
-        if (activeContent.heal) {
-          const { minHeal, maxHeal } = activeContent.heal;
-          const roll = Math.floor(Math.random() * (maxHeal - minHeal + 1)) + minHeal;
-          const healAmount = Math.max(0, roll + stats.healing);
-          setPlayerHp(prev => Math.min(stats.hp, prev + healAmount));
-          if (healAmount > 0) spawnFloat(playerPos.x, playerPos.y, `+${healAmount}`, 'green');
+      const effects = activeContent.effects;
+
+      // Self-targeting: only fire when the player clicks their own tile
+      if (activeContent.target === 'self') {
+        if (targetPos.x !== activePartyPos.x || targetPos.y !== activePartyPos.y) {
+          setPartyActiveSlot(prev => prev.map((s, i) => i === activePartyIdx ? null : s));
+          return;
         }
-        if (activeContent.buff) {
-          setPlayerBuffs(prev => [...prev, {
-            id: `${activeContent.name}-player`,
-            stat: activeContent.buff!.stat,
-            amount: activeContent.buff!.amount,
-            roundsRemaining: activeContent.buff!.rounds,
-          }]);
-          if (!activeContent.heal) spawnFloat(playerPos.x, playerPos.y, `+${activeContent.buff.stat}`, 'green');
+        let selfThreat = 0;
+        for (const eff of effects.filter(e => e.appliesTo === 'caster')) {
+          if (eff.type === 'heal') {
+            const roll = Math.floor(Math.random() * (eff.maxHeal - eff.minHeal + 1)) + eff.minHeal;
+            const healAmount = Math.max(0, roll + activeStats.healing);
+            setPartyHp(prev => prev.map((hp, i) => i === activePartyIdx ? Math.min(activeStats.hp, hp + healAmount) : hp));
+            if (healAmount > 0) spawnFloat(activePartyPos.x, activePartyPos.y, `+${healAmount}`, 'green');
+            selfThreat += healAmount * 1.5;
+          } else if (eff.type === 'hot') {
+            setPartyHots(prev => prev.map((hots, i) => i === activePartyIdx
+              ? [...hots, { name: activeContent.name, damageElement: eff.damageElement, healPerRound: eff.healPerRound, roundsRemaining: eff.rounds }]
+              : hots));
+            spawnFloat(activePartyPos.x, activePartyPos.y, '+HoT', 'green');
+          } else if (eff.type === 'buff') {
+            const newBuffs = (Object.entries(eff.stats) as [BuffableStat, number][]).map(([stat, amount]) => ({
+              id: `${activeContent.name}-${stat}-player-${activePartyIdx}`,
+              source: activeContent.name, damageElement: eff.damageElement,
+              stat, amount, roundsRemaining: eff.rounds,
+            }));
+            const newPctBuffs = (Object.entries(eff.statsPercent ?? {}) as [BuffableStat, number][]).map(([stat, percent]) => ({
+              id: `${activeContent.name}-${stat}-pct-player-${activePartyIdx}`,
+              source: activeContent.name, damageElement: eff.damageElement,
+              stat, amount: 0, percent, roundsRemaining: eff.rounds,
+            }));
+            setPartyBuffs(prev => prev.map((buffs, i) => i === activePartyIdx ? [...buffs, ...newBuffs, ...newPctBuffs] : buffs));
+            spawnFloat(activePartyPos.x, activePartyPos.y, `${activeContent.name}!`, 'green');
+            selfThreat += (Object.values(eff.stats) as number[]).reduce((s, v) => s + Math.abs(v), 0);
+            selfThreat += (Object.values(eff.statsPercent ?? {}) as number[]).reduce((s, v) => s + Math.abs(v), 0);
+          }
         }
-        if (activeContent.hot) {
-          setPlayerHots(prev => [...prev, {
-            healPerRound: activeContent.hot!.healPerRound,
-            roundsRemaining: activeContent.hot!.rounds,
-          }]);
-          if (!activeContent.heal) spawnFloat(playerPos.x, playerPos.y, `+HoT`, 'green');
+        setPartyMp(prev => prev.map((mp, i) => i === activePartyIdx ? mp - activeContent.mpCost : mp));
+        setPartyActiveSlot(prev => prev.map((s, i) => i === activePartyIdx ? null : s));
+        if (combat.active) {
+          const gained = selfThreat * activeStats.threatMultiplier;
+          setCombat(prev => ({
+            ...prev,
+            playerActedThisTurn: true,
+            partyThreat: gained > 0
+              ? prev.partyThreat.map((t, i) => i === activePartyIdx ? t + gained : t)
+              : prev.partyThreat,
+          }));
         }
-        setPlayerMp(prev => prev - activeContent.mpCost);
-        setActiveSlot(null);
-        setCombat(prev => ({ ...prev, playerActedThisTurn: true }));
         return;
       }
 
+      // Enemy-targeting: only works in combat with a loaded zone
+      if (!combat.active) { setPartyActiveSlot(prev => prev.map((s, i) => i === activePartyIdx ? null : s)); return; }
+      if (!zone) return;
+
+      // Enemy-targeting: determine attack parameters
+      const damageEffect = effects.find(e => e.type === 'damage' && e.appliesTo === 'target') as Extract<Effect, { type: 'damage' }> | undefined;
+      const dotEffect    = effects.find(e => e.type === 'dot'    && e.appliesTo === 'target') as Extract<Effect, { type: 'dot' }>    | undefined;
+      const debuffEffect = effects.find(e => e.type === 'debuff' && e.appliesTo === 'target') as Extract<Effect, { type: 'debuff' }> | undefined;
+      const hasTargetHit = damageEffect || dotEffect || debuffEffect || activeContent.useWeapon;
+
+      if (!hasTargetHit) return;
+
       if (activeContent.useWeapon) {
-        if (!weapon) return;
-        attackCategory = weapon.attackCategory;
-        damageElement = weapon.damageElement;
-        minDamage = weapon.minDamage;
-        maxDamage = weapon.maxDamage;
+        if (!activeWeapon) return;
+        attackCategory = activeWeapon.attackCategory;
+        damageElement = activeWeapon.damageElement;
+        minDamage = activeWeapon.minDamage;
+        maxDamage = activeWeapon.maxDamage;
         range = activeContent.range;
         area = activeContent.area;
       } else {
         if (!activeContent.attackCategory) return;
-        if (!activeContent.damage && !activeContent.dot && !activeContent.debuff) return;
         attackCategory = activeContent.attackCategory;
-        damageElement = activeContent.damage?.damageElement ?? activeContent.dot?.damageElement ?? 'slashing';
-        minDamage = activeContent.damage?.minDamage ?? 0;
-        maxDamage = activeContent.damage?.maxDamage ?? 0;
+        damageElement = damageEffect?.damageElement ?? dotEffect?.damageElement ?? 'slashing';
+        minDamage = damageEffect?.minDamage ?? 0;
+        maxDamage = damageEffect?.maxDamage ?? 0;
         range = activeContent.range;
         area = activeContent.area;
       }
@@ -377,34 +579,35 @@ export default function GameScreen({ characterName, selectedClass, pointsSpent, 
     }
 
     // Range + LOS check on the target tile
-    const distance = chebyshev(playerPos, targetPos);
-    if (distance > range || !hasLineOfSight(playerPos, targetPos, zone.floors)) {
-      setActiveSlot(null);
+    const distance = chebyshev(activePartyPos, targetPos);
+    if (distance > range || !hasLineOfSight(activePartyPos, targetPos, zone.floors)) {
+      setPartyActiveSlot(prev => prev.map((s, i) => i === activePartyIdx ? null : s));
       return;
     }
 
-    // Compute affected tiles and find enemies within
-    const affectedTiles = getAffectedTiles(playerPos, targetPos, area, zone.floors);
+    const affectedTiles = getAffectedTiles(activePartyPos, targetPos, area, zone.floors);
     const affectedSet = new Set(affectedTiles.map(t => `${t.x},${t.y}`));
     const targets = zoneEnemies.filter(e =>
       e.currentHp > 0 && affectedSet.has(`${e.pos.x},${e.pos.y}`)
     );
 
-    // Single-target: must have an enemy on the tile
     if ((!area || area === 'single') && targets.length === 0) {
-      setActiveSlot(null);
+      setPartyActiveSlot(prev => prev.map((s, i) => i === activePartyIdx ? null : s));
       return;
     }
 
-    // Resolve attack against each target
-    const atkStats = stats[attackCategory];
+    const atkStats = activeStats[attackCategory];
     const damages: { id: string; damage: number }[] = [];
-    const dotTargets: string[] = [];  // enemy ids that should receive DoTs
-    const debuffTargets: string[] = []; // enemy ids that should receive debuff on hit
-    const hasDamage = activeContent === 'weapon-attack' || (typeof activeContent === 'object' && (!!activeContent.damage || !!activeContent.useWeapon));
-    const abilityDot = activeContent !== 'weapon-attack' && typeof activeContent === 'object' ? activeContent.dot : undefined;
-    const abilityDebuff = activeContent !== 'weapon-attack' && typeof activeContent === 'object' ? activeContent.debuff : undefined;
+    const dotTargets: string[] = [];
+    const debuffTargets: string[] = [];
 
+    // Pull effect refs for the post-loop enemy update (only defined for ability attacks)
+    const abilityEffects = activeContent !== 'weapon-attack' && typeof activeContent === 'object' ? activeContent.effects : [];
+    const abilityDotEffect   = abilityEffects.find(e => e.type === 'dot'    && e.appliesTo === 'target') as Extract<Effect, { type: 'dot' }>    | undefined;
+    const abilityDebuffEffect = abilityEffects.find(e => e.type === 'debuff' && e.appliesTo === 'target') as Extract<Effect, { type: 'debuff' }> | undefined;
+    const hasDamage = activeContent === 'weapon-attack' || (typeof activeContent === 'object' && (!!activeContent.useWeapon || abilityEffects.some(e => e.type === 'damage')));
+
+    const attackerElStats = activeStats.elementalStats[damageElement];
     for (const enemy of targets) {
       const result = resolveAttack({
         hitBonus: atkStats.hitBonus,
@@ -416,6 +619,10 @@ export default function GameScreen({ characterName, selectedClass, pointsSpent, 
         targetDodge: enemy.stats.dodge,
         targetArmor: enemy.stats.armor,
         targetMagicResistance: enemy.stats.magicResistance,
+        elementHit: attackerElStats?.hit,
+        elementCrit: attackerElStats?.crit,
+        elementDamage: attackerElStats?.damage,
+        targetElementResistance: enemy.stats.elementalStats[damageElement]?.resistance,
       });
 
       if (!result.hit) {
@@ -423,18 +630,15 @@ export default function GameScreen({ characterName, selectedClass, pointsSpent, 
       } else if (result.dodged) {
         spawnFloat(enemy.pos.x, enemy.pos.y, 'Dodged!', 'white');
       } else {
-        // Direct damage float (only if the ability has a damage component)
         if (hasDamage && result.finalDamage > 0) {
           const critText = result.crit ? ' CRIT!' : '';
           spawnFloat(enemy.pos.x, enemy.pos.y, `-${result.finalDamage}${critText}`, 'red');
         }
-        // DoT application float
-        if (abilityDot) {
+        if (abilityDotEffect) {
           dotTargets.push(enemy.id);
           spawnFloat(enemy.pos.x, enemy.pos.y, 'Hit!', 'purple');
         }
-        // Debuff application
-        if (abilityDebuff) {
+        if (abilityDebuffEffect) {
           debuffTargets.push(enemy.id);
         }
       }
@@ -444,58 +648,121 @@ export default function GameScreen({ characterName, selectedClass, pointsSpent, 
       }
     }
 
-    // Apply damage, DoTs, and debuffs
     if (damages.length > 0 || dotTargets.length > 0 || debuffTargets.length > 0) {
       const damageMap = new Map(damages.map(d => [d.id, d.damage]));
       const dotSet = new Set(dotTargets);
       const debuffSet = new Set(debuffTargets);
       setEnemies(prev => prev.map(e => {
         const dmg = damageMap.get(e.id);
-        const addDot = dotSet.has(e.id) && abilityDot;
-        const addDebuff = debuffSet.has(e.id) && abilityDebuff;
+        const addDot = dotSet.has(e.id) && abilityDotEffect;
+        const addDebuff = debuffSet.has(e.id) && abilityDebuffEffect;
         if (!dmg && !addDot && !addDebuff) return e;
         let updated = {
           ...e,
           currentHp: dmg ? Math.max(0, e.currentHp - dmg) : e.currentHp,
           dots: addDot ? [...e.dots, {
-            damageElement: abilityDot!.damageElement,
-            damagePerRound: abilityDot!.damagePerRound,
-            roundsRemaining: abilityDot!.rounds,
+            name: activeContent !== 'weapon-attack' && typeof activeContent === 'object' ? activeContent.name : undefined,
+            damageElement: abilityDotEffect!.damageElement,
+            damagePerRound: abilityDotEffect!.damagePerRound,
+            roundsRemaining: abilityDotEffect!.rounds,
+            sourcePartyIdx: activePartyIdx,
           }] : e.dots,
         };
         if (addDebuff) {
-          updated = applyBuffToEnemy(updated, {
-            id: `${activeContent !== 'weapon-attack' && typeof activeContent === 'object' ? activeContent.name : 'debuff'}-${e.id}`,
-            stat: abilityDebuff!.stat,
-            amount: -Math.abs(abilityDebuff!.amount),
-            roundsRemaining: abilityDebuff!.rounds,
-          });
+          const abilityName = activeContent !== 'weapon-attack' && typeof activeContent === 'object' ? activeContent.name : 'debuff';
+          for (const [stat, amount] of Object.entries(abilityDebuffEffect!.stats) as [BuffableStat, number][]) {
+            updated = applyBuffToEnemy(updated, {
+              id: `${abilityName}-${stat}-${e.id}`,
+              stat, amount: -Math.abs(amount), roundsRemaining: abilityDebuffEffect!.rounds,
+            });
+          }
+          for (const [stat, pct] of Object.entries(abilityDebuffEffect!.statsPercent ?? {}) as [BuffableStat, number][]) {
+            updated = applyBuffToEnemy(updated, {
+              id: `${abilityName}-${stat}-pct-${e.id}`,
+              stat, amount: 0, percent: -Math.abs(pct), roundsRemaining: abilityDebuffEffect!.rounds,
+            });
+          }
         }
         return updated;
       }));
     }
 
-    // Subtract MP cost for abilities
-    if (activeContent && typeof activeContent === 'object') {
-      setPlayerMp(prev => prev - activeContent.mpCost);
+    // Compute threat from this action: damage dealt + DoTs applied + debuffs applied
+    let actionThreat = damages.reduce((sum, d) => sum + d.damage, 0);
+    if (abilityDotEffect && dotTargets.length > 0) {
+      // One tick's worth of threat per target at application; remaining threat accumulates per-tick via sourcePartyIdx
+      actionThreat += abilityDotEffect.damagePerRound * dotTargets.length;
+    }
+    if (abilityDebuffEffect && debuffTargets.length > 0) {
+      const debuffThreatPerTarget =
+        (Object.values(abilityDebuffEffect.stats) as number[]).reduce((s, v) => s + Math.abs(v), 0) +
+        (Object.values(abilityDebuffEffect.statsPercent ?? {}) as number[]).reduce((s, v) => s + Math.abs(v), 0);
+      actionThreat += debuffThreatPerTarget * debuffTargets.length;
     }
 
-    setActiveSlot(null);
-    setCombat(prev => ({ ...prev, playerActedThisTurn: true }));
-  }, [combat.active, isPlayerTurn, combat.playerActedThisTurn, activeSlot, slots, weapon, zoneEnemies, playerPos, playerMp, stats, zone, spawnFloat]);
+    // Apply any caster effects from an enemy-targeting ability (e.g. drain life self-heal)
+    if (activeContent !== 'weapon-attack' && typeof activeContent === 'object') {
+      for (const eff of activeContent.effects.filter(e => e.appliesTo === 'caster')) {
+        if (eff.type === 'heal') {
+          const roll = Math.floor(Math.random() * (eff.maxHeal - eff.minHeal + 1)) + eff.minHeal;
+          // Scale heal by number of enemies hit (e.g. drain life hitting 3 targets heals 3x)
+          const healAmount = Math.max(0, roll + activeStats.healing) * Math.max(1, damages.length);
+          setPartyHp(prev => prev.map((hp, i) => i === activePartyIdx ? Math.min(activeStats.hp, hp + healAmount) : hp));
+          if (healAmount > 0) spawnFloat(activePartyPos.x, activePartyPos.y, `+${healAmount}`, 'green');
+          actionThreat += healAmount * 1.5;
+        } else if (eff.type === 'hot') {
+          setPartyHots(prev => prev.map((hots, i) => i === activePartyIdx
+            ? [...hots, { name: activeContent.name, damageElement: eff.damageElement, healPerRound: eff.healPerRound, roundsRemaining: eff.rounds }]
+            : hots));
+        } else if (eff.type === 'buff') {
+          const newBuffs = (Object.entries(eff.stats) as [BuffableStat, number][]).map(([stat, amount]) => ({
+            id: `${activeContent.name}-${stat}-player-${activePartyIdx}`,
+            source: activeContent.name, damageElement: eff.damageElement,
+            stat, amount, roundsRemaining: eff.rounds,
+          }));
+          const newPctBuffs = (Object.entries(eff.statsPercent ?? {}) as [BuffableStat, number][]).map(([stat, percent]) => ({
+            id: `${activeContent.name}-${stat}-pct-player-${activePartyIdx}`,
+            source: activeContent.name, damageElement: eff.damageElement,
+            stat, amount: 0, percent, roundsRemaining: eff.rounds,
+          }));
+          setPartyBuffs(prev => prev.map((buffs, i) => i === activePartyIdx ? [...buffs, ...newBuffs, ...newPctBuffs] : buffs));
+          actionThreat += (Object.values(eff.stats) as number[]).reduce((s, v) => s + Math.abs(v), 0);
+          actionThreat += (Object.values(eff.statsPercent ?? {}) as number[]).reduce((s, v) => s + Math.abs(v), 0);
+        }
+      }
+      setPartyMp(prev => prev.map((mp, i) => i === activePartyIdx ? mp - activeContent.mpCost : mp));
+    }
 
-  // ─── Enemy AI turn (1s move → 1s attack → end) ─────────────────────────
+    setPartyActiveSlot(prev => prev.map((s, i) => i === activePartyIdx ? null : s));
+    if (combat.active) {
+      const gained = actionThreat * activeStats.threatMultiplier;
+      setCombat(prev => ({
+        ...prev,
+        playerActedThisTurn: true,
+        partyThreat: gained > 0
+          ? prev.partyThreat.map((t, i) => i === activePartyIdx ? t + gained : t)
+          : prev.partyThreat,
+      }));
+    }
+  }, [combat.active, isPlayerTurn, combat.playerActedThisTurn, activePartyIdx, activeSlot, partySlots, activeWeapon, zoneEnemies, activePartyPos, activeMp, activeStats, zone, spawnFloat]);
 
-  // Stable refs object — avoids re-triggering the enemy turn effect on every render
+  // ─── Enemy AI turn ───────────────────────────────────────────────────────
+
   const enemyTurnRefs = useMemo(() => ({
-    enemies: enemiesRef, playerPos: playerPosRef, stats: statsRef,
-    zone: zoneRef, currentZone: currentZoneRef, spawnFloat: spawnFloatRef,
+    enemies: enemiesRef,
+    partyPos: partyPosRef,
+    partyStats: partyStatsRef,
+    partyHp: partyHpRef,
+    partyThreat: partyThreatRef,
+    zone: zoneRef,
+    currentZone: currentZoneRef,
+    spawnFloat: spawnFloatRef,
   }), []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEnemyTurn(
     combat, currentCombatant,
     enemyTurnRefs,
-    setEnemies, setPlayerHp, setPlayerBuffs, setCombat,
+    setEnemies, setPartyHp, setPartyBuffs, setCombat,
   );
 
   // ─── Combat end detection ────────────────────────────────────────────────
@@ -503,50 +770,41 @@ export default function GameScreen({ characterName, selectedClass, pointsSpent, 
   useEffect(() => {
     if (!combat.active) return;
     const allAggroedDead = zoneEnemies.filter(e => e.aggroed).every(e => e.currentHp <= 0);
-    if (allAggroedDead) setCombat(INITIAL_COMBAT);
+    if (!allAggroedDead) return;
+    // Revive dead party members to 10% HP/MP before clearing combat state
+    setPartyHp(prev => prev.map((hp, i) =>
+      hp <= 0 ? Math.max(1, Math.floor((partyStatsRef.current[i]?.hp ?? 10) * 0.1)) : hp
+    ));
+    setPartyMp(prev => prev.map((mp, i) =>
+      mp <= 0 ? Math.max(1, Math.floor((partyStatsRef.current[i]?.mp ?? 10) * 0.1)) : mp
+    ));
+    setCombat(INITIAL_COMBAT);
   }, [combat.active, zoneEnemies]);
 
   // ─── Render ──────────────────────────────────────────────────────────────
 
+  const actionRange =
+    activeAbility === 'weapon-attack' ? activeWeapon?.range ?? 0
+    : activeAbility && typeof activeAbility === 'object' ? activeAbility.range
+    : 0;
+
   return (
     <div className="h-screen bg-gray-900 text-gray-100 flex flex-col overflow-hidden">
-      {/* Top bar */}
-      <div className="shrink-0 bg-blue-950 border-b border-blue-900 px-6 pt-3 pb-2 z-10">
-        <div className="max-w-7xl mx-auto">
-          <div className="flex justify-between items-end">
-            <div>
-              <h1 className="text-2xl font-bold text-red-500">{characterName}</h1>
-              <p className="text-sm text-gray-400">{classData.name} - Level {stats.level}</p>
-              {location === 'sanctum' && <p className="text-xs text-purple-400 mt-0.5">The Sanctum</p>}
-              {location === 'dungeon' && zone && <p className="text-xs text-red-400 mt-0.5">Dungeon — Zone {zone.id + 1}</p>}
-            </div>
-            <button
-              onClick={() => setShowCharSheet(true)}
-              className="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 text-sm font-semibold rounded-lg transition-colors"
-            >
-              Character
-            </button>
-            <div className="flex gap-4">
-              <div className="bg-gray-800 px-4 py-2 rounded">
-                <span className="text-green-400 font-bold">HP:</span> {playerHp} / {stats.hp}
-              </div>
-              <div className="bg-gray-800 px-4 py-2 rounded">
-                <span className="text-blue-400 font-bold">MP:</span> {playerMp} / {stats.mp}
-              </div>
-            </div>
-          </div>
-          {/* Reserved space for turn order — always rendered to prevent layout shift */}
-          <div className="h-10 mt-2 flex items-center justify-center">
-            {combat.active && (
-              <TurnOrderBar
-                turnOrder={combat.turnOrder}
-                currentTurnIndex={combat.currentTurnIndex}
-                enemies={zoneEnemies}
-              />
-            )}
-          </div>
-        </div>
-      </div>
+      <TopBar
+        selectedClass={selectedClass}
+        stats={stats}
+        location={location}
+        zone={zone}
+        party={party}
+        partyAllStats={partyAllStats}
+        partyHp={partyHp}
+        partyMp={partyMp}
+        combat={combat}
+        activePartyIdx={activePartyIdx}
+        zoneEnemies={zoneEnemies}
+        currentCombatant={currentCombatant}
+        onShowCharSheet={() => setShowCharSheet(true)}
+      />
 
       <div className="flex-1 overflow-auto p-6">
         <div className="max-w-7xl mx-auto">
@@ -554,102 +812,99 @@ export default function GameScreen({ characterName, selectedClass, pointsSpent, 
             <SanctumMap
               selectedClass={selectedClass}
               playerPos={playerPos}
+              activeMoverPos={playerPos}
+              partyFollowers={partyFollowers}
               movement={stats.movement}
               onMove={handleMove}
               onLocationChange={handleLocationChange}
               activeAbility={activeAbility}
-              onAbilityDeselect={() => setActiveSlot(null)}
-              playerHp={playerHp}
+              isSelfTargetAbility={
+                activeAbility !== null && activeAbility !== 'weapon-attack' &&
+                typeof activeAbility === 'object' && activeAbility.target === 'self'
+              }
+              onAbilityUse={handlePlayerAttack}
+              onAbilityDeselect={() => setPartyActiveSlot(prev => prev.map((s, i) => i === activePartyIdx ? null : s))}
+              onMemberSelect={(idx: number) => setBarViewIdx(idx)}
+              playerHp={partyHp[0] ?? stats.hp}
               playerMaxHp={stats.hp}
+              playerMp={partyMp[0] ?? stats.mp}
+              playerMaxMp={stats.mp}
             />
           )}
           {location === 'dungeon' && zone && (
-            <>
-              <DungeonMap
-                selectedClass={selectedClass}
-                playerPos={playerPos}
-                movement={combat.active ? combat.movementRemaining : stats.movement}
-                onMove={handleMove}
-                onLocationChange={handleLocationChange}
-                onDoorClick={handleDoorClick}
-                activeAbility={activeAbility}
-                activeAbilityArea={
-                  activeAbility && typeof activeAbility === 'object' ? activeAbility.area : undefined
-                }
-                aoeHighlightColor={
-                  activeAbility && typeof activeAbility === 'object' && (activeAbility.heal || activeAbility.buff)
-                    ? 'green' : 'red'
-                }
-                onAbilityDeselect={() => setActiveSlot(null)}
-                enemies={zoneEnemies}
-                inCombat={combat.active}
-                isPlayerTurn={isPlayerTurn}
-                activeCombatantId={currentCombatant?.id ?? null}
-                onAbilityUse={handlePlayerAttack}
-                actionRange={
-                  activeAbility === 'weapon-attack' ? weapon?.range ?? 0
-                    : activeAbility && typeof activeAbility === 'object' ? activeAbility.range
-                    : 0
-                }
-                playerHp={playerHp}
-                playerMaxHp={stats.hp}
-                floatingTexts={floatingTexts}
-                onFloatingTextComplete={removeFloat}
-                zone={zone}
-                portalPos={portalPos}
-              />
-            </>
+            <DungeonMap
+              selectedClass={selectedClass}
+              playerPos={playerPos}
+              activeMoverPos={combat.active ? activePartyPos : playerPos}
+              partyFollowers={partyFollowers}
+              movement={combat.active ? combat.movementRemaining : activeStats.movement}
+              onMove={handleMove}
+              onLocationChange={handleLocationChange}
+              onDoorClick={handleDoorClick}
+              activeAbility={activeAbility}
+              isSelfTargetAbility={
+                activeAbility !== null && activeAbility !== 'weapon-attack' &&
+                typeof activeAbility === 'object' && activeAbility.target === 'self'
+              }
+              activeAbilityArea={
+                activeAbility && typeof activeAbility === 'object' ? activeAbility.area : undefined
+              }
+              aoeHighlightColor={
+                activeAbility && typeof activeAbility === 'object' &&
+                activeAbility.effects.some(e => e.type === 'heal' || e.type === 'buff' || e.type === 'hot')
+                  ? 'green' : 'red'
+              }
+              onAbilityDeselect={() => setPartyActiveSlot(prev => prev.map((s, i) => i === activePartyIdx ? null : s))}
+              onMemberSelect={(idx: number) => setBarViewIdx(idx)}
+              enemies={zoneEnemies}
+              inCombat={combat.active}
+              isPlayerTurn={isPlayerTurn}
+              activeCombatantId={currentCombatant?.id ?? null}
+              onAbilityUse={handlePlayerAttack}
+              actionRange={actionRange}
+              playerHp={partyHp[0] ?? stats.hp}
+              playerMaxHp={stats.hp}
+              playerMp={partyMp[0] ?? stats.mp}
+              playerMaxMp={stats.mp}
+              floatingTexts={floatingTexts}
+              onFloatingTextComplete={removeFloat}
+              zone={zone}
+              portalPos={portalPos}
+              partyBuffs={partyBuffs}
+              partyHots={partyHots}
+            />
           )}
         </div>
       </div>
 
-      {/* Bottom bar */}
-      <div className="shrink-0 bg-blue-950 border-t border-blue-900 px-6 py-4 z-10">
-        <div className="max-w-7xl mx-auto flex items-center">
-          <div className="flex-1" />
-          <ActionBar
-            gear={gear}
-            abilities={classData.abilities}
-            slots={slots}
-            onSlotsChange={setSlots}
-            activeSlot={activeSlot}
-            onActiveSlotChange={setActiveSlot}
-            inCombat={combat.active}
-            isPlayerTurn={isPlayerTurn}
-            playerActedThisTurn={combat.playerActedThisTurn}
-            stats={stats}
-          />
-          <div className="flex-1 flex justify-end items-center gap-3">
-            {combat.active && isPlayerTurn && (
-              <>
-                <span className="text-sm text-gray-400">
-                  Movement: {combat.movementRemaining} / {stats.movement}
-                </span>
-                <button
-                  onClick={handleEndTurn}
-                  className="px-5 py-2 bg-red-700 hover:bg-red-600 text-white font-semibold rounded-lg transition-colors"
-                >
-                  End Turn
-                </button>
-              </>
-            )}
-            {combat.active && !isPlayerTurn && currentCombatant && (
-              <span className="text-sm text-yellow-400 animate-pulse">
-                {currentCombatant.name}'s turn...
-              </span>
-            )}
-          </div>
-        </div>
-      </div>
+      <BottomBar
+        party={party}
+        partySlots={partySlots}
+        partyActiveSlot={partyActiveSlot}
+        partyAllStats={partyAllStats}
+        barViewIdx={barViewIdx}
+        setBarViewIdx={setBarViewIdx}
+        onSlotsChange={(i, slots) => setPartySlots(prev => prev.map((s, idx) => idx === i ? slots : s))}
+        onActiveSlotChange={(i, slot) => setPartyActiveSlot(prev => prev.map((s, idx) => idx === i ? slot : s))}
+        combat={combat}
+        activePartyIdx={activePartyIdx}
+        currentCombatant={currentCombatant}
+        activeStats={activeStats}
+        isPlayerTurn={isPlayerTurn}
+        onEndTurn={handleEndTurn}
+      />
 
       {showCharSheet && (
         <CharacterSheet
-          characterName={characterName}
-          selectedClass={selectedClass}
-          pointsSpent={pointsSpent}
-          stats={stats}
-          playerHp={playerHp}
-          gear={gear}
+          party={party.map(m => ({
+            characterName: m.characterName,
+            selectedClass: m.selectedClass!,
+            pointsSpent: m.pointsSpent,
+            gear: m.gear,
+          }))}
+          partyHp={partyHp}
+          partyStats={partyAllStats}
+          partyBuffs={partyBuffs}
           onClose={() => setShowCharSheet(false)}
         />
       )}

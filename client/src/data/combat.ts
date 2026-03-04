@@ -1,15 +1,16 @@
 import type { EnemyInstance } from './enemies';
 import { recomputeEnemyStats } from './enemies';
-import type { Stats } from './classes';
+import type { Stats } from './stats';
 import { applyDR } from './attackResolution';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 export interface Combatant {
-  id: string;           // 'player' or enemy instance id
+  id: string;           // 'player-0' | 'player-1' | 'player-2' | enemy instance id
   name: string;
   initiativeRoll: number;
   isPlayer: boolean;
+  partyIndex?: number;  // 0|1|2 for party members; absent for enemies
 }
 
 export interface CombatState {
@@ -19,20 +20,25 @@ export interface CombatState {
   round: number;
   playerActedThisTurn: boolean;
   movementRemaining: number;
+  partyThreat: number[];  // indexed by partyIndex; resets to 0 each combat
 }
 
 // ─── Functions ───────────────────────────────────────────────────────────────
 
 const d20 = () => 1 + Math.floor(Math.random() * 20);
 
-export function startCombat(playerStats: Stats, aggroedEnemies: EnemyInstance[]): CombatState {
+export function startCombat(
+  partyMembers: Array<{ stats: Stats; name: string }>,
+  aggroedEnemies: EnemyInstance[],
+): CombatState {
   const combatants: Combatant[] = [
-    {
-      id: 'player',
-      name: 'You',
-      initiativeRoll: d20() + playerStats.initiative,
+    ...partyMembers.map((m, i) => ({
+      id: `player-${i}`,
+      name: m.name,
+      initiativeRoll: d20() + m.stats.initiative,
       isPlayer: true,
-    },
+      partyIndex: i,
+    })),
     ...aggroedEnemies
       .filter(e => e.currentHp > 0)
       .map(e => ({
@@ -55,7 +61,8 @@ export function startCombat(playerStats: Stats, aggroedEnemies: EnemyInstance[])
     currentTurnIndex: 0,
     round: 1,
     playerActedThisTurn: false,
-    movementRemaining: first.isPlayer ? playerStats.movement : 0,
+    movementRemaining: first.isPlayer ? partyMembers[first.partyIndex ?? 0].stats.movement : 0,
+    partyThreat: partyMembers.map(() => 0),
   };
 }
 
@@ -91,18 +98,23 @@ export function joinCombat(state: CombatState, newEnemies: EnemyInstance[]): Com
 export function advanceTurn(
   state: CombatState,
   enemies: EnemyInstance[],
-  playerMovement: number
+  partyMovements: number[],
+  deadPartyIndices?: Set<number>,
 ): CombatState {
   const len = state.turnOrder.length;
   let nextIndex = (state.currentTurnIndex + 1) % len;
   let wrapped = nextIndex === 0;
 
-  // Skip dead enemies
+  // Skip dead combatants (enemies with 0 HP, or party members in deadPartyIndices)
   for (let i = 0; i < len; i++) {
     const combatant = state.turnOrder[nextIndex];
-    if (combatant.isPlayer) break;
-    const enemy = enemies.find(e => e.id === combatant.id);
-    if (enemy && enemy.currentHp > 0) break;
+    if (combatant.isPlayer) {
+      const isDead = deadPartyIndices?.has(combatant.partyIndex ?? 0) ?? false;
+      if (!isDead) break; // alive — stop skipping
+    } else {
+      const enemy = enemies.find(e => e.id === combatant.id);
+      if (enemy && enemy.currentHp > 0) break; // alive enemy — stop skipping
+    }
     nextIndex = (nextIndex + 1) % len;
     if (nextIndex === 0) wrapped = true;
   }
@@ -113,15 +125,16 @@ export function advanceTurn(
     currentTurnIndex: nextIndex,
     round: state.round + (wrapped ? 1 : 0),
     playerActedThisTurn: false,
-    movementRemaining: next.isPlayer ? playerMovement : 0,
+    movementRemaining: next.isPlayer ? (partyMovements[next.partyIndex ?? 0] ?? partyMovements[0] ?? 0) : 0,
   };
 }
 
-/** Per-enemy DoT tick result, used to spawn floating text. */
+/** Per-enemy DoT tick result, used to spawn floating text and attribute threat. */
 export interface DotTickEvent {
   enemyId: string;
   pos: { x: number; y: number };
   damage: number;
+  threatSources: Array<{ partyIdx: number; damage: number }>;
 }
 
 /** Apply all top-of-round effects to enemies (regen, DoT ticks, etc.). */
@@ -153,10 +166,14 @@ export function applyTopOfRound(enemies: EnemyInstance[]): { enemies: EnemyInsta
 
     // Tick DoTs
     let totalDotDamage = 0;
+    const threatSourceMap = new Map<number, number>();
     const remainingDots = e.dots
       .map(dot => {
         const tickDamage = applyDR(dot.damagePerRound, dot.damageElement, s.armor, s.magicResistance);
         totalDotDamage += tickDamage;
+        if (dot.sourcePartyIdx !== undefined) {
+          threatSourceMap.set(dot.sourcePartyIdx, (threatSourceMap.get(dot.sourcePartyIdx) ?? 0) + tickDamage);
+        }
         return dot.roundsRemaining > 1
           ? { ...dot, roundsRemaining: dot.roundsRemaining - 1 }
           : null;
@@ -165,7 +182,12 @@ export function applyTopOfRound(enemies: EnemyInstance[]): { enemies: EnemyInsta
 
     if (totalDotDamage > 0) {
       hp = Math.max(0, hp - totalDotDamage);
-      dotTicks.push({ enemyId: e.id, pos: e.pos, damage: totalDotDamage });
+      dotTicks.push({
+        enemyId: e.id,
+        pos: e.pos,
+        damage: totalDotDamage,
+        threatSources: Array.from(threatSourceMap.entries()).map(([partyIdx, damage]) => ({ partyIdx, damage })),
+      });
     }
 
     return { ...e, currentHp: hp, currentMp: mp, dots: remainingDots, hots: remainingHots, buffs: newBuffs, stats: s };

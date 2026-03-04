@@ -1,100 +1,72 @@
-import { Swords, Shield, Target, Wand2, Sparkles, Flame, Skull } from 'lucide-react';
+import {
+  GiEnrage, GiWaveStrike, GiShardSword, GiHospitalCross, GiOnTarget, GiPoison,
+  GiFireZone, GiFireSpellCast, GiCursedStar, GiPlantWatering, GiSonicShout,
+  GiDrippingBlade, GiPoisonBottle 
+} from 'react-icons/gi';
+
+import type { IconType } from 'react-icons';
 import type { ComponentType } from 'react';
 import type { AttackCategory, DamageElement } from './gear';
+import type { AttributeKey, BuffableStat } from './stats';
 
 export type TargetType = 'enemy' | 'ally' | 'self';
 export type AreaType = 'single' | 'blast1' | 'blast2' | 'line';
+export type EffectTarget = 'target' | 'caster';
+
+export type Effect =
+  | { type: 'damage';  appliesTo: EffectTarget; damageElement: DamageElement; minDamage: number; maxDamage: number }
+  | { type: 'dot';     appliesTo: EffectTarget; damageElement: DamageElement; damagePerRound: number; rounds: number }
+  | { type: 'heal';    appliesTo: EffectTarget; damageElement: DamageElement; minHeal: number; maxHeal: number }
+  | { type: 'hot';     appliesTo: EffectTarget; damageElement: DamageElement; healPerRound: number; rounds: number }
+  | { type: 'buff';    appliesTo: EffectTarget; damageElement?: DamageElement; stats: Partial<Record<BuffableStat, number>>; statsPercent?: Partial<Record<BuffableStat, number>>; rounds: number }
+  | { type: 'debuff';  appliesTo: EffectTarget; damageElement?: DamageElement; stats: Partial<Record<BuffableStat, number>>; statsPercent?: Partial<Record<BuffableStat, number>>; rounds: number };
 
 export interface Ability {
   name: string;
-  icon: ComponentType<{ className?: string }>;
+  icon: ComponentType<{ className?: string }> | IconType;
   mpCost: number;
   range: number;
   target: TargetType;
-
+  displayElement?: DamageElement;
   area?: AreaType;                  // defaults to 'single'
-
-  // Hit resolution (enemy-targeting only)
-  attackCategory?: AttackCategory;  // spell-like
-  useWeapon?: boolean;              // weapon-enhanced
-
-  // Effects (applied on hit or on cast)
-  damage?: {
-    damageElement: DamageElement;
-    minDamage: number;
-    maxDamage: number;
-  };
-  dot?: {
-    damageElement: DamageElement;
-    damagePerRound: number;
-    rounds: number;
-  };
-  heal?: {
-    minHeal: number;
-    maxHeal: number;
-  };
-  hot?: {
-    healPerRound: number;
-    rounds: number;
-  }
-  buff?: {
-    stat: BuffableStat;
-    amount: number;
-    rounds: number;
-  };
-  debuff?: {
-    stat: BuffableStat;
-    amount: number;
-    rounds: number;
-  };
+  attackCategory?: AttackCategory;  // how the hit roll is resolved
+  useWeapon?: boolean;              // use equipped weapon for damage
+  effects: Effect[];
 }
 
-export type AttributeKey = 'strength' | 'toughness' | 'finesse' | 'mind' | 'spirit';
-export type ClassKey = 'barbarian' | 'paladin' | 'ranger' | 'mage' | 'shaman';
+export type ClassKey = 'barbarian' | 'paladin' | 'ranger' | 'mage' | 'shaman'
+| 'poisonmaster';
 
-// ─── Buff / Debuff System ─────────────────────────────────────────────────────
-
-/** Every stat that can be raised or lowered by a buff/debuff. */
-export type BuffableStat =
-  | AttributeKey
-  | 'hpRegen' | 'mpRegen' | 'initiative' | 'movement'
-  | 'armor' | 'dodge' | 'magicResistance' | 'healing'
-  | 'meleeHit' | 'meleeDamage' | 'meleeCrit'
-  | 'rangedHit' | 'rangedDamage' | 'rangedCrit'
-  | 'magicHit' | 'magicDamage' | 'magicCrit';
-
-export interface ActiveBuff {
-  id: string;              // source key — prevents double-applying the same buff source
-  stat: BuffableStat;
-  amount: number;          // positive = buff, negative = debuff
-  roundsRemaining: number;
-}
-
-export interface ActiveHot {
-  healPerRound: number;
-  roundsRemaining: number;
-}
-
-export const ATTRIBUTE_KEYS: AttributeKey[] = ['strength', 'toughness', 'finesse', 'mind', 'spirit'];
-const ATTRIBUTE_KEYS_SET = new Set<string>(ATTRIBUTE_KEYS);
-
-export type ArmorProficiency = 'Light' | 'Medium' | 'Heavy';
+export type ArmorProficiency = 'Cloth' | 'Light' | 'Medium' | 'Heavy';
 export type WeaponProficiency =
   | '1h Swords' | '2h Swords'
   | '1h Maces' | '2h Maces'
   | '2h Axes' | '1h Axes'
   | 'Daggers'
-  | 'Bows'
+  | 'Bows' | 'Crossbows'
   | 'Shields'
   | 'Staves' | 'Wands';
 
+export interface Passive {
+  name: string;
+  flat?: number;     // flat bonus added to the stat
+  percent?: number;  // percent bonus applied after flats (e.g. 10 = +10%)
+}
+
+export interface ScalingPassive {
+  name: string;
+  source: AttributeKey | 'level';  // attribute (or level) to read
+  factor: number;                   // multiplier applied to the source value
+  targetKey: string;                // passive stat key to add the result to (e.g. 'magicDamageBonus')
+}
+
 export interface ClassData {
   name: string;
-  token: ComponentType<{ className?: string }>;
-  color: string;
+  color: string;  // hex color for the class circle token
   description: string;
   attributes: Record<AttributeKey, number>;
-  passives: Record<string, number>;
+  passives: Record<string, Passive>;
+  scalingPassives?: ScalingPassive[];
   armorProficiencies: ArmorProficiency[];
   weaponProficiencies: WeaponProficiency[];
   abilities: Ability[];
@@ -103,193 +75,246 @@ export interface ClassData {
 export const CLASSES: Record<ClassKey, ClassData> = {
   barbarian: {
     name: 'Barbarian',
-    token: Swords,
-    color: 'bg-red-600',
+    color: '#dc2626',
     description: 'A wielder of 2h weapons whose lack of armor is compensated by raw fortitude and battle lust.',
-    attributes: { strength: 2, toughness: 4, finesse: 0, mind: 0, spirit: 0 },
-    passives: { dodgeBonus: 5, meleeCritBonus: 5 },
+    attributes: { strength: 3, toughness: 3, finesse: 0, mind: 0, spirit: 0 },
+    passives: {
+      dodgeBonus:    { name: 'Evasion',     flat: 5 },
+      meleeCritBonus: { name: 'Battle Fury', flat: 5 },
+    },
     armorProficiencies: ['Light'],
     weaponProficiencies: ['2h Swords', '2h Maces', '2h Axes'],
-    abilities: [],
+    abilities: [
+      {
+        name: 'Rage',
+        icon: GiEnrage,
+        mpCost: 10,
+        range: 0,
+        target: 'self',
+        effects: [
+          { type: 'buff', appliesTo: 'caster', stats: { hpRegen: 3, strength: 8 }, rounds: 5 },
+        ],
+      },
+      {
+        name: 'Cleave',
+        icon: GiWaveStrike,
+        mpCost: 8,
+        range: 0,
+        target: 'enemy',
+        useWeapon: true,
+        attackCategory: 'melee',
+        area: 'blast1',
+        effects: []
+      },
+      {
+        name: 'Shout',
+        icon: GiSonicShout,
+        mpCost: 10,
+        range: 0,
+        area: 'blast2',
+        target: 'enemy',
+        attackCategory: 'melee',
+        effects: [
+          { type: 'debuff', appliesTo: 'target', stats: { meleeDamage: -5 }, rounds: 3}
+        ]
+      }
+    ],
+  },
+  poisonmaster: {
+    name: 'Poisonmaster',
+    color: 'olivedrab',
+    description: "A shady dagger-wielder whose toxic concoctions deal damage over time and weaken foes.",
+    attributes: { strength: 0, toughness: 2, finesse: 3, mind: 1, spirit: 0 },
+    passives: {
+      toughness: { name: 'Constitution', flat: 3 },
+      poisonResistanceBonus: { name: 'Conditioned', flat: 30 }
+    },
+    scalingPassives: [
+      { name: "Venomous Blood", source: 'toughness', factor: (1/3), targetKey: 'poisonDamage' }
+    ],
+    armorProficiencies: ['Light'],
+    weaponProficiencies: ['Daggers', 'Crossbows'],
+    abilities: [
+      {
+        name: 'Poison Blade',
+        icon: GiDrippingBlade,
+        mpCost: 6,
+        range: 0,
+        target: 'enemy',
+        displayElement: 'poison',
+        attackCategory: 'melee',
+        useWeapon: true,
+        effects: [
+          { type: 'dot', appliesTo: 'target', damageElement: 'poison', damagePerRound: 3, rounds: 3 }
+        ]
+      },
+      {
+        name: 'Acid Vial',
+        icon: GiPoisonBottle,
+        mpCost: 9,
+        range: 3,
+        target: 'enemy',
+        area: 'blast1',
+        displayElement: 'poison',
+        attackCategory: 'ranged',
+        effects: [
+          { type: 'dot', appliesTo: 'target', damageElement: 'poison', damagePerRound: 5, rounds: 3 }
+        ]
+      }
+    ]
   },
   paladin: {
     name: 'Paladin',
-    token: Shield,
-    color: 'bg-yellow-500',
+    color: '#eab308',
     description: 'A shield-bearing knight that heals companions and strikes enemies with holy power.',
     attributes: { strength: 2, toughness: 1, finesse: 0, mind: 0, spirit: 3 },
-    passives: { healingBonus: 3, armorBonus: 10 },
+    passives: {
+      healingBonus: { name: 'Blessed Touch', flat: 3  },
+      armorBonus:   { name: 'Iron Will',     flat: 10 },
+    },
     armorProficiencies: ['Medium', 'Heavy'],
     weaponProficiencies: ['1h Swords', '1h Maces', 'Shields'],
     abilities: [
       {
-        name: 'Smite',
-        icon: Sparkles,
+        name: 'Blessed Strike',
+        icon: GiShardSword,
         mpCost: 10,
-        range: 3,
+        range: 0,
         target: 'enemy',
+        displayElement: 'holy',
+        attackCategory: 'melee',
+        useWeapon: true,
+        effects: [
+          { type: 'damage', appliesTo: 'target', damageElement: 'holy', minDamage: 6, maxDamage: 9 },
+        ],
+      },
+      {
+        name: 'Holy Light',
+        icon: GiHospitalCross,
+        mpCost: 8,
+        range: 3,
+        target: 'ally',
+        displayElement: 'holy',
         attackCategory: 'magic',
-        damage: { damageElement: 'holy', minDamage: 5, maxDamage: 9 },
+        effects: [
+          { type: 'heal', appliesTo: 'target', damageElement: 'holy', minHeal: 7, maxHeal: 13 }
+        ]
       }
     ],
   },
   ranger: {
     name: 'Ranger',
-    token: Target,
-    color: 'bg-green-600',
+    color: '#16a34a',
     description: 'A bow-wielding wanderer who focuses on ranged ability and poisons.',
     attributes: { strength: 0, toughness: 1, finesse: 4, mind: 1, spirit: 0 },
-    passives: { rangedHitBonus: 3, rangedDamageBonus: 3 },
+    passives: {
+      rangedHitBonus:    { name: 'Eagle Eye', flat: 3 },
+      rangedDamageBonus: { name: 'Marksman',  flat: 3 },
+    },
     armorProficiencies: ['Light', 'Medium'],
     weaponProficiencies: ['Daggers', '1h Swords', 'Bows'],
     abilities: [
       {
         name: 'Aimed Shot',
-        icon: Target,
+        icon: GiOnTarget,
         mpCost: 12,
         range: 5,
         target: 'enemy',
         attackCategory: 'ranged',
-        damage: { damageElement: 'piercing', minDamage: 9, maxDamage: 9 },
+        effects: [
+          { type: 'damage', appliesTo: 'target', damageElement: 'piercing', minDamage: 12, maxDamage: 12 },
+        ],
+      },
+      {
+        name: 'Poison Arrow',
+        icon: GiPoison,
+        mpCost: 8,
+        range: 5,
+        target: 'enemy',
+        displayElement: 'poison',
+        attackCategory: 'ranged',
+        useWeapon: true,
+        effects: [
+          { type: 'dot', appliesTo: 'target', damageElement: 'poison', damagePerRound: 5, rounds: 3 }
+        ]
       }
     ],
   },
   mage: {
     name: 'Mage',
-    token: Wand2,
-    color: 'bg-blue-600',
+    color: '#2563eb',
     description: 'An elementalist who casts devastating spells from afar.',
     attributes: { strength: 0, toughness: 0, finesse: 0, mind: 4, spirit: 2 },
-    passives: { magicDamageBonus: 3, magicResistanceBonus: 10 },
-    armorProficiencies: ['Light'],
+    passives: {
+      magicDamageBonus:      { name: 'Arcane Power', flat: 3  },
+      magicResistanceBonus:  { name: 'Spell Ward',   flat: 10 },
+    },
+    armorProficiencies: ['Cloth'],
     weaponProficiencies: ['Staves', 'Daggers', 'Wands'],
     abilities: [
       {
         name: 'Fireball',
-        icon: Flame,
-        mpCost: 15,
+        icon: GiFireZone,
+        mpCost: 16,
         range: 4,
         target: 'enemy',
         area: 'blast1',
+        displayElement: 'fire',
         attackCategory: 'magic',
-        damage: { damageElement: 'fire', minDamage: 4, maxDamage: 7 },
+        effects: [
+          { type: 'damage', appliesTo: 'target', damageElement: 'fire', minDamage: 4, maxDamage: 7 },
+        ],
+      },
+      {
+        name: 'Fire Blast',
+        icon: GiFireSpellCast,
+        mpCost: 9,
+        range: 3,
+        target: 'enemy',
+        displayElement: 'fire',
+        attackCategory: 'magic',
+        effects: [
+          { type: 'damage', appliesTo: 'target', damageElement: 'fire', minDamage: 8, maxDamage: 10 }
+        ]
       }
     ],
   },
   shaman: {
     name: 'Shaman',
-    token: Sparkles,
-    color: 'bg-purple-600',
+    color: '#9333ea',
     description: 'A wise primalist who can heal themselves and curse enemies.',
     attributes: { strength: 0, toughness: 2, finesse: 0, mind: 2, spirit: 2 },
-    passives: { magicResistanceBonus: 10, magicHitBonus: 3 },
+    passives: {
+      magicResistanceBonus: { name: 'Spirit Shield',  flat: 10 },
+      magicHitBonus:        { name: 'Primal Sight',   flat: 3  },
+    },
     armorProficiencies: ['Light', 'Medium'],
     weaponProficiencies: ['Daggers', '1h Maces', 'Wands', 'Staves', 'Shields'],
     abilities: [
       {
         name: 'Curse',
-        icon: Skull,
+        icon: GiCursedStar,
         mpCost: 7,
         range: 5,
         target: 'enemy',
+        displayElement: 'shadow',
         attackCategory: 'magic',
-        dot: { damageElement: 'shadow', damagePerRound: 5, rounds: 3 }
+        effects: [
+          { type: 'dot', appliesTo: 'target', damageElement: 'shadow', damagePerRound: 5, rounds: 3 },
+        ]
+      },
+      {
+        name: 'Regrow',
+        icon: GiPlantWatering,
+        mpCost: 8,
+        range: 3,
+        displayElement: 'nature',
+        target: 'ally',
+        effects: [
+          { type: 'hot', appliesTo: 'target', damageElement: 'nature', healPerRound: 5, rounds: 3 }
+        ]
       }
     ],
   }
 };
 
-export const BASE_ATTRIBUTES = 5;
-export const TOTAL_POINTS = 6;           // attribute points at level 1 (shared by players and enemies)
-export const ATTRIBUTE_POINTS_PER_LEVEL = 3; // additional points per level above 1
-
-const fl = (n: number) => Math.floor(n);
-
-export function getTotalAttribute(
-  attr: AttributeKey,
-  pointsSpent: Record<AttributeKey, number>,
-  selectedClass: ClassKey | null
-) {
-  return BASE_ATTRIBUTES + pointsSpent[attr] + (selectedClass ? CLASSES[selectedClass].attributes[attr] : 0);
-}
-
-export function calculateStats(
-  selectedClass: ClassKey | null,
-  pointsSpent: Record<AttributeKey, number>,
-  gearArmorBonus = 0,
-  attrBuffs: Partial<Record<AttributeKey, number>> = {},
-) {
-  const level = 1;
-  const clampAttr = (n: number) => Math.max(0, n);
-  const str = clampAttr(getTotalAttribute('strength', pointsSpent, selectedClass) + (attrBuffs.strength ?? 0));
-  const tou = clampAttr(getTotalAttribute('toughness', pointsSpent, selectedClass) + (attrBuffs.toughness ?? 0));
-  const fin = clampAttr(getTotalAttribute('finesse', pointsSpent, selectedClass) + (attrBuffs.finesse ?? 0));
-  const mnd = clampAttr(getTotalAttribute('mind', pointsSpent, selectedClass) + (attrBuffs.mind ?? 0));
-  const spr = clampAttr(getTotalAttribute('spirit', pointsSpent, selectedClass) + (attrBuffs.spirit ?? 0));
-  const passives = selectedClass ? CLASSES[selectedClass].passives : {};
-
-  return {
-    level,
-    hp: fl(30 + (2 * tou) + (str / 4) + (2 * level)),
-    mp: fl(20 + (4 * mnd) + (2 * spr) + level),
-    hpRegen: 1 + fl(spr / 6),
-    mpRegen: 1 + fl((spr / 4) + (mnd / 6)),
-    initiative: fl(5 + (fin / 3) + (mnd / 4)),
-    movement: 3,
-    armor: fl(tou + (str / 2)) + (passives.armorBonus || 0) + gearArmorBonus,
-    dodge: fl(5 + (fin / 2)) + (passives.dodgeBonus || 0),
-    magicResistance: fl(spr + (mnd / 2)) + (passives.magicResistanceBonus || 0),
-    healing: fl(spr / 3) + (passives.healingBonus || 0),
-    melee: {
-      hitBonus: fl((str / 4) + (fin / 3) + (passives.meleeHitBonus || 0)),
-      damage: fl((str / 3) + (passives.meleeDamageBonus || 0)),
-      crit: fl(5 + (fin / 4) + (str / 4) + (passives.meleeCritBonus || 0))
-    },
-    ranged: {
-      hitBonus: fl(fin / 2) + (passives.rangedHitBonus || 0),
-      damage: fl(fin / 3) + (passives.rangedDamageBonus || 0),
-      crit: fl(5 + (fin / 2) + (passives.rangedCritBonus || 0))
-    },
-    magic: {
-      hitBonus: fl(mnd / 2) + (passives.magicHitBonus || 0),
-      damage: fl(mnd / 3) + (passives.magicDamageBonus || 0),
-      crit: fl(5 + (mnd / 2) + (passives.magicCritBonus || 0))
-    }
-  };
-}
-
-export type Stats = ReturnType<typeof calculateStats>;
-
-/**
- * Apply non-attribute buffs/debuffs additively to a Stats block.
- * Attribute buffs are handled upstream by passing attrBuffs into calculateStats /
- * generateEnemyStats so all derived values are recomputed correctly.
- */
-export function applyStatBuffs(stats: Stats, buffs: ActiveBuff[]): Stats {
-  if (buffs.length === 0) return stats;
-  const s = { ...stats, melee: { ...stats.melee }, ranged: { ...stats.ranged }, magic: { ...stats.magic } };
-  const clamp = (v: number, min = 0) => Math.max(min, v);
-  for (const buff of buffs) {
-    if (ATTRIBUTE_KEYS_SET.has(buff.stat)) continue; // handled upstream
-    switch (buff.stat) {
-      case 'hpRegen':         s.hpRegen         = clamp(s.hpRegen         + buff.amount);    break;
-      case 'mpRegen':         s.mpRegen         = clamp(s.mpRegen         + buff.amount);    break;
-      case 'initiative':      s.initiative      = clamp(s.initiative      + buff.amount);    break;
-      case 'movement':        s.movement        = clamp(s.movement        + buff.amount, 1); break;
-      case 'armor':           s.armor           = clamp(s.armor           + buff.amount);    break;
-      case 'dodge':           s.dodge           = clamp(s.dodge           + buff.amount);    break;
-      case 'magicResistance': s.magicResistance = clamp(s.magicResistance + buff.amount);    break;
-      case 'healing':         s.healing         = clamp(s.healing         + buff.amount);    break;
-      case 'meleeHit':        s.melee.hitBonus  = clamp(s.melee.hitBonus  + buff.amount);    break;
-      case 'meleeDamage':     s.melee.damage    = clamp(s.melee.damage    + buff.amount);    break;
-      case 'meleeCrit':       s.melee.crit      = clamp(s.melee.crit      + buff.amount);    break;
-      case 'rangedHit':       s.ranged.hitBonus = clamp(s.ranged.hitBonus + buff.amount);    break;
-      case 'rangedDamage':    s.ranged.damage   = clamp(s.ranged.damage   + buff.amount);    break;
-      case 'rangedCrit':      s.ranged.crit     = clamp(s.ranged.crit     + buff.amount);    break;
-      case 'magicHit':        s.magic.hitBonus  = clamp(s.magic.hitBonus  + buff.amount);    break;
-      case 'magicDamage':     s.magic.damage    = clamp(s.magic.damage    + buff.amount);    break;
-      case 'magicCrit':       s.magic.crit      = clamp(s.magic.crit      + buff.amount);    break;
-    }
-  }
-  return s;
-}

@@ -1,7 +1,9 @@
 import { useState, useRef, type ReactNode, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import { isShieldItem, type WeaponItem, type ArmorItem, type ShieldItem } from '../data/gear';
-import type { Ability, Stats } from '../data/classes';
+import type { Ability } from '../data/classes';
+import type { Stats } from '../data/stats';
+import { DAMAGE_ELEMENT_COLOR } from '../data/constants';
 
 // ─── Portal Tooltip wrapper ───────────────────────────────────────────────────
 
@@ -50,21 +52,10 @@ export function Tooltip({ content, children, className, style }: TooltipProps) {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const ELEMENT_COLOR: Record<string, string> = {
-  fire:        'text-orange-400',
-  ice:         'text-cyan-400',
-  lightning:   'text-yellow-300',
-  shadow:      'text-purple-400',
-  poison:      'text-green-400',
-  holy:        'text-yellow-200',
-  nature:      'text-emerald-400',
-  slashing:    'text-gray-400',
-  piercing:    'text-gray-400',
-  bludgeoning: 'text-gray-400',
-};
+const EL_COLOR = DAMAGE_ELEMENT_COLOR as Record<string, string>;
 
 function ElementTag({ element }: { element: string }) {
-  return <span className={ELEMENT_COLOR[element] ?? 'text-gray-400'}>{element}</span>;
+  return <span style={{ color: EL_COLOR[element] }}>{element}</span>;
 }
 
 function Row({ label, children, valueClass = 'text-gray-200' }: {
@@ -142,19 +133,17 @@ export function AbilityTooltipContent({ ability, stats, weapon }: {
   stats?: Stats;
   weapon?: WeaponItem | null;
 }) {
-  const hasEffects = ability.damage || ability.dot || ability.heal || ability.hot || ability.buff || ability.debuff || ability.useWeapon;
   const category = ability.useWeapon ? 'weapon' : ability.attackCategory;
-
-  // Compute bonus damage if stats are available
   const abilityBonus = stats && ability.attackCategory ? stats[ability.attackCategory].damage : null;
-  const weaponBonus = stats && ability.useWeapon && weapon ? stats[weapon.attackCategory].damage : null;
+  const weaponBonus  = stats && ability.useWeapon && weapon ? stats[weapon.attackCategory].damage : null;
+  const hasEffects   = ability.useWeapon || ability.effects.length > 0;
 
   return (
     <div className="min-w-[210px]">
       {/* Header */}
       <div className="px-3 pt-2.5 pb-1.5 border-b border-gray-700">
         <div className="flex items-baseline justify-between gap-3">
-          <p className="font-bold text-gray-100">{ability.name}</p>
+          <p className="font-bold" style={{ color: ability.displayElement ? DAMAGE_ELEMENT_COLOR[ability.displayElement] : 'rgb(243 244 246)' }}>{ability.name}</p>
           <span className="text-blue-400 font-medium text-xs shrink-0">{ability.mpCost} MP</span>
         </div>
         <p className="text-xs text-gray-500 mt-0.5">
@@ -168,20 +157,6 @@ export function AbilityTooltipContent({ ability, stats, weapon }: {
       {/* Effects */}
       {hasEffects && (
         <div className="px-3 py-2 space-y-1">
-          {ability.damage && (
-            <>
-              <Row label="Base Damage" valueClass="text-gray-400">
-                {ability.damage.minDamage}–{ability.damage.maxDamage}{' '}
-                <ElementTag element={ability.damage.damageElement} />
-              </Row>
-              {abilityBonus !== null && (
-                <Row label="Damage" valueClass="text-red-400 font-medium">
-                  {ability.damage.minDamage + abilityBonus}–{ability.damage.maxDamage + abilityBonus}{' '}
-                  <ElementTag element={ability.damage.damageElement} />
-                </Row>
-              )}
-            </>
-          )}
           {ability.useWeapon && (
             <>
               <Row label="Base Damage" valueClass="text-gray-400">
@@ -195,32 +170,54 @@ export function AbilityTooltipContent({ ability, stats, weapon }: {
               )}
             </>
           )}
-          {ability.dot && (
-            <Row label="DoT" valueClass="text-orange-400">
-              {ability.dot.damagePerRound}/rnd × {ability.dot.rounds}r{' '}
-              <ElementTag element={ability.dot.damageElement} />
-            </Row>
-          )}
-          {ability.heal && (
-            <Row label="Heal" valueClass="text-green-400 font-medium">
-              {ability.heal.minHeal}–{ability.heal.maxHeal}
-            </Row>
-          )}
-          {ability.hot && (
-            <Row label="HoT" valueClass="text-emerald-400">
-              {ability.hot.healPerRound}/rnd × {ability.hot.rounds}r
-            </Row>
-          )}
-          {ability.buff && (
-            <Row label="Buff" valueClass="text-yellow-300">
-              +{ability.buff.amount} {ability.buff.stat} × {ability.buff.rounds}r
-            </Row>
-          )}
-          {ability.debuff && (
-            <Row label="Debuff" valueClass="text-purple-400">
-              −{ability.debuff.amount} {ability.debuff.stat} × {ability.debuff.rounds}r
-            </Row>
-          )}
+          {ability.effects.map((eff, i) => {
+            const target = eff.appliesTo === 'caster' ? ' (self)' : '';
+            switch (eff.type) {
+              case 'damage':
+                return (
+                  <span key={i}>
+                    <Row label="Base Damage" valueClass="text-gray-400">
+                      {eff.minDamage}–{eff.maxDamage} <ElementTag element={eff.damageElement} />{target}
+                    </Row>
+                    {abilityBonus !== null && (
+                      <Row label="Damage" valueClass="text-red-400 font-medium">
+                        {eff.minDamage + abilityBonus}–{eff.maxDamage + abilityBonus} <ElementTag element={eff.damageElement} />{target}
+                      </Row>
+                    )}
+                  </span>
+                );
+              case 'dot':
+                return (
+                  <Row key={i} label={`DoT${target}`} valueClass="text-orange-400">
+                    {eff.damagePerRound}/rnd × {eff.rounds}r <ElementTag element={eff.damageElement} />
+                  </Row>
+                );
+              case 'heal':
+                return (
+                  <Row key={i} label={`Heal${target}`} valueClass="text-green-400 font-medium">
+                    {eff.minHeal}–{eff.maxHeal}
+                  </Row>
+                );
+              case 'hot':
+                return (
+                  <Row key={i} label={`HoT${target}`} valueClass="text-emerald-400">
+                    {eff.healPerRound}/rnd × {eff.rounds}r
+                  </Row>
+                );
+              case 'buff':
+                return (
+                  <Row key={i} label={`Buff${target}`} valueClass="text-yellow-300">
+                    {Object.entries(eff.stats).map(([s, v]) => `+${v} ${s}`).join(', ')} × {eff.rounds}r
+                  </Row>
+                );
+              case 'debuff':
+                return (
+                  <Row key={i} label={`Debuff${target}`} valueClass="text-purple-400">
+                    {Object.entries(eff.stats).map(([s, v]) => `−${v} ${s}`).join(', ')} × {eff.rounds}r
+                  </Row>
+                );
+            }
+          })}
         </div>
       )}
     </div>

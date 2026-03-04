@@ -7,9 +7,9 @@ import { chebyshev, hasLineOfSight } from './dungeonHelpers';
 interface Pos { x: number; y: number }
 
 export interface EnemyAction {
-  moveTo: Pos | null;           // final position after movement (null = stayed put)
-  attackPlayer: boolean;        // whether to do a weapon attack after moving
-  abilityUsed: Ability | null;  // if non-null, use this ability instead of weapon attack
+  moveTo: Pos | null;               // final position after movement (null = stayed put)
+  targetPartyIdx: number | null;    // which party member to attack (null = no attack)
+  abilityUsed: Ability | null;      // if non-null, use this ability instead of weapon attack
 }
 
 // ─── BFS Pathfinding ────────────────────────────────────────────────────────
@@ -92,15 +92,35 @@ function findPath(
 // ─── AI ──────────────────────────────────────────────────────────────────────
 
 /**
- * BFS chase AI: pathfind toward the player, move up to `movement` steps
- * along the shortest path, then attack if within range + LOS.
+ * BFS chase AI: pathfind toward the nearest alive party member, move up to
+ * `movement` steps along the shortest path, then attack if within range + LOS.
  */
 export function computeEnemyTurn(
   enemy: EnemyInstance,
-  playerPos: Pos,
+  partyMembers: Array<{ pos: Pos; hp: number }>,
   allEnemies: EnemyInstance[],
   floors: Set<string>,
+  partyThreat: number[] = [],
 ): EnemyAction {
+  // Pick target: highest threat → closest if tied → random if still tied
+  const aliveMembers = partyMembers
+    .map((m, idx) => ({ ...m, idx }))
+    .filter(m => m.hp > 0);
+
+  if (aliveMembers.length === 0) {
+    return { moveTo: null, targetPartyIdx: null, abilityUsed: null };
+  }
+
+  aliveMembers.sort((a, b) => {
+    const tDiff = (partyThreat[b.idx] ?? 0) - (partyThreat[a.idx] ?? 0);
+    if (tDiff !== 0) return tDiff;
+    const distDiff = chebyshev(enemy.pos, a.pos) - chebyshev(enemy.pos, b.pos);
+    if (distDiff !== 0) return distDiff;
+    return Math.random() - 0.5;
+  });
+  const target = aliveMembers[0];
+  const targetPos = target.pos;
+
   const range = enemy.type.weapon.range;
   let pos = { ...enemy.pos };
 
@@ -112,34 +132,36 @@ export function computeEnemyTurn(
     const hpPct = enemy.currentHp / enemy.stats.hp;
     const healAbility = selfAbilities.find(a => a.heal || a.hot);
     if (healAbility && hpPct < 0.5) {
-      return { moveTo: null, attackPlayer: false, abilityUsed: healAbility };
+      return { moveTo: null, targetPartyIdx: null, abilityUsed: healAbility };
     }
     // Other self buffs: use on first turn of combat (round 1 effectively = first action)
     const buffAbility = selfAbilities.find(a => a.buff);
     if (buffAbility && !enemy.buffs.some(b => b.id.startsWith(buffAbility.name))) {
-      return { moveTo: null, attackPlayer: false, abilityUsed: buffAbility };
+      return { moveTo: null, targetPartyIdx: null, abilityUsed: buffAbility };
     }
   }
 
   // ── Already in weapon range + LOS? Check for ability first, then weapon ──
-  if (chebyshev(pos, playerPos) <= range && hasLineOfSight(pos, playerPos, floors)) {
+  if (chebyshev(pos, targetPos) <= range && hasLineOfSight(pos, targetPos, floors)) {
     const inRangeAbility = enemy.type.abilities.find(
       a => a.target === 'enemy' && enemy.currentMp >= a.mpCost &&
-           chebyshev(pos, playerPos) <= a.range && hasLineOfSight(pos, playerPos, floors)
+           chebyshev(pos, targetPos) <= a.range && hasLineOfSight(pos, targetPos, floors)
     );
-    if (inRangeAbility) return { moveTo: null, attackPlayer: false, abilityUsed: inRangeAbility };
-    return { moveTo: null, attackPlayer: true, abilityUsed: null };
+    if (inRangeAbility) return { moveTo: null, targetPartyIdx: target.idx, abilityUsed: inRangeAbility };
+    return { moveTo: null, targetPartyIdx: target.idx, abilityUsed: null };
   }
 
-  // Tiles occupied by other living enemies
+  // Tiles occupied by other living enemies (and all party member positions)
   const blocked = new Set(
     allEnemies
       .filter(e => e.id !== enemy.id && e.currentHp > 0)
       .map(e => `${e.pos.x},${e.pos.y}`)
   );
-  blocked.add(`${playerPos.x},${playerPos.y}`); // can't walk onto player
+  for (const m of partyMembers) {
+    blocked.add(`${m.pos.x},${m.pos.y}`);
+  }
 
-  const path = findPath(pos, playerPos, floors, blocked);
+  const path = findPath(pos, targetPos, floors, blocked);
 
   // Follow path up to movement budget, stopping early if we enter attack range
   const movement = enemy.stats.movement;
@@ -147,22 +169,18 @@ export function computeEnemyTurn(
   let lastValidPos = { ...enemy.pos };
   for (let i = 0; i < steps; i++) {
     const next = path[i];
-    // Re-check the tile is still walkable (other enemies may share a target tile in theory)
     if (blocked.has(`${next.x},${next.y}`)) break;
-
-    // Hard clamp: never exceed movement budget in Chebyshev distance from start
     if (chebyshev(enemy.pos, next) > movement) break;
 
     pos = next;
     lastValidPos = pos;
 
-    // Stop early if now in attack range + LOS
-    if (chebyshev(pos, playerPos) <= range && hasLineOfSight(pos, playerPos, floors)) break;
+    if (chebyshev(pos, targetPos) <= range && hasLineOfSight(pos, targetPos, floors)) break;
   }
 
   pos = lastValidPos;
   const moved = pos.x !== enemy.pos.x || pos.y !== enemy.pos.y;
-  const canAttack = chebyshev(pos, playerPos) <= range && hasLineOfSight(pos, playerPos, floors);
+  const canAttack = chebyshev(pos, targetPos) <= range && hasLineOfSight(pos, targetPos, floors);
 
   if (moved) {
     console.log(`[AI] ${enemy.type.name} (mv ${movement}): (${enemy.pos.x},${enemy.pos.y}) → (${pos.x},${pos.y}), dist ${chebyshev(enemy.pos, pos)}`);
@@ -171,12 +189,12 @@ export function computeEnemyTurn(
   // Check for an in-range enemy-targeting ability after moving
   const inRangeAbility = canAttack ? enemy.type.abilities.find(
     a => a.target === 'enemy' && enemy.currentMp >= a.mpCost &&
-         chebyshev(pos, playerPos) <= a.range && hasLineOfSight(pos, playerPos, floors)
+         chebyshev(pos, targetPos) <= a.range && hasLineOfSight(pos, targetPos, floors)
   ) : undefined;
 
   return {
     moveTo: moved ? pos : null,
-    attackPlayer: canAttack && !inRangeAbility,
+    targetPartyIdx: canAttack ? target.idx : null,
     abilityUsed: inRangeAbility ?? null,
   };
 }

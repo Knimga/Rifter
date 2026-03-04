@@ -18,6 +18,11 @@ export interface AttackParams {
   targetDodge: number;        // target's dodge stat (dodge of 5 = 5%)
   targetArmor: number;        // target's armor stat
   targetMagicResistance: number; // target's magic resistance stat
+  // Element-specific bonuses/resistances (all optional, default 0)
+  elementHit?: number;              // attacker's extra hit% for this element
+  elementCrit?: number;             // attacker's extra crit% for this element
+  elementDamage?: number;           // attacker's flat damage bonus for this element
+  targetElementResistance?: number; // target's % damage reduction for this element
 }
 
 export interface AttackResult {
@@ -48,6 +53,7 @@ export function applyDR(
   damageElement: DamageElement,
   targetArmor: number,
   targetMagicResistance: number,
+  targetElementResistance = 0,  // % reduction for this element, e.g. 25 = 25% less damage
 ): number {
   let effectiveDefense: number;
   if (PHYSICAL_ELEMENTS.has(damageElement)) {
@@ -57,7 +63,9 @@ export function applyDR(
   }
   const drPercent = (effectiveDefense / (effectiveDefense + DR_DIVISOR)) * DR_CAP;
   const damageReduction = Math.floor(rawDamage * drPercent);
-  return Math.max(1, rawDamage - damageReduction);
+  const afterArmor = Math.max(1, rawDamage - damageReduction);
+  if (targetElementResistance === 0) return afterArmor;
+  return Math.max(1, Math.round(afterArmor * (1 - targetElementResistance / 100)));
 }
 
 // ─── Resolve ─────────────────────────────────────────────────────────────────
@@ -67,12 +75,13 @@ export function resolveAttack(params: AttackParams): AttackResult {
     hitBonus, damageBonus, critChance,
     minDamage, maxDamage, damageElement,
     targetDodge, targetArmor, targetMagicResistance,
+    elementHit = 0, elementCrit = 0, elementDamage = 0, targetElementResistance = 0,
   } = params;
 
   const miss = { hit: false, dodged: false, crit: false, weaponRoll: 0, rawDamage: 0, damageReduction: 0, finalDamage: 0 };
 
-  // 1. Hit check — base 75% + attacker's hitBonus%
-  const hitChance = BASE_HIT_CHANCE + hitBonus;
+  // 1. Hit check — base 75% + attacker's hitBonus% + element hit bonus
+  const hitChance = BASE_HIT_CHANCE + hitBonus + elementHit;
   if (roll100() > hitChance) return miss;
 
   // 2. Dodge check — target's dodge value is their dodge %
@@ -80,16 +89,16 @@ export function resolveAttack(params: AttackParams): AttackResult {
     return { ...miss, hit: true, dodged: true };
   }
 
-  // 3. Crit check — attacker's crit value is their crit %
-  const crit = roll100() <= critChance;
+  // 3. Crit check — attacker's crit value is their crit % + element crit bonus
+  const crit = roll100() <= (critChance + elementCrit);
 
   // 4. Damage roll
   const weaponRoll = rand(minDamage, maxDamage);
-  let rawDamage = weaponRoll + damageBonus;
+  let rawDamage = weaponRoll + damageBonus + elementDamage;
   if (crit) rawDamage *= 2;
 
-  // 5. Damage reduction
-  const finalDamage = applyDR(rawDamage, damageElement, targetArmor, targetMagicResistance);
+  // 5. Damage reduction (armor/MR) then element resistance
+  const finalDamage = applyDR(rawDamage, damageElement, targetArmor, targetMagicResistance, targetElementResistance);
   const damageReduction = rawDamage - finalDamage;
 
   return { hit: true, dodged: false, crit, weaponRoll, rawDamage, damageReduction, finalDamage };

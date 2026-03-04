@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { isWeaponItem, WEAPON_ICON_PATH, type GearSlots } from '../data/gear';
-import type { Ability, Stats } from '../data/classes';
+import type { Ability } from '../data/classes';
+import type { Stats } from '../data/stats';
 import { Tooltip, WeaponTooltipContent, AbilityTooltipContent } from './Tooltip';
 
 // ─── Slot types ─────────────────────────────────────────────────────────────
@@ -120,7 +121,7 @@ export default function ActionBar({ gear, abilities, slots, onSlotsChange, activ
             <div
               onClick={() => handleClick(i)}
               onContextMenu={(e) => handleRightClick(e, i)}
-              className={`w-16 h-16 border rounded-lg transition-colors flex items-center justify-center
+              className={`w-16 h-16 border rounded-lg transition-colors flex flex-col items-center justify-center gap-0.5
                 ${disabled
                   ? 'bg-blue-950 border-blue-800 opacity-50'
                   : isActive
@@ -139,6 +140,11 @@ export default function ActionBar({ gear, abilities, slots, onSlotsChange, activ
               )}
               {slot !== null && slot !== 'weapon-attack' && (
                 React.createElement(slot.icon, { className: `w-8 h-8 ${isActive ? 'text-gray-900' : 'text-gray-200'}` })
+              )}
+              {slot !== null && (
+                <span className={`text-[9px] leading-none text-center px-0.5 truncate w-full text-center ${isActive ? 'text-gray-800' : 'text-gray-400'}`}>
+                  {slot === 'weapon-attack' ? (weapon?.name ?? 'Attack') : slot.name}
+                </span>
               )}
             </div>
 
