@@ -1,9 +1,11 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 
 import { CLASSES, type Effect, type AreaType } from '../data/classes';
-import { ATTRIBUTE_KEYS, type AttributeKey, type ActiveBuff, type ActiveHot, type BuffableStat } from '../data/stats';
+import { ATTRIBUTE_KEYS, type AttributeKey, type ActiveBuff, type ActiveHot, type ActiveDot, type BuffableStat } from '../data/stats';
 import { calculateStats, applyStatBuffs } from '../data/stats';
-import { getGearArmorBonus, isWeaponItem, type AttackCategory, type DamageElement } from '../data/gear';
+import { getGearArmorBonus, isWeaponItem, PHYSICAL_ELEMENTS, generateLootDrop, type AttackCategory, type DamageElement, type Item } from '../data/gear';
+import { isFull, addItem, removeItem, type Inventory } from '../data/inventory';
+import { DAMAGE_ELEMENT_COLOR, OUT_OF_COMBAT_REGEN_INTERVAL_MS } from '../data/constants';
 import type { PartyMemberConfig } from '../data/party';
 import type { EnemyInstance } from '../data/enemies';
 import { applyBuffToEnemy } from '../data/enemies';
@@ -11,9 +13,9 @@ import { chebyshev, hasLineOfSight, getAffectedTiles } from '../data/dungeonHelp
 import { generateDungeon, spawnDungeonEnemies, type DungeonData } from '../data/dungeonGen';
 import { DUNGEON_PRESETS } from '../data/dungeonPresets';
 import { startCombat, joinCombat, advanceTurn, applyTopOfRound, getCurrentCombatant, type CombatState } from '../data/combat';
-import { resolveAttack } from '../data/attackResolution';
+import { resolveAttack, applyDR } from '../data/attackResolution';
 import { findFollowerSpawns, computeFollowerPositions } from '../data/movementHelpers';
-import { useEnemyTurn } from '../hooks/useEnemyTurn';
+import { useEnemyTurn, type EnemyAoePreview } from '../hooks/useEnemyTurn';
 import { useFloatingText } from '../hooks/useFloatingText';
 
 import CharacterSheet from '../components/CharacterSheet';
@@ -41,7 +43,7 @@ const INITIAL_COMBAT: CombatState = {
   partyThreat: [],
 };
 
-export default function GameScreen({ party, setParty: _setParty }: Props) {
+export default function GameScreen({ party, setParty }: Props) {
   // Phase 1: drive gameplay from the leader (party[0])
   const { selectedClass: selectedClassOrNull, gear } = party[0];
   const selectedClass = selectedClassOrNull!; // guaranteed non-null by canStart check
@@ -52,14 +54,18 @@ export default function GameScreen({ party, setParty: _setParty }: Props) {
   const { floatingTexts, spawnFloat, removeFloat, clearFloats, spawnFloatRef } = useFloatingText();
   const [showCharSheet, setShowCharSheet] = useState(false);
   const [dungeon, setDungeon] = useState<DungeonData | null>(null);
+  const [enemyAoePreview, setEnemyAoePreview] = useState<EnemyAoePreview | null>(null);
+  const [enemyTargetPartyIdx, setEnemyTargetPartyIdx] = useState<number | null>(null);
   const [currentZone, setCurrentZone] = useState(0);
   const [followerPositions, setFollowerPositions] = useState([{ x: 6, y: 5 }, { x: 7, y: 5 }]);
+  const [inventory, setInventory] = useState<Inventory>([]);
 
   // ─── Per-member state (Phase 3) ──────────────────────────────────────────
   const [partyHp, setPartyHp] = useState<number[]>([]);
   const [partyMp, setPartyMp] = useState<number[]>([]);
   const [partyBuffs, setPartyBuffs] = useState<ActiveBuff[][]>(() => party.map(() => []));
   const [partyHots, setPartyHots] = useState<ActiveHot[][]>(() => party.map(() => []));
+  const [partyDots, setPartyDots] = useState<ActiveDot[][]>(() => party.map(() => []));
   const [partySlots, setPartySlots] = useState<SlotContent[][]>(() =>
     party.map(m => {
       const abilities = m.selectedClass ? CLASSES[m.selectedClass].abilities : [];
@@ -84,7 +90,7 @@ export default function GameScreen({ party, setParty: _setParty }: Props) {
       return acc;
     }, {} as Partial<Record<AttributeKey, number>>);
     return applyStatBuffs(
-      calculateStats(m.selectedClass, m.pointsSpent, getGearArmorBonus(m.gear), attrBuffs),
+      calculateStats({ mode: 'player', classKey: m.selectedClass, pointsSpent: m.pointsSpent, skillPointsSpent: m.skillPointsSpent, gearArmorBonus: getGearArmorBonus(m.gear), attrBuffs }),
       memberBuffs,
     );
   });
@@ -138,6 +144,8 @@ export default function GameScreen({ party, setParty: _setParty }: Props) {
   partyBuffsRef.current = partyBuffs;
   const partyHotsRef = useRef(partyHots);
   partyHotsRef.current = partyHots;
+  const partyDotsRef = useRef(partyDots);
+  partyDotsRef.current = partyDots;
   const followerPositionsRef = useRef(followerPositions);
   followerPositionsRef.current = followerPositions;
 
@@ -178,6 +186,18 @@ export default function GameScreen({ party, setParty: _setParty }: Props) {
     if (combat.active) setBarViewIdx(activePartyIdx);
   }, [combat.active, activePartyIdx]);
 
+  // ─── Keyboard shortcuts ───────────────────────────────────────────────────
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      if (showCharSheet) { setShowCharSheet(false); return; }
+      if (activeSlot !== null) setPartyActiveSlot(prev => prev.map((s, i) => i === activePartyIdx ? null : s));
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [showCharSheet, activeSlot, activePartyIdx]);
+
   // ─── Top-of-round effects ─────────────────────────────────────────────────
 
   useEffect(() => {
@@ -214,6 +234,22 @@ export default function GameScreen({ party, setParty: _setParty }: Props) {
           idx === i
             ? hots.map(h => ({ ...h, roundsRemaining: h.roundsRemaining - 1 })).filter(h => h.roundsRemaining > 0)
             : hots
+        ));
+      }
+
+      // DoT ticks
+      const memberDots = partyDotsRef.current[i] ?? [];
+      if (memberDots.length > 0) {
+        const totalDotDamage = memberDots.reduce((sum, d) => sum + d.damagePerRound, 0);
+        if (totalDotDamage > 0) {
+          setPartyHp(prev => prev.map((hp, idx) => idx === i ? Math.max(0, hp - totalDotDamage) : hp));
+          const pos = partyPosRef.current[i] ?? partyPosRef.current[0];
+          spawnFloat(pos.x, pos.y, `-${totalDotDamage}`, 'purple');
+        }
+        setPartyDots(prev => prev.map((dots, idx) =>
+          idx === i
+            ? dots.map(d => ({ ...d, roundsRemaining: d.roundsRemaining - 1 })).filter(d => d.roundsRemaining > 0)
+            : dots
         ));
       }
 
@@ -262,6 +298,7 @@ export default function GameScreen({ party, setParty: _setParty }: Props) {
     clearFloats();
     setPartyBuffs(party.map(() => []));
     setPartyHots(party.map(() => []));
+    setPartyDots(party.map(() => []));
 
     if (next === 'dungeon') {
       const config = DUNGEON_PRESETS.crypt;
@@ -398,12 +435,53 @@ export default function GameScreen({ party, setParty: _setParty }: Props) {
     });
   }, [party, spawnFloat]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Out-of-combat tick every 5 seconds
+  // Out-of-combat regen tick
   useEffect(() => {
     if (combat.active) return;
-    const id = setInterval(applyMoveTick, 5000);
+    const id = setInterval(applyMoveTick, OUT_OF_COMBAT_REGEN_INTERVAL_MS);
     return () => clearInterval(id);
   }, [combat.active, applyMoveTick]);
+
+  // ─── Loot pickup ─────────────────────────────────────────────────────────
+
+  const handleLootPickup = useCallback((pos: { x: number; y: number }) => {
+    if (!zone) return;
+    const key = `${pos.x},${pos.y}`;
+    const item = zone.droppedItems[key];
+    if (!item) return;
+    if (isFull(inventory)) {
+      spawnFloat(pos.x, pos.y, 'Inventory Full', '#ef4444');
+      return;
+    }
+    setInventory(prev => addItem(prev, item));
+    setDungeon(prev => prev ? {
+      ...prev,
+      zones: prev.zones.map((z, i) => i === currentZone
+        ? { ...z, droppedItems: Object.fromEntries(Object.entries(z.droppedItems).filter(([k]) => k !== key)) }
+        : z
+      ),
+    } : null);
+    spawnFloat(pos.x, pos.y, '+', '#facc15');
+  }, [zone, inventory, currentZone, spawnFloat]);
+
+  const lootPickupRef = useRef(handleLootPickup);
+  lootPickupRef.current = handleLootPickup;
+
+  const handleEquipItem = useCallback((inventoryIdx: number, charIdx: number) => {
+    const item = inventory[inventoryIdx];
+    if (!item) return;
+    const slot = item.slot;
+    const displaced = party[charIdx]?.gear[slot] ?? null;
+    // Swap: remove from inventory, optionally add displaced item back
+    setInventory(prev => {
+      let next = removeItem(prev, inventoryIdx);
+      if (displaced) next = addItem(next, displaced);
+      return next;
+    });
+    setParty(party.map((m, i) =>
+      i === charIdx ? { ...m, gear: { ...m.gear, [slot]: item } } : m
+    ));
+  }, [inventory, party, setParty]);
 
   // ─── Movement handler ────────────────────────────────────────────────────
 
@@ -415,6 +493,7 @@ export default function GameScreen({ party, setParty: _setParty }: Props) {
 
       if (activePartyIdx === 0) {
         setPlayerPos(newPos);
+        lootPickupRef.current(newPos);
       } else {
         setFollowerPositions(prev => prev.map((p, i) => i === activePartyIdx - 1 ? newPos : p));
       }
@@ -435,6 +514,7 @@ export default function GameScreen({ party, setParty: _setParty }: Props) {
       );
       setPlayerPos(newPos);
       setFollowerPositions([f1, f2]);
+      lootPickupRef.current(newPos);
     }
 
     // Check for newly aggroed enemies
@@ -502,7 +582,11 @@ export default function GameScreen({ party, setParty: _setParty }: Props) {
         }
         let selfThreat = 0;
         for (const eff of effects.filter(e => e.appliesTo === 'caster')) {
-          if (eff.type === 'heal') {
+          if (eff.type === 'damage') {
+            const roll = Math.floor(Math.random() * (eff.maxDamage - eff.minDamage + 1)) + eff.minDamage;
+            setPartyHp(prev => prev.map((hp, i) => i === activePartyIdx ? Math.max(0, hp - roll) : hp));
+            spawnFloat(activePartyPos.x, activePartyPos.y, `-${roll}`, 'red');
+          } else if (eff.type === 'heal') {
             const roll = Math.floor(Math.random() * (eff.maxHeal - eff.minHeal + 1)) + eff.minHeal;
             const healAmount = Math.max(0, roll + activeStats.healing);
             setPartyHp(prev => prev.map((hp, i) => i === activePartyIdx ? Math.min(activeStats.hp, hp + healAmount) : hp));
@@ -510,7 +594,7 @@ export default function GameScreen({ party, setParty: _setParty }: Props) {
             selfThreat += healAmount * 1.5;
           } else if (eff.type === 'hot') {
             setPartyHots(prev => prev.map((hots, i) => i === activePartyIdx
-              ? [...hots, { name: activeContent.name, damageElement: eff.damageElement, healPerRound: eff.healPerRound, roundsRemaining: eff.rounds }]
+              ? [...hots, { name: activeContent.name, damageElement: eff.damageElement, healPerRound: Math.floor(eff.healPerRound + activeStats.healing / 2), roundsRemaining: eff.rounds }]
               : hots));
             spawnFloat(activePartyPos.x, activePartyPos.y, '+HoT', 'green');
           } else if (eff.type === 'buff') {
@@ -528,12 +612,80 @@ export default function GameScreen({ party, setParty: _setParty }: Props) {
             spawnFloat(activePartyPos.x, activePartyPos.y, `${activeContent.name}!`, 'green');
             selfThreat += (Object.values(eff.stats) as number[]).reduce((s, v) => s + Math.abs(v), 0);
             selfThreat += (Object.values(eff.statsPercent ?? {}) as number[]).reduce((s, v) => s + Math.abs(v), 0);
+          } else if (eff.type === 'threat') {
+            selfThreat += eff.amount;
           }
         }
         setPartyMp(prev => prev.map((mp, i) => i === activePartyIdx ? mp - activeContent.mpCost : mp));
         setPartyActiveSlot(prev => prev.map((s, i) => i === activePartyIdx ? null : s));
         if (combat.active) {
           const gained = selfThreat * activeStats.threatMultiplier;
+          setCombat(prev => ({
+            ...prev,
+            playerActedThisTurn: true,
+            partyThreat: gained > 0
+              ? prev.partyThreat.map((t, i) => i === activePartyIdx ? t + gained : t)
+              : prev.partyThreat,
+          }));
+        }
+        return;
+      }
+
+      // Ally-targeting: fire on any party member tile, in or out of combat
+      if (activeContent.target === 'ally') {
+        let targetIdx: number | null = null;
+        if (targetPos.x === playerPos.x && targetPos.y === playerPos.y) {
+          targetIdx = 0;
+        } else {
+          const f = party.slice(1)
+            .map((_, i) => ({ idx: i + 1, pos: followerPositionsRef.current[i] }))
+            .find(({ pos }) => pos?.x === targetPos.x && pos?.y === targetPos.y);
+          if (f) targetIdx = f.idx;
+        }
+        if (targetIdx === null) {
+          setPartyActiveSlot(prev => prev.map((s, i) => i === activePartyIdx ? null : s));
+          return;
+        }
+        const targetMemberStats = partyAllStats[targetIdx] ?? activeStats;
+        let allyThreat = 0;
+        for (const eff of effects) {
+          const effIdx = eff.appliesTo === 'target' ? targetIdx : activePartyIdx;
+          const effStats = eff.appliesTo === 'target' ? targetMemberStats : activeStats;
+          const effPos = effIdx === 0 ? playerPos : (followerPositionsRef.current[effIdx - 1] ?? playerPos);
+          if (eff.type === 'heal') {
+            const roll = Math.floor(Math.random() * (eff.maxHeal - eff.minHeal + 1)) + eff.minHeal;
+            const healAmount = Math.max(0, roll + effStats.healing);
+            setPartyHp(prev => prev.map((hp, i) => i === effIdx ? Math.min(effStats.hp, hp + healAmount) : hp));
+            if (healAmount > 0) spawnFloat(effPos.x, effPos.y, `+${healAmount}`, 'green');
+            allyThreat += healAmount * 1.5;
+          } else if (eff.type === 'hot') {
+            setPartyHots(prev => prev.map((hots, i) => i === effIdx
+              ? [...hots, { name: activeContent.name, damageElement: eff.damageElement, healPerRound: Math.floor(eff.healPerRound + effStats.healing / 2), roundsRemaining: eff.rounds }]
+              : hots));
+            spawnFloat(effPos.x, effPos.y, '+HoT', 'green');
+          } else if (eff.type === 'buff') {
+            const newBuffs = (Object.entries(eff.stats) as [BuffableStat, number][]).map(([stat, amount]) => ({
+              id: `${activeContent.name}-${stat}-player-${effIdx}`,
+              source: activeContent.name, damageElement: eff.damageElement,
+              stat, amount, roundsRemaining: eff.rounds,
+            }));
+            const newPctBuffs = (Object.entries(eff.statsPercent ?? {}) as [BuffableStat, number][]).map(([stat, percent]) => ({
+              id: `${activeContent.name}-${stat}-pct-player-${effIdx}`,
+              source: activeContent.name, damageElement: eff.damageElement,
+              stat, amount: 0, percent, roundsRemaining: eff.rounds,
+            }));
+            setPartyBuffs(prev => prev.map((buffs, i) => i === effIdx ? [...buffs, ...newBuffs, ...newPctBuffs] : buffs));
+            spawnFloat(effPos.x, effPos.y, `${activeContent.name}!`, 'green');
+            allyThreat += (Object.values(eff.stats) as number[]).reduce((s, v) => s + Math.abs(v), 0);
+            allyThreat += (Object.values(eff.statsPercent ?? {}) as number[]).reduce((s, v) => s + Math.abs(v), 0);
+          } else if (eff.type === 'threat') {
+            allyThreat += eff.amount;
+          }
+        }
+        setPartyMp(prev => prev.map((mp, i) => i === activePartyIdx ? mp - activeContent.mpCost : mp));
+        setPartyActiveSlot(prev => prev.map((s, i) => i === activePartyIdx ? null : s));
+        if (combat.active) {
+          const gained = allyThreat * activeStats.threatMultiplier;
           setCombat(prev => ({
             ...prev,
             playerActedThisTurn: true,
@@ -605,13 +757,25 @@ export default function GameScreen({ party, setParty: _setParty }: Props) {
     const abilityEffects = activeContent !== 'weapon-attack' && typeof activeContent === 'object' ? activeContent.effects : [];
     const abilityDotEffect   = abilityEffects.find(e => e.type === 'dot'    && e.appliesTo === 'target') as Extract<Effect, { type: 'dot' }>    | undefined;
     const abilityDebuffEffect = abilityEffects.find(e => e.type === 'debuff' && e.appliesTo === 'target') as Extract<Effect, { type: 'debuff' }> | undefined;
+    // Extra on-hit damage effects for useWeapon abilities (e.g. Blessed Strike holy, Shadow Blade shadow)
+    const abilityExtraDamageEffects = (typeof activeContent === 'object' && activeContent?.useWeapon)
+      ? (abilityEffects.filter(e => e.type === 'damage' && e.appliesTo === 'target') as Extract<Effect, { type: 'damage' }>[])
+      : [];
     const hasDamage = activeContent === 'weapon-attack' || (typeof activeContent === 'object' && (!!activeContent.useWeapon || abilityEffects.some(e => e.type === 'damage')));
 
     const attackerElStats = activeStats.elementalStats[damageElement];
+    // Physical elements scale with attackCategory (melee/ranged); magical elements always use magic damage/pen.
+    // Magic attackCategory applies magic damage/pen bonus to ALL elements, even physical.
+    const isMagicRouted = !PHYSICAL_ELEMENTS.has(damageElement) || attackCategory === 'magic';
+    const categoryDamage = isMagicRouted ? activeStats.magic.damage : atkStats.damage;
+    const categoryPenetration = isMagicRouted ? activeStats.magic.penetration : atkStats.penetration;
+    const elementDamage = attackerElStats?.damage ?? 0;
+    const elementPenetration = attackerElStats?.penetration ?? 0;
+
     for (const enemy of targets) {
       const result = resolveAttack({
-        hitBonus: atkStats.hitBonus,
-        damageBonus: atkStats.damage,
+        hit: atkStats.hit,
+        damageBonus: categoryDamage,
         critChance: atkStats.crit,
         minDamage,
         maxDamage,
@@ -621,30 +785,57 @@ export default function GameScreen({ party, setParty: _setParty }: Props) {
         targetMagicResistance: enemy.stats.magicResistance,
         elementHit: attackerElStats?.hit,
         elementCrit: attackerElStats?.crit,
-        elementDamage: attackerElStats?.damage,
+        elementDamage,
         targetElementResistance: enemy.stats.elementalStats[damageElement]?.resistance,
+        categoryPenetration,
+        elementPenetration,
       });
 
+      const attackerLabel = party[activePartyIdx]?.characterName ?? `Party[${activePartyIdx}]`;
+      const targetLabel = `${enemy.classData.name} (lv${enemy.level})`;
       if (!result.hit) {
+        console.log(`[Combat] ${attackerLabel} → ${targetLabel}: MISS (${damageElement})`);
         spawnFloat(enemy.pos.x, enemy.pos.y, 'Missed!', 'white');
       } else if (result.dodged) {
+        console.log(`[Combat] ${attackerLabel} → ${targetLabel}: DODGED (${damageElement})`);
         spawnFloat(enemy.pos.x, enemy.pos.y, 'Dodged!', 'white');
       } else {
+        const hitType = result.crit ? 'CRIT' : 'HIT';
+        const critText = result.crit ? ' CRIT!' : '';
+        let totalFinalDamage = 0;
+
         if (hasDamage && result.finalDamage > 0) {
-          const critText = result.crit ? ' CRIT!' : '';
-          spawnFloat(enemy.pos.x, enemy.pos.y, `-${result.finalDamage}${critText}`, 'red');
+          totalFinalDamage += result.finalDamage;
+          console.log(`[Combat] ${attackerLabel} → ${targetLabel}: ${hitType} ${result.finalDamage} (${damageElement}) | roll=${result.weaponRoll} +cat=${categoryDamage} +el=${elementDamage} raw=${result.rawDamage} -DR=${result.damageReduction}`);
+          spawnFloat(enemy.pos.x, enemy.pos.y, `-${result.finalDamage}${critText}`, DAMAGE_ELEMENT_COLOR[damageElement]);
+        } else {
+          console.log(`[Combat] ${attackerLabel} → ${targetLabel}: ${hitType} (${damageElement})`);
         }
+
+        for (const eff of abilityExtraDamageEffects) {
+          const effEl = eff.damageElement;
+          const effElStats = activeStats.elementalStats[effEl];
+          const effCatDmg = (!PHYSICAL_ELEMENTS.has(effEl) || attackCategory === 'magic')
+            ? activeStats.magic.damage
+            : atkStats.damage;
+          const effElDmg = effElStats?.damage ?? 0;
+          let effRaw = (eff.minDamage + Math.floor(Math.random() * (eff.maxDamage - eff.minDamage + 1))) + effCatDmg + effElDmg;
+          if (result.crit) effRaw *= 2;
+          const effFinal = applyDR(effRaw, effEl, enemy.stats.armor, enemy.stats.magicResistance, enemy.stats.elementalStats[effEl]?.resistance);
+          totalFinalDamage += effFinal;
+          console.log(`[Combat] ${attackerLabel} → ${targetLabel}: +${effFinal}${critText} (${effEl}) | raw=${effRaw} -DR=${effRaw - effFinal}`);
+          spawnFloat(enemy.pos.x, enemy.pos.y, `-${effFinal}${critText}`, DAMAGE_ELEMENT_COLOR[effEl]);
+        }
+
+        if (totalFinalDamage > 0) damages.push({ id: enemy.id, damage: totalFinalDamage });
+
         if (abilityDotEffect) {
           dotTargets.push(enemy.id);
-          spawnFloat(enemy.pos.x, enemy.pos.y, 'Hit!', 'purple');
+          if (!hasDamage) spawnFloat(enemy.pos.x, enemy.pos.y, 'Hit!', 'purple');
         }
         if (abilityDebuffEffect) {
           debuffTargets.push(enemy.id);
         }
-      }
-
-      if (hasDamage && result.finalDamage > 0) {
-        damages.push({ id: enemy.id, damage: result.finalDamage });
       }
     }
 
@@ -663,9 +854,11 @@ export default function GameScreen({ party, setParty: _setParty }: Props) {
           dots: addDot ? [...e.dots, {
             name: activeContent !== 'weapon-attack' && typeof activeContent === 'object' ? activeContent.name : undefined,
             damageElement: abilityDotEffect!.damageElement,
-            damagePerRound: abilityDotEffect!.damagePerRound,
+            damagePerRound: Math.floor(abilityDotEffect!.damagePerRound + (categoryDamage + elementDamage) / 2),
             roundsRemaining: abilityDotEffect!.rounds,
             sourcePartyIdx: activePartyIdx,
+            armorPenetration: categoryPenetration,
+            elementPenetration,
           }] : e.dots,
         };
         if (addDebuff) {
@@ -685,6 +878,27 @@ export default function GameScreen({ party, setParty: _setParty }: Props) {
         }
         return updated;
       }));
+    }
+
+    // Check for kills and generate loot drops
+    if (damages.length > 0 && dungeon) {
+      const newDrops: Record<string, Item> = {};
+      for (const { id, damage } of damages) {
+        const enemy = enemies.find(e => e.id === id);
+        if (enemy && enemy.currentHp > 0 && enemy.currentHp - damage <= 0) {
+          const item = generateLootDrop(dungeon.baseEnemyLevel, enemy.classData.dropChance);
+          if (item) newDrops[`${enemy.pos.x},${enemy.pos.y}`] = item;
+        }
+      }
+      if (Object.keys(newDrops).length > 0) {
+        setDungeon(prev => prev ? {
+          ...prev,
+          zones: prev.zones.map((z, i) => i === currentZone
+            ? { ...z, droppedItems: { ...z.droppedItems, ...newDrops } }
+            : z
+          ),
+        } : null);
+      }
     }
 
     // Compute threat from this action: damage dealt + DoTs applied + debuffs applied
@@ -712,7 +926,7 @@ export default function GameScreen({ party, setParty: _setParty }: Props) {
           actionThreat += healAmount * 1.5;
         } else if (eff.type === 'hot') {
           setPartyHots(prev => prev.map((hots, i) => i === activePartyIdx
-            ? [...hots, { name: activeContent.name, damageElement: eff.damageElement, healPerRound: eff.healPerRound, roundsRemaining: eff.rounds }]
+            ? [...hots, { name: activeContent.name, damageElement: eff.damageElement, healPerRound: Math.floor(eff.healPerRound + activeStats.healing / 2), roundsRemaining: eff.rounds }]
             : hots));
         } else if (eff.type === 'buff') {
           const newBuffs = (Object.entries(eff.stats) as [BuffableStat, number][]).map(([stat, amount]) => ({
@@ -728,6 +942,8 @@ export default function GameScreen({ party, setParty: _setParty }: Props) {
           setPartyBuffs(prev => prev.map((buffs, i) => i === activePartyIdx ? [...buffs, ...newBuffs, ...newPctBuffs] : buffs));
           actionThreat += (Object.values(eff.stats) as number[]).reduce((s, v) => s + Math.abs(v), 0);
           actionThreat += (Object.values(eff.statsPercent ?? {}) as number[]).reduce((s, v) => s + Math.abs(v), 0);
+        } else if (eff.type === 'threat') {
+          actionThreat += eff.amount;
         }
       }
       setPartyMp(prev => prev.map((mp, i) => i === activePartyIdx ? mp - activeContent.mpCost : mp));
@@ -762,7 +978,7 @@ export default function GameScreen({ party, setParty: _setParty }: Props) {
   useEnemyTurn(
     combat, currentCombatant,
     enemyTurnRefs,
-    setEnemies, setPartyHp, setPartyBuffs, setCombat,
+    setEnemies, setPartyHp, setPartyBuffs, setCombat, setEnemyAoePreview, setEnemyTargetPartyIdx, setPartyDots,
   );
 
   // ─── Combat end detection ────────────────────────────────────────────────
@@ -822,6 +1038,10 @@ export default function GameScreen({ party, setParty: _setParty }: Props) {
                 activeAbility !== null && activeAbility !== 'weapon-attack' &&
                 typeof activeAbility === 'object' && activeAbility.target === 'self'
               }
+              isAllyTargetAbility={
+                activeAbility !== null && activeAbility !== 'weapon-attack' &&
+                typeof activeAbility === 'object' && activeAbility.target === 'ally'
+              }
               onAbilityUse={handlePlayerAttack}
               onAbilityDeselect={() => setPartyActiveSlot(prev => prev.map((s, i) => i === activePartyIdx ? null : s))}
               onMemberSelect={(idx: number) => setBarViewIdx(idx)}
@@ -845,6 +1065,10 @@ export default function GameScreen({ party, setParty: _setParty }: Props) {
               isSelfTargetAbility={
                 activeAbility !== null && activeAbility !== 'weapon-attack' &&
                 typeof activeAbility === 'object' && activeAbility.target === 'self'
+              }
+              isAllyTargetAbility={
+                activeAbility !== null && activeAbility !== 'weapon-attack' &&
+                typeof activeAbility === 'object' && activeAbility.target === 'ally'
               }
               activeAbilityArea={
                 activeAbility && typeof activeAbility === 'object' ? activeAbility.area : undefined
@@ -872,6 +1096,13 @@ export default function GameScreen({ party, setParty: _setParty }: Props) {
               portalPos={portalPos}
               partyBuffs={partyBuffs}
               partyHots={partyHots}
+              partyDots={partyDots}
+              floorColor={DUNGEON_PRESETS.crypt.floorColor}
+              wallColor={DUNGEON_PRESETS.crypt.wallColor}
+              enemyAoePreviewTiles={enemyAoePreview?.tiles}
+              enemyTargetPartyIdx={enemyTargetPartyIdx}
+              droppedItems={zone?.droppedItems}
+              onLootClick={handleLootPickup}
             />
           )}
         </div>
@@ -900,12 +1131,15 @@ export default function GameScreen({ party, setParty: _setParty }: Props) {
             characterName: m.characterName,
             selectedClass: m.selectedClass!,
             pointsSpent: m.pointsSpent,
+            skillPointsSpent: m.skillPointsSpent,
             gear: m.gear,
           }))}
           partyHp={partyHp}
           partyStats={partyAllStats}
           partyBuffs={partyBuffs}
+          inventory={inventory}
           onClose={() => setShowCharSheet(false)}
+          onEquipItem={handleEquipItem}
         />
       )}
     </div>

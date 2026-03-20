@@ -4,6 +4,8 @@ import { isShieldItem, type WeaponItem, type ArmorItem, type ShieldItem } from '
 import type { Ability } from '../data/classes';
 import type { Stats } from '../data/stats';
 import { DAMAGE_ELEMENT_COLOR } from '../data/constants';
+import { AREA_LABEL } from '../data/detailStrings';
+import { PiMouseRightClickFill } from 'react-icons/pi';
 
 // ─── Portal Tooltip wrapper ───────────────────────────────────────────────────
 
@@ -71,29 +73,37 @@ function Row({ label, children, valueClass = 'text-gray-200' }: {
   );
 }
 
-const AREA_LABEL: Record<string, string> = {
-  single: 'Single',
-  blast1:  'Blast 1',
-  blast2:  'Blast 2',
-  line:    'Line',
-};
+function EquipRow() {
+  return (
+    <>
+      <div className="border-t border-gray-700/60 mx-3" />
+      <div className="px-3 py-1.5 flex items-center gap-1.5 text-xs text-gray-400">
+        <PiMouseRightClickFill className="w-3.5 h-3.5 shrink-0" />
+        <span>Equip</span>
+      </div>
+    </>
+  );
+}
 
 // ─── Weapon tooltip ───────────────────────────────────────────────────────────
 
-export function WeaponTooltipContent({ item, stats }: { item: WeaponItem; stats?: Stats }) {
-  const bonus = stats ? stats[item.attackCategory].damage : null;
+export function WeaponTooltipContent({ item, stats, proficient }: { item: WeaponItem; stats?: Stats; proficient?: boolean }) {
+  const bonus = stats
+    ? stats[item.attackCategory].damage + (stats.elementalStats[item.damageElement]?.damage ?? 0)
+    : null;
+  const typeClass = proficient === false ? 'text-pink-400' : 'text-gray-500';
   return (
     <div className="min-w-[180px]">
       <div className="px-3 pt-2.5 pb-1.5 border-b border-gray-700">
         <p className="font-bold text-gray-100">{item.name}</p>
-        <p className="text-xs text-gray-500 mt-0.5 capitalize">{item.weaponType} · {item.attackCategory}</p>
+        <p className={`text-xs mt-0.5 capitalize ${typeClass}`}>{item.weaponType} · {item.attackCategory}</p>
       </div>
       <div className="px-3 py-2 space-y-1">
         <Row label="Base Damage" valueClass="text-gray-400">
           {item.minDamage}–{item.maxDamage}{' '}
           <ElementTag element={item.damageElement} />
         </Row>
-        {bonus !== null && (
+        {bonus !== null && bonus !== 0 && (
           <Row label="Damage" valueClass="text-red-400 font-medium">
             {item.minDamage + bonus}–{item.maxDamage + bonus}{' '}
             <ElementTag element={item.damageElement} />
@@ -101,20 +111,22 @@ export function WeaponTooltipContent({ item, stats }: { item: WeaponItem; stats?
         )}
         <Row label="Range">{item.range}</Row>
       </div>
+      {proficient && <EquipRow />}
     </div>
   );
 }
 
 // ─── Armor / Shield tooltip ───────────────────────────────────────────────────
 
-export function ArmorTooltipContent({ item }: { item: ArmorItem | ShieldItem }) {
+export function ArmorTooltipContent({ item, proficient }: { item: ArmorItem | ShieldItem; proficient?: boolean }) {
   const isShield = isShieldItem(item);
   const armor = item as ArmorItem;
+  const typeClass = proficient === false ? 'text-pink-400' : 'text-gray-500';
   return (
     <div className="min-w-[160px]">
       <div className="px-3 pt-2.5 pb-1.5 border-b border-gray-700">
         <p className="font-bold text-gray-100">{item.name}</p>
-        <p className="text-xs text-gray-500 mt-0.5">{item.armorType} {isShield ? 'Shield' : 'Armor'}</p>
+        <p className={`text-xs mt-0.5 ${typeClass}`}>{item.armorType} {isShield ? 'Shield' : 'Armor'}</p>
       </div>
       <div className="px-3 py-2 space-y-1">
         <Row label="Armor" valueClass="text-gray-200 font-medium">{item.armorValue}</Row>
@@ -122,6 +134,7 @@ export function ArmorTooltipContent({ item }: { item: ArmorItem | ShieldItem }) 
           <Row label="Magic Res" valueClass="text-purple-300 font-medium">{armor.magicResistance}</Row>
         )}
       </div>
+      {proficient && <EquipRow />}
     </div>
   );
 }
@@ -134,8 +147,15 @@ export function AbilityTooltipContent({ ability, stats, weapon }: {
   weapon?: WeaponItem | null;
 }) {
   const category = ability.useWeapon ? 'weapon' : ability.attackCategory;
-  const abilityBonus = stats && ability.attackCategory ? stats[ability.attackCategory].damage : null;
-  const weaponBonus  = stats && ability.useWeapon && weapon ? stats[weapon.attackCategory].damage : null;
+  const weaponBonus = stats && ability.useWeapon && weapon
+    ? stats[weapon.attackCategory].damage + (stats.elementalStats[weapon.damageElement]?.damage ?? 0)
+    : null;
+  const damageBonus = (element: string) => {
+    if (!stats) return 0;
+    const catBonus = ability.attackCategory ? stats[ability.attackCategory].damage : 0;
+    const elBonus = stats.elementalStats[element as keyof typeof stats.elementalStats]?.damage ?? 0;
+    return catBonus + elBonus;
+  };
   const hasEffects   = ability.useWeapon || ability.effects.length > 0;
 
   return (
@@ -162,7 +182,7 @@ export function AbilityTooltipContent({ ability, stats, weapon }: {
               <Row label="Base Damage" valueClass="text-gray-400">
                 {weapon ? <>{weapon.minDamage}–{weapon.maxDamage} <ElementTag element={weapon.damageElement} /></> : 'Weapon'}
               </Row>
-              {weapon && weaponBonus !== null && (
+              {weapon && weaponBonus !== null && weaponBonus !== 0 && (
                 <Row label="Damage" valueClass="text-red-400 font-medium">
                   {weapon.minDamage + weaponBonus}–{weapon.maxDamage + weaponBonus}{' '}
                   <ElementTag element={weapon.damageElement} />
@@ -173,19 +193,21 @@ export function AbilityTooltipContent({ ability, stats, weapon }: {
           {ability.effects.map((eff, i) => {
             const target = eff.appliesTo === 'caster' ? ' (self)' : '';
             switch (eff.type) {
-              case 'damage':
+              case 'damage': {
+                const bonus = damageBonus(eff.damageElement);
                 return (
                   <span key={i}>
                     <Row label="Base Damage" valueClass="text-gray-400">
                       {eff.minDamage}–{eff.maxDamage} <ElementTag element={eff.damageElement} />{target}
                     </Row>
-                    {abilityBonus !== null && (
+                    {stats && bonus !== 0 && (
                       <Row label="Damage" valueClass="text-red-400 font-medium">
-                        {eff.minDamage + abilityBonus}–{eff.maxDamage + abilityBonus} <ElementTag element={eff.damageElement} />{target}
+                        {eff.minDamage + bonus}–{eff.maxDamage + bonus} <ElementTag element={eff.damageElement} />{target}
                       </Row>
                     )}
                   </span>
                 );
+              }
               case 'dot':
                 return (
                   <Row key={i} label={`DoT${target}`} valueClass="text-orange-400">

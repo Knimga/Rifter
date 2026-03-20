@@ -1,6 +1,6 @@
 import type { EnemyInstance } from './enemies';
-import { recomputeEnemyStats } from './enemies';
 import type { Stats } from './stats';
+import { recomputeStats } from './stats';
 import { applyDR } from './attackResolution';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -43,7 +43,7 @@ export function startCombat(
       .filter(e => e.currentHp > 0)
       .map(e => ({
         id: e.id,
-        name: e.type.name,
+        name: e.classData.name,
         initiativeRoll: d20() + e.stats.initiative,
         isPlayer: false,
       })),
@@ -72,7 +72,7 @@ export function joinCombat(state: CombatState, newEnemies: EnemyInstance[]): Com
 
   const newCombatants: Combatant[] = newEnemies.map(e => ({
     id: e.id,
-    name: e.type.name,
+    name: e.classData.name,
     initiativeRoll: d20() + e.stats.initiative,
     isPlayer: false,
   }));
@@ -149,7 +149,7 @@ export function applyTopOfRound(enemies: EnemyInstance[]): { enemies: EnemyInsta
       .map(b => ({ ...b, roundsRemaining: b.roundsRemaining - 1 }))
       .filter(b => b.roundsRemaining > 0);
     const buffsChanged = newBuffs.length !== e.buffs.length;
-    const s = buffsChanged ? recomputeEnemyStats(e, newBuffs) : e.stats;
+    const s = buffsChanged ? recomputeStats({ mode: 'enemy', classData: e.classData, pointsSpent: e.pointsSpent, level: e.level }, newBuffs) : e.stats;
 
     // Regen (using current effective stats)
     let hp = Math.min(s.hp, e.currentHp + s.hpRegen);
@@ -169,7 +169,7 @@ export function applyTopOfRound(enemies: EnemyInstance[]): { enemies: EnemyInsta
     const threatSourceMap = new Map<number, number>();
     const remainingDots = e.dots
       .map(dot => {
-        const tickDamage = applyDR(dot.damagePerRound, dot.damageElement, s.armor, s.magicResistance);
+        const tickDamage = applyDR(dot.damagePerRound, dot.damageElement, s.armor, s.magicResistance, undefined, dot.armorPenetration, dot.elementPenetration);
         totalDotDamage += tickDamage;
         if (dot.sourcePartyIdx !== undefined) {
           threatSourceMap.set(dot.sourcePartyIdx, (threatSourceMap.get(dot.sourcePartyIdx) ?? 0) + tickDamage);

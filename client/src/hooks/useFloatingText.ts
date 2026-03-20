@@ -7,7 +7,12 @@ export function useFloatingText() {
 
   const spawnFloat = useCallback((gridX: number, gridY: number, text: string, color: FloatingText['color']) => {
     const id = nextId.current++;
-    setFloatingTexts(prev => [...prev, { id, gridX, gridY, text, color }]);
+    setFloatingTexts(prev => {
+      const count = prev.filter(f => f.gridX === gridX && f.gridY === gridY).length;
+      // Spread floats at the same tile: 0, -18, +18, -36, +36, ...
+      const offsetX = count === 0 ? 0 : count % 2 === 1 ? -(Math.ceil(count / 2) * 18) : Math.ceil(count / 2) * 18;
+      return [...prev, { id, gridX, gridY, text, color, offsetX }];
+    });
   }, []);
 
   const removeFloat = useCallback((id: number) => {

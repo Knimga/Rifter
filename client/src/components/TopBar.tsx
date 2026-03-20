@@ -55,9 +55,9 @@ export default function TopBar({
                 <div key={i} className={`bg-gray-800 px-3 py-2 rounded text-xs min-w-[120px] ${isActive ? 'ring-2 ring-yellow-400' : ''}`}>
                   <div className="font-semibold mb-1" style={{ color: CLASSES[m.selectedClass!].color }}>{m.characterName}</div>
                   <div className="flex items-center gap-1 mb-0.5">
-                    <span className="text-green-400 font-bold w-6">HP</span>
+                    <span className="text-red-400 font-bold w-6">HP</span>
                     <div className="flex-1 h-2 bg-gray-700 rounded-full overflow-hidden">
-                      <div className="h-full bg-green-500 transition-all" style={{ width: `${(hp / memberStats.hp) * 100}%` }} />
+                      <div className="h-full bg-red-500 transition-all" style={{ width: `${(hp / memberStats.hp) * 100}%` }} />
                     </div>
                     <span className="text-gray-300 w-14 text-right">{hp}/{memberStats.hp}</span>
                   </div>

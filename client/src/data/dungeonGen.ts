@@ -1,4 +1,5 @@
-import type { EnemyType, EnemyInstance } from './enemies';
+import type { EnemyClassData, EnemyInstance } from './enemies';
+import type { Item } from './gear';
 import { generateEnemyInstance } from './enemies';
 
 // ─── Core Types ──────────────────────────────────────────────────────────────
@@ -30,27 +31,43 @@ export interface ZoneData {
   floors: Set<string>;   // "x,y" keys for all walkable tiles
   rooms: Room[];
   doors: Door[];
+  droppedItems: Record<string, Item>; // "x,y" → item dropped at that tile
 }
 
 export interface DungeonData {
   zones: ZoneData[];
   startZoneId: number;
-  endZoneId: number;
+  endZoneId: number;     // boss zone — portal lives here
   playerStart: Pos;
   portalPos: Pos;
+  baseEnemyLevel: number;
+}
+
+// ─── Config Types ─────────────────────────────────────────────────────────────
+
+export interface ZoneConfig {
+  minRoomSize: number;
+  maxRoomSize: number;
+  splitDepth: number;
+  corridorWidth: number;
+  enemyGroups: EnemyClassData[][];  // one group chosen at random per room
+}
+
+export interface BossZoneConfig {
+  roomSize: number;       // boss room is a square of this side length
+  corridorWidth: number;  // corridor connecting boss room to antechamber
+  bossGroup: EnemyClassData[];  // placed scattered in the boss room center
 }
 
 export interface DungeonConfig {
   name: string;
-  width: number;
-  height: number;
-  minRoomSize: number;     // minimum interior dimension for a room
-  maxRoomSize: number;     // maximum interior dimension for a room
-  splitDepth: number;      // BSP recursion depth
-  corridorWidth: number;   // corridor width in tiles (1-3)
-  maxZones: number;        // maximum number of zones (min 2)
-  baseEnemyLevel: number;  // enemy level in zone 0; zone n gets baseEnemyLevel + n
-  enemyGroups: EnemyType[][];  // possible group compositions; one picked at random per room
+  width: number;          // applies to all regular zones
+  height: number;         // applies to all regular zones
+  baseEnemyLevel: number;
+  zones: ZoneConfig[];    // regular zones, chained linearly: 0 → 1 → … → boss
+  bossZone: BossZoneConfig;
+  floorColor: string;     // hex color for walkable floor tiles
+  wallColor: string;      // hex color for wall/non-floor tiles
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -75,8 +92,13 @@ interface BSPNode {
   room?: Room;
 }
 
-function splitBSP(node: BSPNode, depth: number, config: DungeonConfig, nextId: { value: number }): void {
-  const minLeaf = config.minRoomSize + 2; // room + 1 tile padding each side
+function splitBSP(
+  node: BSPNode,
+  depth: number,
+  zoneConfig: Pick<ZoneConfig, 'minRoomSize' | 'maxRoomSize'>,
+  nextId: { value: number },
+): void {
+  const minLeaf = zoneConfig.minRoomSize + 2; // room + 1 tile padding each side
 
   if (depth > 0) {
     const canSplitH = node.h >= minLeaf * 2;
@@ -100,19 +122,19 @@ function splitBSP(node: BSPNode, depth: number, config: DungeonConfig, nextId: {
         node.right = { x: node.x + at, y: node.y, w: node.w - at, h: node.h };
       }
 
-      splitBSP(node.left, depth - 1, config, nextId);
-      splitBSP(node.right, depth - 1, config, nextId);
+      splitBSP(node.left, depth - 1, zoneConfig, nextId);
+      splitBSP(node.right, depth - 1, zoneConfig, nextId);
       return;
     }
   }
 
   // Leaf — create room
-  const maxW = Math.min(config.maxRoomSize, node.w - 2);
-  const maxH = Math.min(config.maxRoomSize, node.h - 2);
-  if (maxW < config.minRoomSize || maxH < config.minRoomSize) return; // too small
+  const maxW = Math.min(zoneConfig.maxRoomSize, node.w - 2);
+  const maxH = Math.min(zoneConfig.maxRoomSize, node.h - 2);
+  if (maxW < zoneConfig.minRoomSize || maxH < zoneConfig.minRoomSize) return;
 
-  const rw = randInt(config.minRoomSize, maxW);
-  const rh = randInt(config.minRoomSize, maxH);
+  const rw = randInt(zoneConfig.minRoomSize, maxW);
+  const rh = randInt(zoneConfig.minRoomSize, maxH);
   const rx = node.x + 1 + randInt(0, node.w - 2 - rw);
   const ry = node.y + 1 + randInt(0, node.h - 2 - rh);
 
@@ -184,32 +206,118 @@ function buildFloorSet(rooms: Room[]): Set<string> {
   return floors;
 }
 
-// ─── Single Zone Generator ──────────────────────────────────────────────────
+// ─── Regular Zone Generator ──────────────────────────────────────────────────
 
-function generateZone(id: number, config: DungeonConfig): ZoneData {
+function generateZone(id: number, width: number, height: number, zoneConfig: ZoneConfig): ZoneData {
   const nextId = { value: 0 };
-  const root: BSPNode = { x: 1, y: 1, w: config.width - 2, h: config.height - 2 };
+  const root: BSPNode = { x: 1, y: 1, w: width - 2, h: height - 2 };
 
-  splitBSP(root, config.splitDepth, config, nextId);
+  splitBSP(root, zoneConfig.splitDepth, zoneConfig, nextId);
 
   const rooms = collectRooms(root);
   const floors = buildFloorSet(rooms);
 
-  connectBSP(root, floors, config.corridorWidth);
+  connectBSP(root, floors, zoneConfig.corridorWidth);
 
+  return { id, width, height, floors, rooms, doors: [], droppedItems: {} };
+}
+
+// ─── Boss Zone Generator ──────────────────────────────────────────────────────
+
+const ANTECHAMBER_SIZE = 5;
+// Enough padding on all 4 sides for: 1 border + antechamber + corridor gap
+const BOSS_ZONE_PADDING = 9;
+
+type CardinalDir = 'north' | 'south' | 'east' | 'west';
+
+function getEntryDirection(doorPos: Pos, bossRoom: Room): CardinalDir {
+  if (doorPos.y < bossRoom.y) return 'north';
+  if (doorPos.y >= bossRoom.y + bossRoom.h) return 'south';
+  if (doorPos.x < bossRoom.x) return 'west';
+  return 'east';
+}
+
+/** Generates just the main boss room. Antechamber is added after door placement. */
+function generateBossZoneMain(id: number, config: BossZoneConfig): { zone: ZoneData; bossRoom: Room } {
+  const zoneSize = config.roomSize + BOSS_ZONE_PADDING * 2;
+  const half = Math.floor((zoneSize - config.roomSize) / 2);
+  const bossRoom: Room = { id: 0, x: half, y: half, w: config.roomSize, h: config.roomSize };
+  const floors = buildFloorSet([bossRoom]);
   return {
-    id,
-    width: config.width,
-    height: config.height,
-    floors,
-    rooms,
-    doors: [],
+    zone: { id, width: zoneSize, height: zoneSize, floors, rooms: [bossRoom], doors: [], droppedItems: {} },
+    bossRoom,
   };
+}
+
+/**
+ * Adds an antechamber (small room) in a random cardinal direction that is not
+ * the entry direction, connects it with a corridor, and returns the portal position.
+ */
+function addBossAntechamber(
+  zone: ZoneData,
+  bossRoom: Room,
+  entryDir: CardinalDir,
+  corridorWidth: number,
+): Pos {
+  const all: CardinalDir[] = ['north', 'south', 'east', 'west'];
+  const dirs = all.filter(d => d !== entryDir);
+  const dir = dirs[randInt(0, dirs.length - 1)];
+
+  const cx = Math.floor(bossRoom.x + bossRoom.w / 2);
+  const cy = Math.floor(bossRoom.y + bossRoom.h / 2);
+  const A = ANTECHAMBER_SIZE;
+
+  let antRoom: Room;
+
+  switch (dir) {
+    case 'north': {
+      const ax = cx - Math.floor(A / 2);
+      const ay = 1;
+      antRoom = { id: 1, x: ax, y: ay, w: A, h: A };
+      // corridor from antechamber south edge to boss room north wall
+      drawVCorridor(ay + A, bossRoom.y - 1, cx, zone.floors, corridorWidth);
+      break;
+    }
+    case 'south': {
+      const ax = cx - Math.floor(A / 2);
+      const ay = zone.height - 1 - A;
+      antRoom = { id: 1, x: ax, y: ay, w: A, h: A };
+      // corridor from boss room south wall to antechamber north edge
+      drawVCorridor(bossRoom.y + bossRoom.h, ay - 1, cx, zone.floors, corridorWidth);
+      break;
+    }
+    case 'east': {
+      const ax = zone.width - 1 - A;
+      const ay = cy - Math.floor(A / 2);
+      antRoom = { id: 1, x: ax, y: ay, w: A, h: A };
+      // corridor from boss room east wall to antechamber west edge
+      drawHCorridor(bossRoom.x + bossRoom.w, ax - 1, cy, zone.floors, corridorWidth);
+      break;
+    }
+    case 'west': {
+      const ax = 1;
+      const ay = cy - Math.floor(A / 2);
+      antRoom = { id: 1, x: ax, y: ay, w: A, h: A };
+      // corridor from antechamber east edge to boss room west wall
+      drawHCorridor(ax + A, bossRoom.x - 1, cy, zone.floors, corridorWidth);
+      break;
+    }
+  }
+
+  // Add antechamber floor tiles and register room
+  for (let x = antRoom.x; x < antRoom.x + antRoom.w; x++) {
+    for (let y = antRoom.y; y < antRoom.y + antRoom.h; y++) {
+      zone.floors.add(`${x},${y}`);
+    }
+  }
+  zone.rooms.push(antRoom);
+
+  return roomCenter(antRoom);
 }
 
 // ─── Zone Graph ─────────────────────────────────────────────────────────────
 
-/** Build a linear chain of connections: 0→1→2→...→N-1. */
+/** Build a linear chain: 0 → 1 → 2 → … → N-1. */
 function buildZoneGraph(zones: ZoneData[]): [number, number][] {
   const connections: [number, number][] = [];
   for (let i = 0; i < zones.length - 1; i++) {
@@ -220,46 +328,24 @@ function buildZoneGraph(zones: ZoneData[]): [number, number][] {
 
 // ─── Door Placement ─────────────────────────────────────────────────────────
 
-/**
- * Find wall tiles adjacent to at least one floor tile within a zone.
- * Prefers tiles on room perimeters.
- */
 function findDoorCandidates(zone: ZoneData): Pos[] {
   const candidates: Pos[] = [];
 
   for (const room of zone.rooms) {
-    // Check tiles just outside each room edge
-    // Top edge (y = room.y - 1)
     for (let x = room.x; x < room.x + room.w; x++) {
-      const y = room.y - 1;
-      if (y >= 0 && !zone.floors.has(`${x},${y}`)) {
-        candidates.push({ x, y });
-      }
+      const yTop = room.y - 1;
+      if (yTop >= 0 && !zone.floors.has(`${x},${yTop}`)) candidates.push({ x, y: yTop });
+      const yBot = room.y + room.h;
+      if (yBot < zone.height && !zone.floors.has(`${x},${yBot}`)) candidates.push({ x, y: yBot });
     }
-    // Bottom edge (y = room.y + room.h)
-    for (let x = room.x; x < room.x + room.w; x++) {
-      const y = room.y + room.h;
-      if (y < zone.height && !zone.floors.has(`${x},${y}`)) {
-        candidates.push({ x, y });
-      }
-    }
-    // Left edge (x = room.x - 1)
     for (let y = room.y; y < room.y + room.h; y++) {
-      const x = room.x - 1;
-      if (x >= 0 && !zone.floors.has(`${x},${y}`)) {
-        candidates.push({ x, y });
-      }
-    }
-    // Right edge (x = room.x + room.w)
-    for (let y = room.y; y < room.y + room.h; y++) {
-      const x = room.x + room.w;
-      if (x < zone.width && !zone.floors.has(`${x},${y}`)) {
-        candidates.push({ x, y });
-      }
+      const xLeft = room.x - 1;
+      if (xLeft >= 0 && !zone.floors.has(`${xLeft},${y}`)) candidates.push({ x: xLeft, y });
+      const xRight = room.x + room.w;
+      if (xRight < zone.width && !zone.floors.has(`${xRight},${y}`)) candidates.push({ x: xRight, y });
     }
   }
 
-  // Deduplicate
   const seen = new Set<string>();
   return candidates.filter(p => {
     const key = `${p.x},${p.y}`;
@@ -269,9 +355,6 @@ function findDoorCandidates(zone: ZoneData): Pos[] {
   });
 }
 
-/**
- * Place a pair of doors connecting two zones. Mutates both zones' doors arrays.
- */
 function placeDoorPair(
   zoneA: ZoneData,
   zoneB: ZoneData,
@@ -299,32 +382,39 @@ function placeDoorPair(
 // ─── Main Generator ─────────────────────────────────────────────────────────
 
 export function generateDungeon(config: DungeonConfig): DungeonData {
-  const numZones = Math.max(2, randInt(2, config.maxZones));
+  const numRegularZones = config.zones.length;
+  const bossZoneId = numRegularZones;
 
-  // Generate each zone independently
+  // Generate regular zones
   const zones: ZoneData[] = [];
-  for (let i = 0; i < numZones; i++) {
-    zones.push(generateZone(i, config));
+  for (let i = 0; i < numRegularZones; i++) {
+    zones.push(generateZone(i, config.width, config.height, config.zones[i]));
   }
 
-  // Build zone graph and place doors
+  // Generate boss zone (main room only — antechamber added after door placement)
+  const { zone: bossZone, bossRoom } = generateBossZoneMain(bossZoneId, config.bossZone);
+  zones.push(bossZone);
+
+  // Build linear chain and place doors
   const connections = buildZoneGraph(zones);
   const usedDoorPositions = new Set<string>();
   const nextDoorId = { value: 0 };
-
   for (const [a, b] of connections) {
     placeDoorPair(zones[a], zones[b], usedDoorPositions, nextDoorId);
   }
 
-  const startZoneId = 0;
-  const endZoneId = numZones - 1;
+  // Determine entry direction from the boss zone's entry door, then add antechamber
+  const entryDoor = bossZone.doors[0];
+  const entryDir = entryDoor ? getEntryDirection(entryDoor.pos, bossRoom) : 'south';
+  const portalPos = addBossAntechamber(bossZone, bossRoom, entryDir, config.bossZone.corridorWidth);
 
   return {
     zones,
-    startZoneId,
-    endZoneId,
-    playerStart: roomCenter(zones[startZoneId].rooms[0]),
-    portalPos: roomCenter(zones[endZoneId].rooms[zones[endZoneId].rooms.length - 1]),
+    startZoneId: 0,
+    endZoneId: bossZoneId,
+    playerStart: roomCenter(zones[0].rooms[0]),
+    portalPos,
+    baseEnemyLevel: config.baseEnemyLevel,
   };
 }
 
@@ -340,7 +430,6 @@ export function spawnDungeonEnemies(dungeon: DungeonData, config: DungeonConfig)
     `${dungeon.endZoneId}:${dungeon.portalPos.x},${dungeon.portalPos.y}`,
   ]);
 
-  // Also mark door positions as occupied
   for (const zone of dungeon.zones) {
     for (const door of zone.doors) {
       occupied.add(`${zone.id}:${door.pos.x},${door.pos.y}`);
@@ -348,28 +437,27 @@ export function spawnDungeonEnemies(dungeon: DungeonData, config: DungeonConfig)
   }
 
   for (const zone of dungeon.zones) {
-    // Entrance room of the start zone has no enemies
+    const isBossZone = zone.id === dungeon.endZoneId;
     const isStartZone = zone.id === dungeon.startZoneId;
-    const eligibleRooms = isStartZone ? zone.rooms.slice(1) : zone.rooms;
-    if (eligibleRooms.length === 0 || config.enemyGroups.length === 0) continue;
 
-    // More than half of eligible rooms get a group
-    const groupCount = Math.ceil(eligibleRooms.length / 2) + randInt(0, Math.floor(eligibleRooms.length / 4));
-    const roomCount = Math.min(groupCount, eligibleRooms.length);
+    if (isBossZone) {
+      // Place boss group scattered in the center half of the boss room
+      const bossRoom = zone.rooms[0];
+      const group = config.bossZone.bossGroup;
+      if (group.length === 0) continue;
 
-    const shuffled = [...eligibleRooms].sort(() => Math.random() - 0.5);
-    const selectedRooms = shuffled.slice(0, roomCount);
-
-    for (const room of selectedRooms) {
-      const group = config.enemyGroups[randInt(0, config.enemyGroups.length - 1)];
       const groupId = nextGroupId++;
+      const subX = bossRoom.x + Math.floor(bossRoom.w / 4);
+      const subY = bossRoom.y + Math.floor(bossRoom.h / 4);
+      const subW = Math.ceil(bossRoom.w / 2);
+      const subH = Math.ceil(bossRoom.h / 2);
 
       for (const type of group) {
         let x: number, y: number, key: string;
         let attempts = 0;
         do {
-          x = room.x + Math.floor(Math.random() * room.w);
-          y = room.y + Math.floor(Math.random() * room.h);
+          x = subX + Math.floor(Math.random() * subW);
+          y = subY + Math.floor(Math.random() * subH);
           key = `${zone.id}:${x},${y}`;
           attempts++;
         } while (occupied.has(key) && attempts < 100);
@@ -380,6 +468,40 @@ export function spawnDungeonEnemies(dungeon: DungeonData, config: DungeonConfig)
         const id = `${type.id}-${globalIdx++}`;
         const level = config.baseEnemyLevel + zone.id;
         instances.push(generateEnemyInstance(type, level, id, { x, y }, zone.id, groupId));
+      }
+    } else {
+      // Regular zone: one random group per selected room
+      const zoneConfig = config.zones[zone.id];
+      if (!zoneConfig || zoneConfig.enemyGroups.length === 0) continue;
+
+      const eligibleRooms = isStartZone ? zone.rooms.slice(1) : zone.rooms;
+      if (eligibleRooms.length === 0) continue;
+
+      const groupCount = Math.ceil(eligibleRooms.length / 2) + randInt(0, Math.floor(eligibleRooms.length / 4));
+      const roomCount = Math.min(groupCount, eligibleRooms.length);
+      const selectedRooms = [...eligibleRooms].sort(() => Math.random() - 0.5).slice(0, roomCount);
+
+      for (const room of selectedRooms) {
+        const group = zoneConfig.enemyGroups[randInt(0, zoneConfig.enemyGroups.length - 1)];
+        const groupId = nextGroupId++;
+
+        for (const type of group) {
+          let x: number, y: number, key: string;
+          let attempts = 0;
+          do {
+            x = room.x + Math.floor(Math.random() * room.w);
+            y = room.y + Math.floor(Math.random() * room.h);
+            key = `${zone.id}:${x},${y}`;
+            attempts++;
+          } while (occupied.has(key) && attempts < 100);
+
+          if (attempts >= 100) continue;
+          occupied.add(key);
+
+          const id = `${type.id}-${globalIdx++}`;
+          const level = config.baseEnemyLevel + zone.id;
+          instances.push(generateEnemyInstance(type, level, id, { x, y }, zone.id, groupId));
+        }
       }
     }
   }

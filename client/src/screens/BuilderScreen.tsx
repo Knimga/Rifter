@@ -1,9 +1,11 @@
 import { Check } from 'lucide-react';
-import { CLASSES, type Ability, type ClassKey, type Passive, type ScalingPassive } from '../data/classes';
-import type { AttributeKey } from '../data/stats';
-import { BASE_ATTRIBUTES, TOTAL_POINTS, calculateStats, statSuffix } from '../data/stats';
+import { CLASSES, type Ability, type ClassKey } from '../data/classes';
+import type { AttributeKey, SkillKey } from '../data/stats';
+import { BASE_ATTRIBUTES, STARTING_ATTR_POINTS, STARTING_SKILL_POINTS, SKILL_KEYS, calculateStats, statSuffix } from '../data/stats';
 import { DAMAGE_ELEMENT_COLOR } from '../data/constants';
 import type { PartyMemberConfig } from '../data/party';
+import { Tooltip } from '../components/Tooltip';
+import { AttributeTooltips, SkillTooltips, AREA_LABEL, passiveBonusText, scalingPassiveText } from '../data/detailStrings';
 
 interface Props {
   party: PartyMemberConfig[];
@@ -14,31 +16,9 @@ interface Props {
   onBack: () => void;
 }
 
-const ATTRIBUTES: AttributeKey[] = ['strength', 'toughness', 'finesse', 'mind', 'spirit'];
+const ATTRIBUTES: AttributeKey[] = ['strength', 'toughness', 'finesse', 'mind', 'spirit', 'speed'];
 
-function formatStatLabel(key: string): string {
-  return key.replace('Bonus', '').replace(/([A-Z])/g, ' $1').trim().replace(/^\w/, c => c.toUpperCase());
-}
 
-function passiveBonusText(p: Passive, key: string): string {
-  const statKey = key.replace('Bonus', '');
-  const label = formatStatLabel(key);
-  const suffix = statSuffix(statKey);
-  const parts: string[] = [];
-  if (p.flat)    parts.push(`+${p.flat}${suffix}`);
-  if (p.percent) parts.push(`+${p.percent}%`);
-  return `${parts.join(' / ')} ${label}`;
-}
-
-function scalingPassiveText(sp: ScalingPassive): string {
-  const pct = Math.round(sp.factor * 100);
-  const src = sp.source === 'level' ? 'Level' : sp.source.charAt(0).toUpperCase() + sp.source.slice(1);
-  return `${pct}% of ${src} → ${formatStatLabel(sp.targetKey)}`;
-}
-
-const ABILITY_AREA_LABEL: Record<string, string> = {
-  single: 'Single', blast1: 'Blast 1', blast2: 'Blast 2', line: 'Line',
-};
 
 const EL_COLOR = DAMAGE_ELEMENT_COLOR as Record<string, string>;
 
@@ -48,14 +28,14 @@ function AbilityPane({ ability }: { ability: Ability }) {
     <div className="bg-gray-900 rounded p-2 text-left">
       <div className="flex items-center justify-between gap-2 mb-0.5">
         <div className="flex items-center gap-1.5">
-          <ability.icon className="w-3.5 h-3.5 text-gray-400 shrink-0" />
+          {ability.icon && <ability.icon className="w-3.5 h-3.5 shrink-0" style={{ color: DAMAGE_ELEMENT_COLOR[ability.displayElement ?? 'slashing'] }} />}
           <span className="font-bold text-xs" style={{ color: ability.displayElement ? DAMAGE_ELEMENT_COLOR[ability.displayElement] : 'rgb(229 231 235)' }}>{ability.name}</span>
         </div>
         <span className="text-blue-400 text-[10px] shrink-0">{ability.mpCost} MP</span>
       </div>
       <p className="text-[10px] text-gray-500 mb-1.5">
         {category && <span className="capitalize">{category} · </span>}
-        {ABILITY_AREA_LABEL[ability.area ?? 'single']} · range {ability.range}
+        {AREA_LABEL[ability.area ?? 'single']} · range {ability.range}
       </p>
       <div className="border-t border-gray-700 mb-1.5" />
       <div className="space-y-0.5 text-[10px]">
@@ -101,26 +81,37 @@ function AbilityPane({ ability }: { ability: Ability }) {
 }
 
 function isMemberComplete(m: PartyMemberConfig): boolean {
+  const attrSpent = Object.values(m.pointsSpent).reduce((a, b) => a + b, 0);
+  const skillSpent = Object.values(m.skillPointsSpent).reduce((a, b) => a + b, 0);
   return (
     m.characterName.trim() !== '' &&
     m.selectedClass !== null &&
-    Object.values(m.pointsSpent).reduce((a, b) => a + b, 0) === TOTAL_POINTS
+    attrSpent === STARTING_ATTR_POINTS &&
+    skillSpent === STARTING_SKILL_POINTS
   );
 }
 
 export default function BuilderScreen({ party, activeIdx, onSelectMember, onUpdateMember, onStart, onBack }: Props) {
   const member = party[activeIdx];
-  const { characterName, selectedClass, pointsSpent } = member;
+  const { characterName, selectedClass, pointsSpent, skillPointsSpent } = member;
 
   const canStart = party.every(isMemberComplete);
-  const remainingPoints = TOTAL_POINTS - Object.values(pointsSpent).reduce((a, b) => a + b, 0);
-  const stats = calculateStats(selectedClass, pointsSpent);
+  const remainingPoints = STARTING_ATTR_POINTS - Object.values(pointsSpent).reduce((a, b) => a + b, 0);
+  const remainingSkillPoints = STARTING_SKILL_POINTS - Object.values(skillPointsSpent).reduce((a, b) => a + b, 0);
+  const stats = calculateStats({ mode: 'player', classKey: selectedClass, pointsSpent, skillPointsSpent });
 
   const adjustPoints = (attr: AttributeKey, delta: number) => {
     const newValue = pointsSpent[attr] + delta;
     if (newValue < 0) return;
     if (delta > 0 && remainingPoints <= 0) return;
     onUpdateMember(activeIdx, { pointsSpent: { ...pointsSpent, [attr]: newValue } });
+  };
+
+  const adjustSkillPoints = (skill: SkillKey, delta: number) => {
+    const newValue = (skillPointsSpent[skill] ?? 0) + delta;
+    if (newValue < 0) return;
+    if (delta > 0 && remainingSkillPoints <= 0) return;
+    onUpdateMember(activeIdx, { skillPointsSpent: { ...skillPointsSpent, [skill]: newValue } });
   };
 
   return (
@@ -217,21 +208,19 @@ export default function BuilderScreen({ party, activeIdx, onSelectMember, onUpda
                         <div className="text-[10px] font-bold uppercase tracking-widest text-gray-500 mb-1">Weapons</div>
                         <p className="text-xs text-gray-300">{cd.weaponProficiencies.join(', ')}</p>
                       </div>
-                      <div className="bg-gray-800 rounded-md p-2.5 text-center">
+                      <div className="bg-gray-800 rounded-md p-2.5">
                         <div className="text-[10px] font-bold uppercase tracking-widest text-gray-500 mb-1.5">Passives</div>
-                        <div className="flex flex-wrap gap-1.5 justify-center">
+                        <div className="space-y-1">
                           {Object.entries(cd.passives).map(([key, p]) => (
-                            <div key={key} className="bg-gray-900 rounded p-2 whitespace-nowrap">
-                              <div className="font-bold text-xs text-gray-200">{p.name}</div>
-                              <div className="border-t border-gray-700 my-1" />
-                              <p className="text-[12px] text-gray-400 italic">{passiveBonusText(p, key)}</p>
+                            <div key={key}>
+                              <span className="font-bold text-xs text-gray-200">{p.name}: </span>
+                              <span className="text-[11px] text-gray-400 italic">{passiveBonusText(p, key)}</span>
                             </div>
                           ))}
                           {(cd.scalingPassives ?? []).map((sp, i) => (
-                            <div key={i} className="bg-gray-900 rounded p-2 whitespace-nowrap">
-                              <div className="font-bold text-xs text-gray-200">{sp.name}</div>
-                              <div className="border-t border-gray-700 my-1" />
-                              <p className="text-[12px] text-gray-400 italic">{scalingPassiveText(sp)}</p>
+                            <div key={i}>
+                              <span className="font-bold text-xs text-gray-200">{sp.name}: </span>
+                              <span className="text-[11px] text-gray-400 italic">{scalingPassiveText(sp)}</span>
                             </div>
                           ))}
                         </div>
@@ -273,7 +262,7 @@ export default function BuilderScreen({ party, activeIdx, onSelectMember, onUpda
           {/* Attribute Point Buy */}
           <div className="mb-8">
             <div className="flex justify-between items-center mb-4">
-              <h2 className="text-2xl font-semibold">Distribute Attribute Points</h2>
+              <h2 className="text-2xl font-semibold">Allocate Attributes</h2>
               <div className="text-xl font-bold">
                 Points Remaining:{' '}
                 <span className={remainingPoints === 0 ? 'text-green-500' : 'text-yellow-500'}>
@@ -285,8 +274,11 @@ export default function BuilderScreen({ party, activeIdx, onSelectMember, onUpda
             <div className="bg-gray-800 rounded-lg p-6">
               {ATTRIBUTES.map((attr) => (
                 <div key={attr} className="flex items-center justify-between py-3 border-b border-gray-700 last:border-b-0">
-                  <div className="flex-1">
-                    <div className="font-semibold text-lg capitalize">{attr}</div>
+                  <Tooltip
+                    className="flex-1 group"
+                    content={<div className="px-3 py-2 max-w-[240px]"><p className="italic text-gray-300 text-sm">{AttributeTooltips[attr]}</p></div>}
+                  >
+                    <div className="font-semibold text-lg capitalize group-hover:text-gray-300 transition-colors">{attr}</div>
                     <div className="text-sm text-gray-400">
                       {(() => {
                         const cd = selectedClass ? CLASSES[selectedClass] : null;
@@ -296,7 +288,7 @@ export default function BuilderScreen({ party, activeIdx, onSelectMember, onUpda
                         return `Base: ${BASE_ATTRIBUTES} + Spent: ${pointsSpent[attr]} + Class: ${classTotal}`;
                       })()}
                     </div>
-                  </div>
+                  </Tooltip>
                   <div className="flex items-center gap-4">
                     <button
                       onClick={() => adjustPoints(attr, -1)}
@@ -321,6 +313,58 @@ export default function BuilderScreen({ party, activeIdx, onSelectMember, onUpda
             </div>
           </div>
 
+          {/* Skill Point Buy */}
+          <div className="mb-8">
+            <div className="flex justify-between items-center mb-3">
+              <h2 className="text-lg font-semibold text-gray-300">Allocate Skills</h2>
+              <div className="text-sm font-semibold text-gray-400">
+                Points:{' '}
+                <span className={remainingSkillPoints === 0 ? 'text-green-500' : 'text-yellow-500'}>
+                  {remainingSkillPoints}
+                </span>
+              </div>
+            </div>
+
+            <div className="bg-gray-800 rounded-lg px-4 py-2">
+              {SKILL_KEYS.map((skill) => {
+                const classVal = selectedClass ? (CLASSES[selectedClass].skills[skill] ?? 0) : 0;
+                const spent = skillPointsSpent[skill] ?? 0;
+                return (
+                  <div key={skill} className="flex items-center justify-between py-1.5 border-b border-gray-700/50 last:border-b-0">
+                    <Tooltip
+                      className="flex-1 group"
+                      content={<div className="px-3 py-2 max-w-[240px]"><p className="italic text-gray-300 text-sm">{SkillTooltips[skill]}</p></div>}
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium capitalize text-gray-300 group-hover:text-gray-100 transition-colors">{skill}</span>
+                        {classVal > 0 && <span className="text-xs text-blue-400">+{classVal}</span>}
+                      </div>
+                    </Tooltip>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => adjustSkillPoints(skill, -1)}
+                        disabled={spent === 0}
+                        className="bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:text-gray-600 text-white font-bold w-7 h-7 rounded transition-colors text-sm"
+                      >
+                        -
+                      </button>
+                      <div className="text-base font-bold w-8 text-center text-yellow-500">
+                        {stats.skills[skill]}
+                      </div>
+                      <button
+                        onClick={() => adjustSkillPoints(skill, 1)}
+                        disabled={remainingSkillPoints === 0}
+                        className="bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:text-gray-600 text-white font-bold w-7 h-7 rounded transition-colors text-sm"
+                      >
+                        +
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
           {/* Stats Preview */}
           <div className="mb-8">
             <h2 className="text-2xl font-semibold mb-4">Final Stats (Level {stats.level})</h2>
@@ -340,8 +384,8 @@ export default function BuilderScreen({ party, activeIdx, onSelectMember, onUpda
                 <h3 className="text-lg font-bold mb-3 text-blue-400">Defense Stats</h3>
                 <div className="space-y-2 text-sm">
                   <div className="flex justify-between"><span className="text-gray-400">Armor:</span><span className="font-bold">{stats.armor}</span></div>
-                  <div className="flex justify-between"><span className="text-gray-400">Dodge:</span><span className="font-bold">{stats.dodge}%</span></div>
-                  <div className="flex justify-between"><span className="text-gray-400">Magic Resistance:</span><span className="font-bold">{stats.magicResistance}</span></div>
+                  <div className="flex justify-between"><span className="text-gray-400">Dodge:</span><span className="font-bold">{stats.dodge}{statSuffix('dodge')}</span></div>
+                  <div className="flex justify-between"><span className="text-gray-400">Magic Resistance:</span><span className="font-bold">{stats.magicResistance}{statSuffix('magicResistance')}</span></div>
                   <div className="flex justify-between"><span className="text-gray-400">Healing:</span><span className="font-bold">{stats.healing}</span></div>
                 </div>
               </div>
@@ -349,27 +393,27 @@ export default function BuilderScreen({ party, activeIdx, onSelectMember, onUpda
               <div className="bg-gray-800 rounded-lg p-4">
                 <h3 className="text-lg font-bold mb-3 text-red-400">Melee</h3>
                 <div className="space-y-2 text-sm">
-                  <div className="flex justify-between"><span className="text-gray-400">Hit Bonus:</span><span className="font-bold">{stats.melee.hitBonus}%</span></div>
+                  <div className="flex justify-between"><span className="text-gray-400">Hit Bonus:</span><span className="font-bold">{stats.melee.hit}{statSuffix('meleeHit')}</span></div>
                   <div className="flex justify-between"><span className="text-gray-400">Damage:</span><span className="font-bold">{stats.melee.damage}</span></div>
-                  <div className="flex justify-between"><span className="text-gray-400">Crit Chance:</span><span className="font-bold">{stats.melee.crit}%</span></div>
+                  <div className="flex justify-between"><span className="text-gray-400">Crit Chance:</span><span className="font-bold">{stats.melee.crit}{statSuffix('meleeCrit')}</span></div>
                 </div>
               </div>
 
               <div className="bg-gray-800 rounded-lg p-4">
                 <h3 className="text-lg font-bold mb-3 text-green-400">Ranged</h3>
                 <div className="space-y-2 text-sm">
-                  <div className="flex justify-between"><span className="text-gray-400">Hit Bonus:</span><span className="font-bold">{stats.ranged.hitBonus}%</span></div>
+                  <div className="flex justify-between"><span className="text-gray-400">Hit Bonus:</span><span className="font-bold">{stats.ranged.hit}{statSuffix('rangedHit')}</span></div>
                   <div className="flex justify-between"><span className="text-gray-400">Damage:</span><span className="font-bold">{stats.ranged.damage}</span></div>
-                  <div className="flex justify-between"><span className="text-gray-400">Crit Chance:</span><span className="font-bold">{stats.ranged.crit}%</span></div>
+                  <div className="flex justify-between"><span className="text-gray-400">Crit Chance:</span><span className="font-bold">{stats.ranged.crit}{statSuffix('rangedCrit')}</span></div>
                 </div>
               </div>
 
               <div className="bg-gray-800 rounded-lg p-4">
                 <h3 className="text-lg font-bold mb-3 text-purple-400">Magic</h3>
                 <div className="space-y-2 text-sm">
-                  <div className="flex justify-between"><span className="text-gray-400">Hit Bonus:</span><span className="font-bold">{stats.magic.hitBonus}%</span></div>
+                  <div className="flex justify-between"><span className="text-gray-400">Hit Bonus:</span><span className="font-bold">{stats.magic.hit}{statSuffix('magicHit')}</span></div>
                   <div className="flex justify-between"><span className="text-gray-400">Damage:</span><span className="font-bold">{stats.magic.damage}</span></div>
-                  <div className="flex justify-between"><span className="text-gray-400">Crit Chance:</span><span className="font-bold">{stats.magic.crit}%</span></div>
+                  <div className="flex justify-between"><span className="text-gray-400">Crit Chance:</span><span className="font-bold">{stats.magic.crit}{statSuffix('magicCrit')}</span></div>
                 </div>
               </div>
             </div>
@@ -402,7 +446,9 @@ export default function BuilderScreen({ party, activeIdx, onSelectMember, onUpda
                 if (!m.characterName.trim()) issues.push('name required');
                 if (!m.selectedClass) issues.push('no class');
                 const spent = Object.values(m.pointsSpent).reduce((a, b) => a + b, 0);
-                if (spent < TOTAL_POINTS) issues.push(`${TOTAL_POINTS - spent} pts unspent`);
+                if (spent < STARTING_ATTR_POINTS) issues.push(`${STARTING_ATTR_POINTS - spent} attr pts unspent`);
+                const skillSpent = Object.values(m.skillPointsSpent).reduce((a, b) => a + b, 0);
+                if (skillSpent < STARTING_SKILL_POINTS) issues.push(`${STARTING_SKILL_POINTS - skillSpent} skill pts unspent`);
                 return (
                   <p key={i} className="text-yellow-500">
                     • {m.characterName.trim() || `Character ${i + 1}`}: {issues.join(' · ')}

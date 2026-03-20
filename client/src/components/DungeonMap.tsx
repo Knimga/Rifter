@@ -1,13 +1,15 @@
-import { useState, useMemo } from 'react';
-import { Home, DoorOpen } from 'lucide-react';
+import { useState, useMemo, createElement } from 'react';
+import { GiMagicPortal, GiDoorway } from 'react-icons/gi';
 import { CLASSES, type ClassKey, type AreaType } from '../data/classes';
-import type { ActiveBuff, ActiveHot } from '../data/stats';
-import type { EnemyInstance, ActiveDot } from '../data/enemies';
+import type { ActiveBuff, ActiveHot, ActiveDot } from '../data/stats';
+import type { EnemyInstance } from '../data/enemies';
 import type { ZoneData, Pos } from '../data/dungeonGen';
-import { chebyshev, hasLineOfSight, getAffectedTiles } from '../data/dungeonHelpers';
+import { chebyshev, hasLineOfSight, getAffectedTiles, isValidMoveTarget, brightenHex } from '../data/dungeonHelpers';
 import { TILE_SIZE, DAMAGE_ELEMENT_COLOR } from '../data/constants';
+import { isWeaponItem, isArmorItem, isShieldItem, type Item } from '../data/gear';
 import FloatingCombatText, { type FloatingText } from './FloatingCombatText';
 import { Tooltip } from './Tooltip';
+import MoveLine from './MoveLine';
 
 interface EffectDot {
   name: string;
@@ -15,7 +17,7 @@ interface EffectDot {
   sign: '+' | '-';
 }
 
-function computePlayerDots(buffs: ActiveBuff[], hots: ActiveHot[]): EffectDot[] {
+function computePlayerDots(buffs: ActiveBuff[], hots: ActiveHot[], activeDots: ActiveDot[] = []): EffectDot[] {
   const dots: EffectDot[] = [];
   const seen = new Set<string>();
   for (const buff of buffs) {
@@ -29,6 +31,9 @@ function computePlayerDots(buffs: ActiveBuff[], hots: ActiveHot[]): EffectDot[] 
   for (const hot of hots) {
     const color = hot.damageElement ? DAMAGE_ELEMENT_COLOR[hot.damageElement] : '#888';
     dots.push({ name: hot.name ?? 'HoT', color, sign: '+' });
+  }
+  for (const dot of activeDots) {
+    dots.push({ name: dot.name ?? `${dot.damageElement} DoT`, color: DAMAGE_ELEMENT_COLOR[dot.damageElement], sign: '-' });
   }
   return dots;
 }
@@ -95,6 +100,7 @@ interface Props {
   onDoorClick: (doorId: string) => void;
   activeAbility: unknown;
   isSelfTargetAbility: boolean;
+  isAllyTargetAbility: boolean;
   activeAbilityArea?: AreaType;
   aoeHighlightColor: 'red' | 'green';
   onAbilityDeselect: () => void;
@@ -115,9 +121,16 @@ interface Props {
   portalPos: Pos | null;
   partyBuffs: ActiveBuff[][];
   partyHots: ActiveHot[][];
+  partyDots?: ActiveDot[][];
+  floorColor: string;
+  wallColor: string;
+  enemyAoePreviewTiles?: Set<string>;
+  enemyTargetPartyIdx: number | null;
+  droppedItems?: Record<string, Item>;
+  onLootClick?: (pos: { x: number; y: number }) => void;
 }
 
-export default function DungeonMap({ selectedClass, playerPos, activeMoverPos, partyFollowers, movement, onMove, onLocationChange, onDoorClick, activeAbility, isSelfTargetAbility, activeAbilityArea, aoeHighlightColor, onAbilityDeselect, onMemberSelect, enemies, inCombat, isPlayerTurn, activeCombatantId, onAbilityUse, actionRange, playerHp, playerMaxHp, playerMp, playerMaxMp, floatingTexts, onFloatingTextComplete, zone, portalPos, partyBuffs, partyHots }: Props) {
+export default function DungeonMap({ selectedClass, playerPos, activeMoverPos, partyFollowers, movement, onMove, onLocationChange, onDoorClick, activeAbility, isSelfTargetAbility, isAllyTargetAbility, activeAbilityArea, aoeHighlightColor, onAbilityDeselect, onMemberSelect, enemies, inCombat, isPlayerTurn, activeCombatantId, onAbilityUse, actionRange, playerHp, playerMaxHp, playerMp, playerMaxMp, floatingTexts, onFloatingTextComplete, zone, portalPos, partyBuffs, partyHots, partyDots, floorColor, wallColor, enemyAoePreviewTiles, enemyTargetPartyIdx, droppedItems = {}, onLootClick }: Props) {
   const { width, height, floors, doors } = zone;
   const [hoveredTile, setHoveredTile] = useState<{ x: number; y: number } | null>(null);
 
@@ -137,9 +150,13 @@ export default function DungeonMap({ selectedClass, playerPos, activeMoverPos, p
   const doorAt = (x: number, y: number) =>
     doors.find(d => d.pos.x === x && d.pos.y === y);
 
+  const isMoveWalkable = (p: { x: number; y: number }) => floors.has(`${p.x},${p.y}`);
+  const isMoveOccupied = (p: { x: number; y: number }) => !!enemyAt(p.x, p.y) || partyFollowers.some(f => f.pos.x === p.x && f.pos.y === p.y);
+  const isMoveSpecial = (p: { x: number; y: number }) => portalPos !== null && portalPos.x === p.x && portalPos.y === p.y;
+
   // Single-target: highlight individual targetable enemies
   const isValidTarget = (enemy: EnemyInstance) =>
-    activeAbility && !isAoE && inCombat && isPlayerTurn &&
+    activeAbility && !isAoE && !isAllyTargetAbility && inCombat && isPlayerTurn &&
     chebyshev(activeMoverPos, enemy.pos) <= actionRange &&
     hasLineOfSight(activeMoverPos, enemy.pos, floors);
 
@@ -170,6 +187,11 @@ export default function DungeonMap({ selectedClass, playerPos, activeMoverPos, p
       if (isSelfTargetAbility) {
         // Self-target: only fires on own tile, deselects anywhere else
         onAbilityUse({ x, y });
+      } else if (isAllyTargetAbility) {
+        const isPartyMemberHere = (playerPos.x === x && playerPos.y === y) ||
+          partyFollowers.some(f => f.pos.x === x && f.pos.y === y);
+        if (isPartyMemberHere) onAbilityUse({ x, y });
+        else onAbilityDeselect();
       } else if (isAoE) {
         onAbilityUse({ x, y });
       } else if (enemy) {
@@ -181,6 +203,13 @@ export default function DungeonMap({ selectedClass, playerPos, activeMoverPos, p
     }
 
     if (enemy) return; // can't walk onto enemies
+
+    // Loot pickup: click adjacent dropped item out of combat
+    if (!inCombat && !activeAbility && droppedItems[`${x},${y}`] && isAdjacent(x, y)) {
+      onLootClick?.({ x, y });
+      return;
+    }
+
     // Out-of-combat: clicking a party member's token selects their action bar
     if (!inCombat) {
       if (playerPos.x === x && playerPos.y === y) { onMemberSelect(0); return; }
@@ -191,8 +220,7 @@ export default function DungeonMap({ selectedClass, playerPos, activeMoverPos, p
       if (!inCombat && isAdjacentToPortal) onLocationChange('sanctum');
       return;
     }
-    const distance = Math.max(Math.abs(x - activeMoverPos.x), Math.abs(y - activeMoverPos.y));
-    if (distance <= movement) onMove({ x, y });
+    if (isValidMoveTarget({ x, y }, activeMoverPos, movement, isMoveWalkable, isMoveOccupied, isMoveSpecial)) onMove({ x, y });
   };
 
   return (
@@ -211,35 +239,46 @@ export default function DungeonMap({ selectedClass, playerPos, activeMoverPos, p
                 const targetable = enemy && isValidTarget(enemy);
                 const isSelfTile = isSelfTargetAbility && inCombat && isPlayerTurn && x === activeMoverPos.x && y === activeMoverPos.y;
                 const isDoorAdjacent = door ? isAdjacent(x, y) : false;
+                const isLootAdjacent = !inCombat && !!droppedItems[`${x},${y}`] && isAdjacent(x, y);
                 const inAoEPreview = aoeTiles.has(`${x},${y}`);
+                const inEnemyAoePreview = !!enemyAoePreviewTiles?.has(`${x},${y}`);
+                const isEnemyTargeted = enemyTargetPartyIdx !== null && (
+                  (enemyTargetPartyIdx === 0 && isPlayer) ||
+                  (!!follower && follower.partyIndex === enemyTargetPartyIdx)
+                );
 
                 let cellClass: string;
+                let cellBgColor: string | undefined;
                 if (enemy && enemy.id === activeCombatantId) {
-                  cellClass = 'bg-gray-900 border-2 border-yellow-400';
-                } else if (isSelfTile) {
+                  cellClass = 'border-2 border-yellow-400';
+                  cellBgColor = floorColor;
+                } else if (isSelfTile || (isAllyTargetAbility && (isPlayer || !!follower))) {
                   cellClass = 'bg-green-900/40 border-2 border-green-400 cursor-crosshair';
-                } else if (targetable) {
+                } else if (targetable || isEnemyTargeted) {
                   cellClass = 'bg-gray-900 border-2 border-red-500 cursor-crosshair';
                 } else if (inAoEPreview) {
                   cellClass = aoeHighlightColor === 'green'
                     ? 'bg-green-900/60 border-green-700 cursor-crosshair'
                     : 'bg-red-900/60 border-red-700 cursor-crosshair';
                 } else if (inCombat && isPlayerTurn && x === activeMoverPos.x && y === activeMoverPos.y) {
-                  cellClass = 'bg-gray-900 border-gray-400/60';
+                  cellClass = 'border-gray-400/60';
+                  cellBgColor = floorColor;
                 } else if (door) {
                   cellClass = isDoorAdjacent && !inCombat
-                    ? 'bg-gray-950 border-gray-700/30 cursor-pointer'
-                    : 'bg-gray-950 border-gray-700/30';
+                    ? 'border-gray-700/30 cursor-pointer'
+                    : 'border-gray-700/30';
+                  cellBgColor = wallColor;
                 } else if (!floor) {
-                  cellClass = 'bg-gray-950 border-gray-700/30';
-                } else if (
-                  !activeAbility &&
-                  Math.max(Math.abs(x - activeMoverPos.x), Math.abs(y - activeMoverPos.y)) <= movement &&
-                  !(x === activeMoverPos.x && y === activeMoverPos.y) && !enemy && !follower && !isPortal
-                ) {
-                  cellClass = 'bg-gray-900 hover:bg-gray-800 border-gray-700/30';
+                  cellClass = 'border-gray-700/30';
+                  cellBgColor = wallColor;
+                } else if (!activeAbility && isValidMoveTarget({ x, y }, activeMoverPos, movement, isMoveWalkable, isMoveOccupied, isMoveSpecial)) {
+                  cellClass = 'border-gray-700/30';
+                  cellBgColor = hoveredTile?.x === x && hoveredTile?.y === y
+                    ? brightenHex(floorColor, 1.5)
+                    : floorColor;
                 } else {
-                  cellClass = 'bg-gray-900 border-gray-700/30';
+                  cellClass = 'border-gray-700/30';
+                  cellBgColor = floorColor;
                 }
 
                 return (
@@ -248,9 +287,29 @@ export default function DungeonMap({ selectedClass, playerPos, activeMoverPos, p
                     onClick={() => handleClick(x, y, floor, isPortal)}
                     onMouseEnter={() => setHoveredTile({ x, y })}
                     onMouseLeave={() => setHoveredTile(prev => prev?.x === x && prev?.y === y ? null : prev)}
-                    style={{ width: TILE_SIZE, height: TILE_SIZE }}
-                    className={`shrink-0 border flex items-center justify-center text-xs ${cellClass}`}
+                    style={{ width: TILE_SIZE, height: TILE_SIZE, ...(cellBgColor ? { backgroundColor: cellBgColor } : {}) }}
+                    className={`relative shrink-0 border flex items-center justify-center text-xs ${cellClass}`}
                   >
+                    {(() => {
+                      const item = floor ? droppedItems[`${x},${y}`] : undefined;
+                      if (!item) return null;
+                      const icon = (isWeaponItem(item) || isShieldItem(item)) && item.iconPath
+                        ? <img src={item.iconPath} className="w-5 h-5 object-contain" />
+                        : isArmorItem(item) && item.icon
+                          ? createElement(item.icon, { className: 'w-5 h-5 text-yellow-200' })
+                          : null;
+                      if (!icon) return null;
+                      return (
+                        <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-0">
+                          <div
+                            className={`transition-all ${isLootAdjacent ? 'animate-pulse' : 'opacity-70'}`}
+                            style={isLootAdjacent ? { filter: 'drop-shadow(0 0 5px rgba(234,179,8,0.9))' } : undefined}
+                          >
+                            {icon}
+                          </div>
+                        </div>
+                      );
+                    })()}
                     {isPlayer && (
                       <div className="relative w-full h-full flex items-center justify-center">
                         <div className="w-8 h-8 rounded-full" style={{ backgroundColor: CLASSES[selectedClass].color }} />
@@ -262,7 +321,7 @@ export default function DungeonMap({ selectedClass, playerPos, activeMoverPos, p
                             <div className="h-full bg-blue-500 transition-all" style={{ width: `${(playerMp / playerMaxMp) * 100}%` }} />
                           </div>
                         </div>
-                        <EffectDotRow dots={computePlayerDots(partyBuffs[0] ?? [], partyHots[0] ?? [])} />
+                        <EffectDotRow dots={computePlayerDots(partyBuffs[0] ?? [], partyHots[0] ?? [], partyDots?.[0] ?? [])} />
                       </div>
                     )}
                     {!isPlayer && follower && (
@@ -276,15 +335,15 @@ export default function DungeonMap({ selectedClass, playerPos, activeMoverPos, p
                             <div className="h-full bg-blue-500 transition-all" style={{ width: `${(follower.mp / follower.maxMp) * 100}%` }} />
                           </div>
                         </div>
-                        <EffectDotRow dots={computePlayerDots(partyBuffs[follower.partyIndex] ?? [], partyHots[follower.partyIndex] ?? [])} />
+                        <EffectDotRow dots={computePlayerDots(partyBuffs[follower.partyIndex] ?? [], partyHots[follower.partyIndex] ?? [], partyDots?.[follower.partyIndex] ?? [])} />
                       </div>
                     )}
                     {!isPlayer && !follower && enemy && (
                       <div
                         className="relative w-full h-full flex items-center justify-center cursor-pointer"
-                        onClick={() => console.log(`[${enemy.type.name} lv${enemy.level}]`, { attrs: enemy.attrs, stats: enemy.stats, weapon: enemy.type.weapon })}
+                        onClick={() => {}}
                       >
-                        <span className="text-lg leading-none">{enemy.type.token}</span>
+                        {createElement(enemy.classData.token, { className: 'w-7 h-7' })}
                         <div className="absolute bottom-0.5 left-1/2 -translate-x-1/2 w-8 h-1 bg-gray-700 rounded-full overflow-hidden">
                           <div
                             className="h-full bg-red-500 transition-all"
@@ -297,11 +356,11 @@ export default function DungeonMap({ selectedClass, playerPos, activeMoverPos, p
                     {!isPlayer && !follower && !enemy && door && (
                       <div
                         className={`transition-all ${isDoorAdjacent && !inCombat ? 'animate-pulse' : ''}`}
-                        style={{ filter: isDoorAdjacent && !inCombat ? 'drop-shadow(0 0 8px rgba(251,191,36,0.8))' : 'none' }}
-                        onMouseEnter={(e) => { if (isDoorAdjacent && !inCombat) (e.currentTarget as HTMLElement).style.filter = 'drop-shadow(0 0 12px rgba(251,191,36,1))'; }}
-                        onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.filter = isDoorAdjacent && !inCombat ? 'drop-shadow(0 0 8px rgba(251,191,36,0.8))' : 'none'; }}
+                        style={{ filter: isDoorAdjacent && !inCombat ? 'drop-shadow(0 0 8px rgba(209,213,219,0.8))' : 'none' }}
+                        onMouseEnter={(e) => { if (isDoorAdjacent && !inCombat) (e.currentTarget as HTMLElement).style.filter = 'drop-shadow(0 0 12px rgba(209,213,219,1))'; }}
+                        onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.filter = isDoorAdjacent && !inCombat ? 'drop-shadow(0 0 8px rgba(209,213,219,0.8))' : 'none'; }}
                       >
-                        <DoorOpen className="w-6 h-6 text-amber-400" />
+                        <GiDoorway className="w-8 h-8 text-gray-400" />
                       </div>
                     )}
                     {!isPlayer && !follower && !enemy && !door && isPortal && (
@@ -311,14 +370,38 @@ export default function DungeonMap({ selectedClass, playerPos, activeMoverPos, p
                         onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.filter = 'drop-shadow(0 0 12px rgba(34,211,238,1))'; }}
                         onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.filter = isAdjacentToPortal ? 'drop-shadow(0 0 8px rgba(34,211,238,0.8))' : 'none'; }}
                       >
-                        <Home className="w-6 h-6 text-cyan-400" />
+                        <GiMagicPortal className="w-9 h-9 text-cyan-400" />
                       </div>
+                    )}
+                    {inEnemyAoePreview && (
+                      <div className="absolute inset-0 bg-red-900/50 border border-red-600 pointer-events-none z-20 animate-pulse" />
                     )}
                   </div>
                 );
               })}
             </div>
           ))}
+
+          {/* Movement line overlay */}
+          {(() => {
+            if (activeAbility || !hoveredTile) return null;
+            if (inCombat && !isPlayerTurn) return null;
+            const { x: hx, y: hy } = hoveredTile;
+            if (!isValidMoveTarget({ x: hx, y: hy }, activeMoverPos, movement, isMoveWalkable, isMoveOccupied, isMoveSpecial)) return null;
+
+            const half = TILE_SIZE / 2;
+            const x1 = activeMoverPos.x * TILE_SIZE + half;
+            const y1 = activeMoverPos.y * TILE_SIZE + half;
+            const x2 = hx * TILE_SIZE + half;
+            const y2 = hy * TILE_SIZE + half;
+
+            return (
+              <MoveLine
+                svgWidth={width * TILE_SIZE} svgHeight={height * TILE_SIZE}
+                x1={x1} y1={y1} x2={x2} y2={y2}
+              />
+            );
+          })()}
 
           {/* Floating combat text overlay */}
           {floatingTexts.map(ft => (

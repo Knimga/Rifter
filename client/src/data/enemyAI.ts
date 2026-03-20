@@ -1,6 +1,6 @@
 import type { EnemyInstance } from './enemies';
 import type { Ability } from './classes';
-import { chebyshev, hasLineOfSight } from './dungeonHelpers';
+import { chebyshev, hasLineOfSight, getAffectedTiles } from './dungeonHelpers';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -8,8 +8,9 @@ interface Pos { x: number; y: number }
 
 export interface EnemyAction {
   moveTo: Pos | null;               // final position after movement (null = stayed put)
-  targetPartyIdx: number | null;    // which party member to attack (null = no attack)
-  abilityUsed: Ability | null;      // if non-null, use this ability instead of weapon attack
+  targetPartyIdx: number | null;    // primary target party member (null = no attack)
+  abilityUsed: Ability | null;      // ability to use; null = no attack possible
+  abilityTargetPos: Pos | null;     // tile the ability is aimed at (enemy pos for self, target pos otherwise)
 }
 
 // ─── BFS Pathfinding ────────────────────────────────────────────────────────
@@ -92,8 +93,10 @@ function findPath(
 // ─── AI ──────────────────────────────────────────────────────────────────────
 
 /**
- * BFS chase AI: pathfind toward the nearest alive party member, move up to
- * `movement` steps along the shortest path, then attack if within range + LOS.
+ * Picks a random affordable ability, pathfinds to within that ability's range,
+ * and attacks if in range + LOS. AoE abilities are excluded unless 2+ party
+ * members can be hit. Self-target abilities are only used when conditions are met
+ * (self-heal below 50% HP, self-buff only if not already active).
  */
 export function computeEnemyTurn(
   enemy: EnemyInstance,
@@ -102,14 +105,14 @@ export function computeEnemyTurn(
   floors: Set<string>,
   partyThreat: number[] = [],
 ): EnemyAction {
-  // Pick target: highest threat → closest if tied → random if still tied
+  const noAction: EnemyAction = { moveTo: null, targetPartyIdx: null, abilityUsed: null, abilityTargetPos: null };
+
+  // Pick primary target: highest threat → closest if tied → random if still tied
   const aliveMembers = partyMembers
     .map((m, idx) => ({ ...m, idx }))
     .filter(m => m.hp > 0);
 
-  if (aliveMembers.length === 0) {
-    return { moveTo: null, targetPartyIdx: null, abilityUsed: null };
-  }
+  if (aliveMembers.length === 0) return noAction;
 
   aliveMembers.sort((a, b) => {
     const tDiff = (partyThreat[b.idx] ?? 0) - (partyThreat[a.idx] ?? 0);
@@ -121,37 +124,55 @@ export function computeEnemyTurn(
   const target = aliveMembers[0];
   const targetPos = target.pos;
 
-  const range = enemy.type.weapon.range;
+  // ── Build pool of affordable, eligible abilities ──────────────────────────
+  const candidates: Ability[] = [];
+
+  for (const a of enemy.classData.abilities) {
+    if (enemy.currentMp < a.mpCost) continue;
+
+    if (a.target === 'self') {
+      if (a.effects.some(e => e.type === 'heal' || e.type === 'hot')) {
+        // Only self-heal when below 50% HP
+        if (enemy.currentHp / enemy.stats.hp < 0.5) candidates.push(a);
+      } else if (a.effects.some(e => e.type === 'buff')) {
+        // Don't re-apply a buff that's already active from this ability
+        if (!enemy.buffs.some(b => b.source === a.name)) candidates.push(a);
+      } else {
+        candidates.push(a);
+      }
+    } else if (a.target === 'enemy') {
+      if (a.area && a.area !== 'single') {
+        // AoE: only use if 2+ alive party members can be hit from current position
+        const affectedTiles = getAffectedTiles(enemy.pos, targetPos, a.area, floors);
+        const affectedSet = new Set(affectedTiles.map(t => `${t.x},${t.y}`));
+        const hittable = aliveMembers.filter(m => affectedSet.has(`${m.pos.x},${m.pos.y}`)).length;
+        if (hittable >= 2) candidates.push(a);
+      } else {
+        candidates.push(a);
+      }
+    }
+  }
+
+  if (candidates.length === 0) return noAction;
+
+  // ── Pick randomly ─────────────────────────────────────────────────────────
+  const chosen = candidates[Math.floor(Math.random() * candidates.length)];
+
+  // ── Self-target: no movement needed ──────────────────────────────────────
+  if (chosen.target === 'self') {
+    return { moveTo: null, targetPartyIdx: null, abilityUsed: chosen, abilityTargetPos: { ...enemy.pos } };
+  }
+
+  // ── Enemy-target: pathfind to within chosen ability's range ──────────────
+  const attackRange = chosen.range ?? 1;
   let pos = { ...enemy.pos };
 
-  // ── Self-targeting ability check (e.g. self-heal when low HP) ────────────
-  const selfAbilities = enemy.type.abilities.filter(
-    a => a.target === 'self' && enemy.currentMp >= a.mpCost
-  );
-  if (selfAbilities.length > 0) {
-    const hpPct = enemy.currentHp / enemy.stats.hp;
-    const healAbility = selfAbilities.find(a => a.heal || a.hot);
-    if (healAbility && hpPct < 0.5) {
-      return { moveTo: null, targetPartyIdx: null, abilityUsed: healAbility };
-    }
-    // Other self buffs: use on first turn of combat (round 1 effectively = first action)
-    const buffAbility = selfAbilities.find(a => a.buff);
-    if (buffAbility && !enemy.buffs.some(b => b.id.startsWith(buffAbility.name))) {
-      return { moveTo: null, targetPartyIdx: null, abilityUsed: buffAbility };
-    }
+  // Already in range + LOS? Attack without moving
+  if (chebyshev(pos, targetPos) <= attackRange && hasLineOfSight(pos, targetPos, floors)) {
+    return { moveTo: null, targetPartyIdx: target.idx, abilityUsed: chosen, abilityTargetPos: targetPos };
   }
 
-  // ── Already in weapon range + LOS? Check for ability first, then weapon ──
-  if (chebyshev(pos, targetPos) <= range && hasLineOfSight(pos, targetPos, floors)) {
-    const inRangeAbility = enemy.type.abilities.find(
-      a => a.target === 'enemy' && enemy.currentMp >= a.mpCost &&
-           chebyshev(pos, targetPos) <= a.range && hasLineOfSight(pos, targetPos, floors)
-    );
-    if (inRangeAbility) return { moveTo: null, targetPartyIdx: target.idx, abilityUsed: inRangeAbility };
-    return { moveTo: null, targetPartyIdx: target.idx, abilityUsed: null };
-  }
-
-  // Tiles occupied by other living enemies (and all party member positions)
+  // Tiles occupied by other living enemies and all party members
   const blocked = new Set(
     allEnemies
       .filter(e => e.id !== enemy.id && e.currentHp > 0)
@@ -162,11 +183,10 @@ export function computeEnemyTurn(
   }
 
   const path = findPath(pos, targetPos, floors, blocked);
-
-  // Follow path up to movement budget, stopping early if we enter attack range
   const movement = enemy.stats.movement;
   const steps = Math.min(path.length, movement);
   let lastValidPos = { ...enemy.pos };
+
   for (let i = 0; i < steps; i++) {
     const next = path[i];
     if (blocked.has(`${next.x},${next.y}`)) break;
@@ -175,26 +195,18 @@ export function computeEnemyTurn(
     pos = next;
     lastValidPos = pos;
 
-    if (chebyshev(pos, targetPos) <= range && hasLineOfSight(pos, targetPos, floors)) break;
+    // Stop early once we're in attack range with line of sight
+    if (chebyshev(pos, targetPos) <= attackRange && hasLineOfSight(pos, targetPos, floors)) break;
   }
 
   pos = lastValidPos;
   const moved = pos.x !== enemy.pos.x || pos.y !== enemy.pos.y;
-  const canAttack = chebyshev(pos, targetPos) <= range && hasLineOfSight(pos, targetPos, floors);
-
-  if (moved) {
-    console.log(`[AI] ${enemy.type.name} (mv ${movement}): (${enemy.pos.x},${enemy.pos.y}) → (${pos.x},${pos.y}), dist ${chebyshev(enemy.pos, pos)}`);
-  }
-
-  // Check for an in-range enemy-targeting ability after moving
-  const inRangeAbility = canAttack ? enemy.type.abilities.find(
-    a => a.target === 'enemy' && enemy.currentMp >= a.mpCost &&
-         chebyshev(pos, targetPos) <= a.range && hasLineOfSight(pos, targetPos, floors)
-  ) : undefined;
+  const canAttack = chebyshev(pos, targetPos) <= attackRange && hasLineOfSight(pos, targetPos, floors);
 
   return {
     moveTo: moved ? pos : null,
     targetPartyIdx: canAttack ? target.idx : null,
-    abilityUsed: inRangeAbility ?? null,
+    abilityUsed: canAttack ? chosen : null,
+    abilityTargetPos: canAttack ? targetPos : null,
   };
 }

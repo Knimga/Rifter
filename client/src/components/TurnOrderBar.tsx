@@ -1,3 +1,4 @@
+import { createElement } from 'react';
 import type { Combatant } from '../data/combat';
 import type { EnemyInstance } from '../data/enemies';
 
@@ -32,7 +33,7 @@ export default function TurnOrderBar({ turnOrder, currentTurnIndex, enemies, par
               isDead
                 ? 'bg-gray-700 text-gray-500 line-through'
                 : isCurrent
-                  ? 'bg-yellow-500 text-gray-900'
+                  ? `ring-2 ring-green-400 ${c.isPlayer ? 'bg-blue-900 text-blue-200' : 'bg-gray-700 text-gray-300'}`
                   : c.isPlayer
                     ? 'bg-blue-900 text-blue-200'
                     : 'bg-gray-700 text-gray-300'
@@ -40,7 +41,7 @@ export default function TurnOrderBar({ turnOrder, currentTurnIndex, enemies, par
           >
             {c.isPlayer
               ? (() => { const p = resolvePlayer(c.id, partyNames, partyColors); return <span style={{ color: p.color }}>{p.name}</span>; })()
-              : `${enemy?.type.token ?? ''} ${c.name}`
+              : <span className="flex items-center gap-1">{enemy && createElement(enemy.classData.token, { className: 'w-4 h-4 shrink-0' })}{c.name}</span>
             }
             <span className="ml-1 text-xs opacity-60">({c.initiativeRoll})</span>
           </div>

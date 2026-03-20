@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { isWeaponItem, WEAPON_ICON_PATH, type GearSlots } from '../data/gear';
+import { isWeaponItem, type GearSlots, type DamageElement } from '../data/gear';
 import type { Ability } from '../data/classes';
 import type { Stats } from '../data/stats';
+import { DAMAGE_ELEMENT_COLOR, DAMAGE_ELEMENT_DARK_COLOR } from '../data/constants';
 import { Tooltip, WeaponTooltipContent, AbilityTooltipContent } from './Tooltip';
 
 // ─── Slot types ─────────────────────────────────────────────────────────────
@@ -69,9 +70,13 @@ export default function ActionBar({ gear, abilities, slots, onSlotsChange, activ
   return (
     <div className="flex justify-center gap-3">
       {slots.map((slot, i) => {
-        const weaponIconSrc = weapon ? WEAPON_ICON_PATH[weapon.weaponType] : undefined;
+        const weaponIconSrc = weapon?.iconPath;
         const isOpen = openMenu === i;
         const isActive = activeSlot === i && slot !== null;
+        const isAbility = slot !== null && slot !== 'weapon-attack';
+        const elKey: DamageElement = isAbility ? (slot.displayElement ?? 'slashing') : 'slashing';
+        const slotBgStyle = isAbility && !isActive ? { backgroundColor: DAMAGE_ELEMENT_DARK_COLOR[elKey] } : undefined;
+        const iconColor = isActive ? '#111827' : isAbility ? DAMAGE_ELEMENT_COLOR[elKey] : undefined;
 
         return (
           <Tooltip key={i} className="relative" content={tooltipContent(slot)}>
@@ -99,7 +104,7 @@ export default function ActionBar({ gear, abilities, slots, onSlotsChange, activ
                     onClick={() => assign(i, ability)}
                     className="w-full text-left px-3 py-2 text-sm text-gray-200 hover:bg-gray-700 flex items-center gap-2"
                   >
-                    {React.createElement(ability.icon, { className: 'w-4 h-4 text-gray-300 shrink-0' })}
+                    {ability.icon && React.createElement(ability.icon, { className: 'w-4 h-4 text-gray-300 shrink-0' })}
                     {ability.name}
                   </button>
                 ))}
@@ -130,6 +135,7 @@ export default function ActionBar({ gear, abilities, slots, onSlotsChange, activ
                       ? 'bg-blue-800 border-blue-500'
                       : 'bg-blue-900 hover:bg-blue-800 border-blue-700'
                 }`}
+              style={slotBgStyle}
             >
               {slot === 'weapon-attack' && weaponIconSrc && (
                 <img
@@ -139,10 +145,12 @@ export default function ActionBar({ gear, abilities, slots, onSlotsChange, activ
                 />
               )}
               {slot !== null && slot !== 'weapon-attack' && (
-                React.createElement(slot.icon, { className: `w-8 h-8 ${isActive ? 'text-gray-900' : 'text-gray-200'}` })
+                <div style={{ color: iconColor }}>
+                  {slot.icon && React.createElement(slot.icon, { className: 'w-8 h-8' })}
+                </div>
               )}
               {slot !== null && (
-                <span className={`text-[9px] leading-none text-center px-0.5 truncate w-full text-center ${isActive ? 'text-gray-800' : 'text-gray-400'}`}>
+                <span className={`text-[9px] leading-none text-center px-0.5 truncate w-full text-center ${isActive ? 'text-gray-800' : 'text-gray-100'}`}>
                   {slot === 'weapon-attack' ? (weapon?.name ?? 'Attack') : slot.name}
                 </span>
               )}

@@ -1,6 +1,9 @@
-import { Zap } from 'lucide-react';
+import { useState } from 'react';
+import { GiMagicPortal } from 'react-icons/gi';
 import { CLASSES, type ClassKey } from '../data/classes';
-import { TILE_SIZE } from '../data/constants';
+import { isValidMoveTarget, brightenHex } from '../data/dungeonHelpers';
+import { TILE_SIZE, SANCTUM_FLOOR_COLOR, SANCTUM_WALL_COLOR } from '../data/constants';
+import MoveLine from './MoveLine';
 
 interface PartyFollower {
   pos: { x: number; y: number };
@@ -22,6 +25,7 @@ interface Props {
   onLocationChange: (location: 'dungeon') => void;
   activeAbility: unknown;
   isSelfTargetAbility: boolean;
+  isAllyTargetAbility: boolean;
   onAbilityUse: (pos: { x: number; y: number }) => void;
   onAbilityDeselect: () => void;
   onMemberSelect: (partyIndex: number) => void;
@@ -33,7 +37,9 @@ interface Props {
 
 const PORTAL_POS = { x: 5, y: 2 };
 
-export default function SanctumMap({ selectedClass, playerPos, activeMoverPos, partyFollowers, movement, onMove, onLocationChange, activeAbility, isSelfTargetAbility, onAbilityUse, onAbilityDeselect, onMemberSelect, playerHp, playerMaxHp, playerMp, playerMaxMp }: Props) {
+export default function SanctumMap({ selectedClass, playerPos, activeMoverPos, partyFollowers, movement, onMove, onLocationChange, activeAbility, isSelfTargetAbility, isAllyTargetAbility, onAbilityUse, onAbilityDeselect, onMemberSelect, playerHp, playerMaxHp, playerMp, playerMaxMp }: Props) {
+  const [hoveredTile, setHoveredTile] = useState<{ x: number; y: number } | null>(null);
+
   const isAdjacent = (x: number, y: number) => {
     const dx = Math.abs(x - playerPos.x);
     const dy = Math.abs(y - playerPos.y);
@@ -42,11 +48,23 @@ export default function SanctumMap({ selectedClass, playerPos, activeMoverPos, p
 
   const isAdjacentToPortal = isAdjacent(PORTAL_POS.x, PORTAL_POS.y);
 
+  const isMoveWalkable = (p: { x: number; y: number }) => p.x > 0 && p.x < 10 && p.y > 0 && p.y < 10;
+  const isMoveOccupied = (p: { x: number; y: number }) => partyFollowers.some(f => f.pos.x === p.x && f.pos.y === p.y);
+  const isMoveSpecial = (p: { x: number; y: number }) => PORTAL_POS.x === p.x && PORTAL_POS.y === p.y;
+
   const handleClick = (x: number, y: number, isWall: boolean, isPortal: boolean) => {
     if (isWall) return;
     if (activeAbility) {
-      if (isSelfTargetAbility) onAbilityUse({ x, y });
-      else onAbilityDeselect();
+      if (isSelfTargetAbility) {
+        onAbilityUse({ x, y });
+      } else if (isAllyTargetAbility) {
+        const isPartyMemberHere = (playerPos.x === x && playerPos.y === y) ||
+          partyFollowers.some(f => f.pos.x === x && f.pos.y === y);
+        if (isPartyMemberHere) onAbilityUse({ x, y });
+        else onAbilityDeselect();
+      } else {
+        onAbilityDeselect();
+      }
       return;
     }
     // Select party member's action bar by clicking their token
@@ -57,13 +75,13 @@ export default function SanctumMap({ selectedClass, playerPos, activeMoverPos, p
       if (isAdjacentToPortal) onLocationChange('dungeon');
       return;
     }
-    const distance = Math.max(Math.abs(x - activeMoverPos.x), Math.abs(y - activeMoverPos.y));
-    if (distance <= movement) onMove({ x, y });
+    if (isValidMoveTarget({ x, y }, activeMoverPos, movement, isMoveWalkable, isMoveOccupied, isMoveSpecial)) onMove({ x, y });
   };
 
   return (
     <div className="flex flex-col items-center">
       <div className="bg-gray-800 p-4 rounded-lg inline-block">
+        <div className="relative">
         {Array.from({ length: 11 }).map((_, y) => (
           <div key={y} className="flex">
             {Array.from({ length: 11 }).map((_, x) => {
@@ -76,13 +94,24 @@ export default function SanctumMap({ selectedClass, playerPos, activeMoverPos, p
                 <div
                   key={`${x}-${y}`}
                   onClick={() => handleClick(x, y, isWall, isPortal)}
-                  style={{ width: TILE_SIZE, height: TILE_SIZE }}
-                  className={`shrink-0 border border-gray-700/30 flex items-center justify-center text-xs ${
+                  onMouseEnter={() => setHoveredTile({ x, y })}
+                  onMouseLeave={() => setHoveredTile(prev => prev?.x === x && prev?.y === y ? null : prev)}
+                  style={{
+                    width: TILE_SIZE, height: TILE_SIZE,
+                    backgroundColor: isAllyTargetAbility && (isPlayer || !!follower)
+                      ? undefined
+                      : isWall
+                        ? SANCTUM_WALL_COLOR
+                        : !isWall && !activeAbility && isValidMoveTarget({ x, y }, activeMoverPos, movement, isMoveWalkable, isMoveOccupied, isMoveSpecial) && hoveredTile?.x === x && hoveredTile?.y === y
+                          ? brightenHex(SANCTUM_FLOOR_COLOR, 1.5)
+                          : SANCTUM_FLOOR_COLOR,
+                  }}
+                  className={`shrink-0 border flex items-center justify-center text-xs ${
                     isWall
-                      ? 'bg-gray-950'
-                      : Math.max(Math.abs(x - activeMoverPos.x), Math.abs(y - activeMoverPos.y)) <= movement && !isWall && !isPortal && !follower && !(x === activeMoverPos.x && y === activeMoverPos.y)
-                        ? 'bg-gray-900 hover:bg-gray-800'
-                        : 'bg-gray-900'
+                      ? 'border-gray-700/30'
+                      : isAllyTargetAbility && (isPlayer || !!follower)
+                        ? 'bg-green-900/40 border-2 border-green-400 cursor-crosshair'
+                        : 'border-gray-700/30'
                   }`}
                 >
                   {isPlayer && (
@@ -118,7 +147,7 @@ export default function SanctumMap({ selectedClass, playerPos, activeMoverPos, p
                       onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.filter = 'drop-shadow(0 0 12px rgba(192,132,252,1))'; }}
                       onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.filter = isAdjacentToPortal ? 'drop-shadow(0 0 8px rgba(192,132,252,0.8))' : 'none'; }}
                     >
-                      <Zap className="w-6 h-6 text-purple-400" />
+                      <GiMagicPortal className="w-9 h-9 text-purple-400" />
                     </div>
                   )}
                 </div>
@@ -126,6 +155,27 @@ export default function SanctumMap({ selectedClass, playerPos, activeMoverPos, p
             })}
           </div>
         ))}
+
+        {/* Movement line overlay */}
+        {(() => {
+          if (activeAbility || !hoveredTile) return null;
+          const { x: hx, y: hy } = hoveredTile;
+          if (!isValidMoveTarget({ x: hx, y: hy }, activeMoverPos, movement, isMoveWalkable, isMoveOccupied, isMoveSpecial)) return null;
+
+          const half = TILE_SIZE / 2;
+          const x1 = activeMoverPos.x * TILE_SIZE + half;
+          const y1 = activeMoverPos.y * TILE_SIZE + half;
+          const x2 = hx * TILE_SIZE + half;
+          const y2 = hy * TILE_SIZE + half;
+
+          return (
+            <MoveLine
+              svgWidth={11 * TILE_SIZE} svgHeight={11 * TILE_SIZE}
+              x1={x1} y1={y1} x2={x2} y2={y2}
+            />
+          );
+        })()}
+        </div>
       </div>
     </div>
   );

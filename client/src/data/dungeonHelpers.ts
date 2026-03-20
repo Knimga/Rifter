@@ -2,6 +2,15 @@ import type { AreaType } from './classes';
 
 // ─── Shared dungeon geometry utilities ────────────────────────────────────────
 
+/** Scale each RGB channel of a hex color by `factor` (e.g. 1.4 to brighten). */
+export function brightenHex(hex: string, factor: number): string {
+  const n = parseInt(hex.slice(1), 16);
+  const r = Math.min(255, Math.round(((n >> 16) & 0xff) * factor));
+  const g = Math.min(255, Math.round(((n >> 8) & 0xff) * factor));
+  const b = Math.min(255, Math.round((n & 0xff) * factor));
+  return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+}
+
 export function chebyshev(a: { x: number; y: number }, b: { x: number; y: number }): number {
   return Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y));
 }
@@ -56,6 +65,28 @@ function getLineTiles(from: Pos, to: Pos, floors: Set<string>): Pos[] {
     if (x === to.x && y === to.y) break;
   }
   return tiles;
+}
+
+/**
+ * Returns true if `pos` is a valid tile for the active mover to move to.
+ * @param isWalkable  - tile is passable (floor, not wall)
+ * @param isOccupied  - tile is blocked by an entity (enemy, NPC, party member)
+ * @param isSpecialTile - tile is a special interactive tile that can't be moved onto (portal, etc.)
+ */
+export function isValidMoveTarget(
+  pos: Pos,
+  activeMoverPos: Pos,
+  movement: number,
+  isWalkable: (pos: Pos) => boolean,
+  isOccupied: (pos: Pos) => boolean,
+  isSpecialTile: (pos: Pos) => boolean = () => false,
+): boolean {
+  if (!isWalkable(pos)) return false;
+  if (isSpecialTile(pos)) return false;
+  if (pos.x === activeMoverPos.x && pos.y === activeMoverPos.y) return false;
+  if (isOccupied(pos)) return false;
+  if (chebyshev(activeMoverPos, pos) > movement) return false;
+  return true;
 }
 
 /** Returns the set of floor tiles affected by an area ability centred on `target`. */
