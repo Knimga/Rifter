@@ -27,7 +27,8 @@ scripts/          forge-lint, forge-sheet (Node, run with tsx)
 - 1 unit = 1 tile. Grid cell (gx, gy) centers at world (gx + .5, 0, gy + .5). Grid +y is world +z (down the screen, toward the camera).
 - **Placement on the map** (the game renderer, the builder's game view and `forge:sheet` all follow it):
   - Creatures: the design's `feet` anchor (the middle of its stance) goes exactly to the tile center; the body rises above it. Designs should always mark `m.anchor('feet', ...)`; without it, the bounding-box center is used and anything held out (a scythe, reaching arms) pulls the feet off-center.
-  - Items (origin at their center) rest on the tile, i.e. lifted by `-bounds.min.y`.
+  - Items (loot) lie **flat on the tile, face up** (`ITEM_GROUND_PITCH` / `layItem` in `stage-config.ts`), resting on the floor. A design can lie less tipped with `fit.groundPitchDeg` (the Iron Helm uses -55 so its open underside is not on show). The oblique projection draws the ground without distortion, so a flat item shows its true outline, never tilted toward or away from the camera.
+  - Inventory icons use a straight-on camera (`ICON_CAMERA`: no elevation, no yaw) for the same reason.
 - Models face +z at yaw 0. A model's left side is +x (`_l` = +x, `_r` = -x).
 - Facing is view state: `yaw = atan2(dx, dy)` from the last grid move, smoothed with `smoothYaw`. Models turn only while moving.
 - **Game camera: oblique projection** (`core/stage-config.ts`, `three/stage.ts`). The map stays the DOM tile grid; models draw on a transparent three.js canvas over it. An orthographic camera at 60° elevation with its vertical extent compressed by sin(60°) makes the ground map 1:1 onto 50 px tiles; height lifts a point by `y * cot(60°)` tiles. `obliqueProject` / `obliqueLift` give the same mapping without three.js (for DOM overlays and the contact sheet).

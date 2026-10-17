@@ -7,9 +7,7 @@ import { smoothYaw } from '../core/facing';
 import type { Category, Design, Model, ModelLink, ParamDef, Params } from '../core/types';
 import { designs } from '../registry.vite';
 import { drafts } from './draftRegistry';
-import { ENEMY_CLASSES, BOSS_CLASSES } from '../../data/enemies';
-import { ARMOR_SLOTS } from '../../data/gear';
-import { WEAPON_TYPE_DATA } from '../../data/gear/weapons';
+import { allDataEntries, dataEntry } from '../dataRefs';
 import { DUNGEON_PRESETS } from '../../data/dungeonPresets';
 import { TILE_SIZE } from '../../data/constants';
 import { TILE_BORDER_CLASS } from '../../components/mapParts';
@@ -22,7 +20,7 @@ const LABEL_H = 0; // no per-cell text strip; a cell's name and seed show on hov
 const COLS = 6;
 // Left-panel sections, in order. Every Category must be listed (Record keeps that checked).
 const CATEGORY_LABEL: Record<Category, string> = {
-  creature: 'Creatures', character: 'Characters', weapon: 'Weapons', armor: 'Armor', prop: 'Props',
+  creature: 'Creatures', character: 'Characters', weapon: 'Weapons', armor: 'Armor', offhand: 'Offhands', prop: 'Props',
 };
 const CATEGORIES = Object.keys(CATEGORY_LABEL) as Category[];
 const WALK_DIRS = [0, 1, 2, 3, 4, 5, 6, 7].map((i) => (i * Math.PI) / 4);
@@ -31,7 +29,8 @@ type Entry = { id: string; approved?: Design; draft?: Design };
 /** A row of cells in the grid: one design, one set of seeds. */
 type Block = { label: string; sub: string; design: Design; cells: SeedCell[]; applyPins: boolean };
 
-const ENEMY_LIST = [...ENEMY_CLASSES, ...BOSS_CLASSES];
+// Every game data entry that can have a model (enemies, weapons, ...). Re-read when game data hot-reloads.
+const DATA_ENTRIES = allDataEntries();
 const stemOf = (id: string) => id.slice(id.indexOf('.') + 1);
 
 // ─── URL state ────────────────────────────────────────────────────────────────
@@ -65,6 +64,9 @@ export default function ForgePage() {
   // Design registries live in state so "Refresh designs" can swap in freshly loaded code without a
   // page reload (selection, seed page, fixed params and focus all survive).
   const [registry, setRegistry] = useState({ designs, drafts });
+  // Hot reload re-runs this module with fresh `designs`/`drafts` objects, but React keeps state across a
+  // hot reload, so sync them in; otherwise edited designs would only show after "Refresh designs".
+  useEffect(() => setRegistry({ designs, drafts }), [designs, drafts]); // eslint-disable-line react-hooks/exhaustive-deps
   const entries = useMemo(() => {
     const map = new Map<string, Entry>();
     for (const d of Object.values(registry.designs)) map.set(d.id, { id: d.id, approved: d });
@@ -87,13 +89,15 @@ export default function ForgePage() {
   const entry = entries.find((e) => e.id === selectedId) ?? entries[0];
   const paramDesign = entry?.draft ?? entry?.approved;
   const schema: Record<string, ParamDef> = useMemo(() => (paramDesign ? describeParams(paramDesign) : {}), [paramDesign]);
-  // In-game samples: game objects linked to this design, built exactly as the game builds them. A link
-  // with a fixed seed is one exact look; without one each enemy seeds from its own id, so show a few
-  // sample enemies (same id scheme as dungeon spawning) to show the spread the game produces.
+  // The exact game data entry this design is the model for (lint guarantees it exists and the names match)
+  const source = entry ? dataEntry((entry.approved ?? entry.draft)!.source) : undefined;
+  // In-game samples: the data entry linked to this design, built exactly as the game builds it. A link
+  // with a fixed seed is one exact look; without one each instance seeds from its own id, so show a few
+  // sample instances (enemies use the dungeon's id scheme, e.g. 'skeleton-0').
   const gameCells: SeedCell[] = entry
-    ? ENEMY_LIST.filter((c) => c.model?.design === entry.id).flatMap((c) => {
-        const link = c.model!;
-        const ids = link.seed !== undefined ? [c.id] : [0, 1, 2].map((n) => `${c.id}-${n}`);
+    ? DATA_ENTRIES.filter((d) => d.link?.design === entry.id).flatMap((d) => {
+        const link = d.link!;
+        const ids = link.seed !== undefined ? [d.ref.key] : [0, 1, 2].map((n) => `${d.ref.key}-${n}`);
         return ids.map((id) => ({ seed: instanceSeed(link, id), tag: id, params: link.params }));
       })
     : [];
@@ -228,10 +232,10 @@ export default function ForgePage() {
       return (await post('snapshot', { name: `${stemOf(entry!.id)}-${Date.now()}`, pngBase64: png })).path;
     });
   const focusModel = focusSeed !== null ? built[built.length - 1]?.[0]?.model : null;
-  // Data-entry snippets: paste them to Claude Code with the game object to link ("link zombie: ...").
+  // Data-entry snippets, headed by the exact entry they belong to: paste them to Claude Code as-is.
   const copyLink = (link: ModelLink, what: string) => {
-    navigator.clipboard.writeText(`model: ${JSON.stringify(link)},`);
-    setStatus(`Copied (${what}). Paste it to Claude Code with the game object to link.`);
+    navigator.clipboard.writeText(`// ${source?.path ?? link.design}\nmodel: ${JSON.stringify(link)},`);
+    setStatus(`Copied the link for ${source?.name ?? link.design} (${what}). Paste it to Claude Code.`);
   };
   // The normal case: the design plus the FIXED params only. Everything set to Varies differs per enemy.
   const copyForGame = () => {
@@ -244,17 +248,16 @@ export default function ForgePage() {
   const copyExact = () =>
     focusModel && copyLink({ design: focusModel.designId, version: focusModel.version, seed: focusModel.seed, params: focusModel.params }, 'this exact model for every enemy');
 
-  // Link status of every game object that should have a model
-  const approvedVersion = (id: string) => registry.designs[id]?.version;
-  const enemyLinks = ENEMY_LIST.map((c) => {
-    const link = c.model;
-    const status = !link ? 'not linked'
-      : approvedVersion(link.design) === undefined ? `${link.design} is not approved`
-      : approvedVersion(link.design) !== link.version ? `linked to v${link.version}, design is v${approvedVersion(link.design)}`
-      : `${link.design} v${link.version}`;
-    return { id: c.id, ok: !!link && approvedVersion(link.design) === link.version, status };
-  });
-  const itemBases = [...Object.keys(WEAPON_TYPE_DATA), ...ARMOR_SLOTS.map((s) => `armor:${s}`), 'shield'];
+  // Link status of an approved design: does its data entry's `model` point at it, and at this version?
+  const linkBadge = (e: (typeof entries)[number]): { text: string; color: string; title: string } | null => {
+    if (!e.approved) return null;
+    const link = dataEntry(e.approved.source)?.link;
+    if (!link || link.design !== e.approved.id) return { text: 'not linked', color: 'bg-gray-600', title: 'Approved, but its data entry has no model link yet' };
+    if (link.version !== e.approved.version) {
+      return { text: `linked v${link.version}`, color: 'bg-yellow-700', title: `The game uses v${link.version}; the approved design is v${e.approved.version}` };
+    }
+    return { text: 'linked', color: 'bg-green-800', title: `In game: linked v${link.version}` };
+  };
 
   const pin = (key: string, value: string | number | boolean | undefined) =>
     setPins((p) => {
@@ -275,35 +278,39 @@ export default function ForgePage() {
           return (
             <div key={cat}>
               <h2 className="text-xs font-bold uppercase tracking-widest text-gray-500 mb-1">{CATEGORY_LABEL[cat]}</h2>
-              {list.map((e) => (
+              {list.map((e) => {
+                const lb = linkBadge(e);
+                return (
                 <button
                   key={e.id}
+                  title={dataEntry((e.approved ?? e.draft)!.source)?.path}
                   onClick={() => { setSelectedId(e.id); setPins({}); setFocusSeed(null); }}
                   className={`w-full text-left px-2 py-1.5 rounded flex items-center justify-between gap-2 ${e.id === entry?.id ? 'bg-gray-700' : 'hover:bg-gray-700/50'}`}
                 >
                   <span className="truncate">{(e.draft ?? e.approved)!.label}</span>
                   <span className="flex gap-1 shrink-0">
-                    {e.approved && <Badge color="bg-green-800">approved</Badge>}
+                    {lb && <Badge color={lb.color} title={lb.title}>{lb.text}</Badge>}
                     {e.draft && <Badge color={e.approved ? 'bg-yellow-700' : 'bg-blue-700'}>{e.approved ? 'draft' : 'new'}</Badge>}
                   </span>
                 </button>
-              ))}
+                );
+              })}
             </div>
           );
         })}
-        <div className="bg-gray-900/60 rounded-lg p-2 space-y-1">
-          <h2 className="text-xs font-bold uppercase tracking-widest text-gray-500">Game links</h2>
-          {enemyLinks.map((l) => (
-            <p key={l.id} className="text-xs">
-              <span className="text-gray-300">{l.id}</span> <span className={l.ok ? 'text-green-400' : 'text-yellow-300'}>{l.status}</span>
-            </p>
-          ))}
-          <p className="text-xs text-gray-500 pt-1">Items (linked in M3): {itemBases.join(', ')}</p>
-        </div>
       </aside>
 
       {/* ── Center: seed grid ── */}
       <main className="flex-1 overflow-auto p-4">
+        {entry && (
+          <div className="mb-3">
+            <h1 className="text-lg font-bold">{(entry.approved ?? entry.draft)!.label}</h1>
+            <p className="text-xs text-gray-400">
+              Model for <span className="font-mono text-gray-300">{source?.path ?? 'an unknown data entry (run forge:lint)'}</span>
+              <span className="text-gray-500"> · design {entry.id}</span>
+            </p>
+          </div>
+        )}
         <div className="flex flex-wrap items-center gap-3 mb-4 bg-gray-800 rounded-lg px-3 py-2">
           <div className="flex items-center gap-1" title="Each seed is one fixed random variant. Page through them to judge the design's variety.">
             <button className={BTN} disabled={seedStart <= 1} onClick={() => setSeedStart(Math.max(1, seedStart - count))}>◀</button>
@@ -501,8 +508,8 @@ function safeBuild(design: Design, seed: number, pins: Params): Model | null {
   }
 }
 
-function Badge({ color, children }: { color: string; children: string }) {
-  return <span className={`${color} text-[10px] leading-none px-1.5 py-0.5 rounded`}>{children}</span>;
+function Badge({ color, title, children }: { color: string; title?: string; children: string }) {
+  return <span title={title} className={`${color} text-[10px] leading-none px-1.5 py-0.5 rounded`}>{children}</span>;
 }
 
 /**

@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { Model } from '../core/types';
 import { smoothYaw, yawFromGridMove } from '../core/facing';
-import { addForgeLights, fitGameCamera, makeGameCamera } from './stage';
+import { addForgeLights, fitGameCamera, makeGameCamera, layItemOnGround } from './stage';
 import { disposeObject, toThree } from './toThree';
 
 type Pos = { x: number; y: number };
@@ -11,6 +11,8 @@ export interface MapUnit {
   id: string;
   model: Model;
   pos: Pos;
+  /** Items (loot) lie flat on the floor and never turn; creatures stand and face their last move. */
+  lying?: boolean;
 }
 
 interface Entry {
@@ -21,9 +23,16 @@ interface Entry {
   targetYaw: number;
 }
 
+/** A unit's scene object, standing upright or (loot) laid flat on the floor. */
+function makeObject(u: MapUnit): THREE.Group {
+  const obj = toThree(u.model);
+  if (u.lying) layItemOnGround(obj, u.model);
+  return obj;
+}
+
 /**
  * Draws models on a transparent canvas laid exactly over the DOM tile grid (oblique game projection,
- * 1 tile = tilePx). Creatures stand with their feet at the tile center.
+ * 1 tile = tilePx). Creatures stand with their feet at the tile center; loot lies flat, centered on its tile.
  *
  * Facing is view state kept here, never in the game: when a unit's position changes, it turns toward
  * the direction of that move. Rendering is on demand; the animation loop only runs while a unit is
@@ -65,19 +74,20 @@ export class MapModelRenderer {
         // Same unit, rebuilt model (e.g. a design update in dev): swap the mesh, keep its facing.
         this.scene.remove(e.obj);
         disposeObject(e.obj);
-        e = { ...e, model: u.model, obj: toThree(u.model) };
+        e = { ...e, model: u.model, obj: makeObject(u) };
         this.scene.add(e.obj);
         this.entries.set(u.id, e);
       }
       if (!e) {
-        e = { model: u.model, obj: toThree(u.model), pos: u.pos, yaw: 0, targetYaw: 0 };
+        e = { model: u.model, obj: makeObject(u), pos: u.pos, yaw: 0, targetYaw: 0 };
         this.scene.add(e.obj);
         this.entries.set(u.id, e);
       } else if (u.pos.x !== e.pos.x || u.pos.y !== e.pos.y) {
         e.targetYaw = yawFromGridMove(u.pos.x - e.pos.x, u.pos.y - e.pos.y);
         e.pos = u.pos;
       }
-      e.obj.position.set(u.pos.x + 0.5, 0, u.pos.y + 0.5);
+      e.obj.position.x = u.pos.x + 0.5;
+      e.obj.position.z = u.pos.y + 0.5;
     }
     for (const [id, e] of this.entries) {
       if (seen.has(id)) continue;

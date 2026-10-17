@@ -4,6 +4,7 @@ import type { Ability } from '../data/classes';
 import type { Stats } from '../data/stats';
 import { DAMAGE_ELEMENT_COLOR, DAMAGE_ELEMENT_DARK_COLOR } from '../data/constants';
 import { Tooltip, WeaponTooltipContent, AbilityTooltipContent } from './Tooltip';
+import ItemIcon from './ItemIcon';
 
 // ─── Slot types ─────────────────────────────────────────────────────────────
 
@@ -70,7 +71,6 @@ export default function ActionBar({ gear, abilities, slots, onSlotsChange, activ
   return (
     <div className="flex justify-center gap-3">
       {slots.map((slot, i) => {
-        const weaponIconSrc = weapon?.iconPath;
         const isOpen = openMenu === i;
         const isActive = activeSlot === i && slot !== null;
         const isAbility = slot !== null && slot !== 'weapon-attack';
@@ -93,7 +93,7 @@ export default function ActionBar({ gear, abilities, slots, onSlotsChange, activ
                     onClick={() => assign(i, 'weapon-attack')}
                     className="w-full text-left px-3 py-2 text-sm text-gray-200 hover:bg-gray-700 flex items-center gap-2"
                   >
-                    {weaponIconSrc && <img src={weaponIconSrc} alt="" className="w-4 h-4 shrink-0" />}
+                    <ItemIcon item={weapon} className="w-4 h-4 shrink-0" />
                     Weapon Attack
                   </button>
                 )}
@@ -137,12 +137,8 @@ export default function ActionBar({ gear, abilities, slots, onSlotsChange, activ
                 }`}
               style={slotBgStyle}
             >
-              {slot === 'weapon-attack' && weaponIconSrc && (
-                <img
-                  src={weaponIconSrc}
-                  alt=""
-                  className={`w-8 h-8 ${isActive ? 'brightness-0' : ''}`}
-                />
+              {slot === 'weapon-attack' && weapon && (
+                <ItemIcon item={weapon} className={`w-8 h-8 ${isActive ? 'brightness-0' : ''}`} />
               )}
               {slot !== null && slot !== 'weapon-attack' && (
                 <div style={{ color: iconColor }}>

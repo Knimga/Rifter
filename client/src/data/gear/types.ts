@@ -1,6 +1,7 @@
 import type { IconType } from 'react-icons';
 import type { ArmorProficiency, WeaponProficiency } from '../classes';
 import type { BuffableStat, DamageElement } from '../stats';
+import type { ModelLink } from '../../forge/core/types';
 
 // ─── Slots ────────────────────────────────────────────────────────────────────
 
@@ -21,11 +22,15 @@ export interface ImplicitDef {
 }
 
 export interface Item {
+  /** Unique per item; seeds the parts of its model the link leaves free (see instanceSeed). */
+  id: string;
   name: string;
   slot: GearSlot;
   rarity: Rarity;
   affixes: Affix[];
   implicit?: Affix;       // fixed bonus from the base type; counts toward stats like an affix
+  /** The forge design it is drawn with (inventory icon, loot on the map), from its data entry. */
+  model?: ModelLink;
 }
 
 export interface ArmorItem extends Item {
@@ -63,7 +68,6 @@ export interface WeaponItem extends Item {
   minDamage: number;
   maxDamage: number;
   range: number;
-  iconPath?: string;
 }
 
 export type GearSlots = Record<GearSlot, Item | null>;

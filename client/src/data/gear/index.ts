@@ -10,9 +10,9 @@ import type { DamageElement, BuffableStat, ActiveBuff } from '../stats';
 import type { ArmorSlot, WeaponType, GearSlots, Item, ArmorItem, ShieldItem, WeaponItem, Affix, Rarity, ImplicitDef } from './types';
 import { ARMOR_SLOTS, GEAR_SLOTS, PHYSICAL_ELEMENTS, RarityPerAffixCount } from './types';
 
-import { ARMOR_TYPE_BASE_VALUE, ARMOR_SLOT_MULTIPLIER, ARMOR_INVALID_AFFIXES, ARMOR_SERIES, ARMOR_IMPLICITS } from './armor';
+import { ARMOR_TYPE_BASE_VALUE, ARMOR_SLOT_MULTIPLIER, ARMOR_INVALID_AFFIXES, ARMOR_SERIES, ARMOR_IMPLICITS, armorName } from './armor';
 import { SHIELD_ARMOR_MULTIPLIER, SHIELDS, SHIELD_IMPLICIT } from './offhands';
-import { WEAPON_SERIES, WEAPON_TYPE_DATA } from './weapons';
+import { WEAPON_SERIES, WEAPON_TYPE_DATA, weaponName } from './weapons';
 import { PotencyBonusDivisor, STAT_POTENCY } from './affixes';
 import { chance, pick, randInt } from '../random';
 
@@ -102,6 +102,10 @@ function rollAffixes(invalidAffixes: BuffableStat[], level: number, enabled: boo
   return { affixes, rarity: RarityPerAffixCount[affixes.length] };
 }
 
+let itemCounter = 0;
+/** A unique item id (it also seeds the item's model, so each drop keeps its own look). */
+const newItemId = () => `item-${Date.now().toString(36)}-${(itemCounter++).toString(36)}`;
+
 export function generateWeapon(
   level: number,
   weaponType: WeaponType,
@@ -111,7 +115,7 @@ export function generateWeapon(
   const series = pickSeriesForLevel(WEAPON_SERIES, level);
   const m = series.damageMultiplier;
   return {
-    name: series.weapons[weaponType]?.name ?? weaponType,
+    name: weaponName(series, weaponType),
     slot: 'mainhand',
     ...rollAffixes(data.invalidAffixes, level, affixes),
     weaponType,
@@ -121,7 +125,8 @@ export function generateWeapon(
     minDamage: Math.max(1, Math.round(data.baseDamage.min * m)),
     maxDamage: Math.max(1, Math.round(data.baseDamage.max * m)),
     range: data.range,
-    iconPath: series.weapons[weaponType]?.icon,
+    id: newItemId(),
+    model: series.weapons[weaponType]?.model,
     implicit: data.implicits ? resolveImplicit(data.implicits, level) : undefined,
   };
 }
@@ -136,12 +141,14 @@ export function generateArmor(
   const type = series.armorType;
   const implicitDef = ARMOR_IMPLICITS[type];
   return {
-    name: series.names[slot],
+    id: newItemId(),
+    name: armorName(series, slot),
     slot,
     ...rollAffixes(ARMOR_INVALID_AFFIXES[type], level, affixes),
     armorType: type,
     armorValue: Math.round(ARMOR_TYPE_BASE_VALUE[type] * level * ARMOR_SLOT_MULTIPLIER[slot]),
     icon: series.icons[slot],
+    model: series.models?.[slot],
     implicit: resolveImplicit({ statKey: implicitDef.statKey, ...implicitDef.slots[slot] }, level),
   };
 }
@@ -153,12 +160,14 @@ export function generateShield(
 ): ShieldItem {
   const template = pickSeriesForLevel(armorType ? SHIELDS.filter(s => s.type === armorType) : SHIELDS, level);
   return {
+    id: newItemId(),
     name: template.name,
     slot: 'offhand',
     ...rollAffixes(ARMOR_INVALID_AFFIXES[template.type], level, affixes),
     armorType: template.type,
     armorValue: Math.round(ARMOR_TYPE_BASE_VALUE[template.type] * level * SHIELD_ARMOR_MULTIPLIER),
     iconPath: template.icon,
+    model: template.model,
     implicit: resolveImplicit(SHIELD_IMPLICIT, level),
   };
 }

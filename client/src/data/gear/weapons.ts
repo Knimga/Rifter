@@ -1,37 +1,43 @@
 // Static weapon data for the weapon drop generator.
 import type { BuffableStat, DamageElement } from '../stats';
 import type { AttackCategory, ImplicitDef, WeaponType } from './types';
+import type { ModelLink } from '../../forge/core/types';
 import { nonWeaponAffixes, meleeStats, rangedStats, magicStats } from './types';
 
 // ─── Weapon Series ────────────────────────────────────────────────────────────
 
 export interface WeaponSeries {
   id: string;
-  name: string;             // prefix applied to the weapon name: 'Iron Sword', 'Steel Axe'
+  name: string;             // prefix applied to the weapon name: 'Plain Gladius' (see weaponName)
   requiredLevel: number;
   damageMultiplier: number; // scales base weapon damage relative to tier 1 (Iron = 1.0)
-  weapons: Partial<Record<WeaponType, { name: string; icon: string }>>
+  // Each named weapon of the series; `model` links it to its forge design, which is also how it is drawn (icon and loot).
+  weapons: Partial<Record<WeaponType, { name: string; model?: ModelLink }>>
 }
 
 export const WEAPON_SERIES: WeaponSeries[] = [
   {
     id: 'plain', name: 'Plain', requiredLevel: 1, damageMultiplier: 1.0,
     weapons: {
-      '1h Swords': { name: 'Gladius',       icon: '/gearIcons/weapons/plain/sword.png' },
-      '2h Swords': { name: 'Bastard Sword', icon: '/gearIcons/weapons/plain/sword.png' },
-      '1h Maces':  { name: 'Mace',          icon: '/gearIcons/weapons/plain/mace.png' },
-      '2h Maces':  { name: 'Maul',          icon: '/gearIcons/weapons/plain/mace.png' },
-      '1h Axes':   { name: 'Hatchet',       icon: '/gearIcons/weapons/plain/axe.png' },
-      '2h Axes':   { name: 'Battleaxe',     icon: '/gearIcons/weapons/plain/battleaxe.png' },
-      'Daggers':   { name: 'Dirk',          icon: '/gearIcons/weapons/plain/dagger.png' },
-      'Bows':      { name: 'Shortbow',      icon: '/gearIcons/weapons/plain/bow.png' },
-      'Crossbows': { name: 'Crossbow',      icon: '/gearIcons/weapons/plain/crossbow.png' },
-      'Staves':    { name: 'Staff',         icon: '/gearIcons/weapons/plain/staff.png' },
-      'Wands':     { name: 'Wand',          icon: '/gearIcons/weapons/plain/wand.png' },
+      '1h Swords': { name: 'Gladius',       model: { design: 'weapon.plain-gladius', version: 1, params: {} } },
+      '2h Swords': { name: 'Bastard Sword', model: { design: 'weapon.plain-bastard-sword', version: 1, params: {} } },
+      '1h Maces':  { name: 'Mace',          model: { design: 'weapon.plain-mace', version: 1, params: { head: 'knobbed' } } },
+      '2h Maces':  { name: 'Maul',          model: { design: 'weapon.plain-maul', version: 1, params: {} } },
+      '1h Axes':   { name: 'Hatchet',       model: { design: 'weapon.plain-hatchet', version: 1, params: {} } },
+      '2h Axes':   { name: 'Battleaxe',     model: { design: 'weapon.plain-battleaxe', version: 1, params: {} } },
+      'Daggers':   { name: 'Dirk',          model: { design: 'weapon.plain-dirk', version: 1, params: { guard: 'bar' } } },
+      'Bows':      { name: 'Shortbow',      model: { design: 'weapon.plain-shortbow', version: 1, params: {} } },
+      'Crossbows': { name: 'Crossbow',      model: { design: 'weapon.plain-crossbow', version: 1, params: { loaded: false } } },
+      'Staves':    { name: 'Staff',         model: { design: 'weapon.plain-staff', version: 1, params: {} } },
+      'Wands':     { name: 'Wand',          model: { design: 'weapon.plain-wand', version: 1, params: {} } },
     }
   }
 ];
 
+/** Display name of a weapon: series name + the series' name for the type, e.g. Plain + '1h Swords' -> 'Plain Gladius'. */
+export function weaponName(series: WeaponSeries, weaponType: WeaponType): string {
+  return `${series.name} ${series.weapons[weaponType]?.name ?? weaponType}`;
+}
 
 export interface WeaponTypeData {
   baseDamage: { min: number; max: number; };

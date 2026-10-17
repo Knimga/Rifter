@@ -1,6 +1,7 @@
 import { BuildCtx } from './ctx';
 import { finalize } from './finalize';
 import { bake } from './mesh';
+import { itemGroundPitch } from './stage-config';
 import type { Design, Model, ParamDef, Params } from './types';
 
 /** Seed + optional pinned params in, finished renderer-agnostic model out. Pure and deterministic. */
@@ -15,6 +16,7 @@ export function buildModel(design: Design, seed: number, overrides: Params = {})
     name,
     params: c.resolved,
     mesh: bake(c.mesh),
+    groundPitch: design.fit.kind === 'item' ? itemGroundPitch(design.fit) : undefined,
   };
 }
 

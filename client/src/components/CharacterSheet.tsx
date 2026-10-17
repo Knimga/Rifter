@@ -74,8 +74,8 @@ function GearSlotPane({ slot, gear, stats, onUnequip }: { slot: GearSlot; gear: 
       style={{ gridColumn: SLOT_POS[slot].col, gridRow: SLOT_POS[slot].row }}
     >
       <div
-        className={`w-14 h-14 rounded-lg border flex flex-col items-center pt-1 ${
-          item ? 'bg-gray-700 border-gray-500' : 'bg-gray-800 border-gray-700'
+        className={`w-14 h-14 rounded-lg border bg-gray-800 flex flex-col items-center pt-1 ${
+          item ? 'border-gray-500' : 'border-gray-700'
         } ${item && onUnequip ? 'cursor-pointer' : ''}`}
         onContextMenu={rightClick(!!item, onUnequip)}
       >

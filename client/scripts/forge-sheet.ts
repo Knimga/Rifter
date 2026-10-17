@@ -9,7 +9,7 @@
 //   --elev <deg>        camera elevation (default GAME_CAMERA)   --cols <n> (default 6)   --cell <px> (default 200)
 import { writeFileSync } from 'node:fs';
 import { buildModel } from '../src/forge/core/build';
-import { GAME_CAMERA, LIGHT, SHEET_SHADING, obliqueProject } from '../src/forge/core/stage-config';
+import { GAME_CAMERA, ITEM_GROUND_PITCH, LIGHT, SHEET_SHADING, itemRestLift, layItem, obliqueProject } from '../src/forge/core/stage-config';
 import type { Design, Model, Params } from '../src/forge/core/types';
 import { loadDesigns } from './load-designs';
 import { encodePNG } from './png';
@@ -44,7 +44,12 @@ function renderCell(model: Model, design: Design, yaw: number): Uint8Array {
 
   const ce = Math.cos(elev), se = Math.sin(elev), cy = Math.cos(yaw), sy = Math.sin(yaw);
   // world-ish space: rotate model by yaw about Y (matches rotY in vec.ts)
-  const rot = (p: number[]): [number, number, number] => [p[0] * cy + p[2] * sy, p[1], -p[0] * sy + p[2] * cy];
+  // Items lie on the floor as loot (flat and face up unless the design sets its own pitch), then everything turns by yaw.
+  const isItem = design.fit.kind === 'item';
+  const pitch = model.groundPitch ?? ITEM_GROUND_PITCH;
+  const lift = isItem ? itemRestLift(model.mesh.positions, pitch) : 0;
+  const place = (p: number[]): number[] => (isItem ? layItem([p[0], p[1], p[2]], pitch, lift) : p);
+  const rot = (q: number[]): [number, number, number] => { const p = place(q); return [p[0] * cy + p[2] * sy, p[1], -p[0] * sy + p[2] * cy]; };
   // Same oblique projection as the game: ground maps 1:1, height lifts by y*cot(e). Returns [x, up, depth].
   const view = (p: number[]): [number, number, number] => {
     const [x, down, depth] = obliqueProject([p[0], p[1], p[2]], elevDeg);
@@ -57,7 +62,7 @@ function renderCell(model: Model, design: Design, yaw: number): Uint8Array {
   const cxp = S / 2;
   const cyp = standing ? S * 0.68 : S * 0.5;
   const toScreen = (v: [number, number, number]) => [cxp + v[0] * k, cyp - v[1] * k, v[2]] as const;
-  const groundY = model.mesh.bounds.min[1];
+  const groundY = 0; // standing models' feet and flat-laid items both rest on y = 0
 
   const fillTri = (a: readonly number[], b: readonly number[], c: readonly number[], rgb: number[], alpha: number, writeZ: boolean) => {
     const minX = Math.max(0, Math.floor(Math.min(a[0], b[0], c[0]))), maxX = Math.min(S - 1, Math.ceil(Math.max(a[0], b[0], c[0])));

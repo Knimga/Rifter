@@ -13,6 +13,7 @@ const GLOWS = {
 
 const design: Design = {
   id: 'creature.necromancer',
+  source: { table: 'enemies', key: 'necromancer' }, // data/enemies.ts › necromancer
   category: 'creature',
   label: 'Necromancer',
   version: 1,

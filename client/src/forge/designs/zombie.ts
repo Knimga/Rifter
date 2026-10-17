@@ -6,6 +6,7 @@ import { hslRGB, mixC, mulC, type RGB, type Vec3 } from '../core/vec';
 // Seeds vary clothing color, build, a missing arm and whether the jaw hangs open.
 const design: Design = {
   id: 'creature.zombie',
+  source: { table: 'enemies', key: 'zombie' }, // data/enemies.ts › zombie
   category: 'creature',
   label: 'Zombie',
   version: 2, // v2: feet anchor, so the stance (not the reaching arms) is centered on the tile

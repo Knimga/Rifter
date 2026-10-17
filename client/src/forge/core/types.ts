@@ -9,22 +9,41 @@ export type ParamDef =
 /** Overrides a caller can pin. Anything not pinned is drawn from the seed. */
 export type Params = Record<string, string | number | boolean>;
 
-export type Category = 'creature' | 'character' | 'weapon' | 'armor' | 'prop';
+export type Category = 'creature' | 'character' | 'weapon' | 'armor' | 'offhand' | 'prop';
 
 /**
  * How a finished mesh is scaled and positioned. Units are TILES (1 unit = 1 grid cell).
  * standing: origin at the feet center, y up, scaled so height <= height and footprint radius <= maxRadius.
  * item:     origin at the bbox center, scaled so the longest dimension == size.
+ *           groundPitchDeg: how far it tips back when lying on the floor as loot (default -90 = flat,
+ *           face up; see ITEM_GROUND_PITCH). Less tipped (e.g. -55) hides an open underside like a helm's.
  */
 export type FitSpec =
   | { kind: 'standing'; height: number; maxRadius: number }
-  | { kind: 'item'; size: number };
+  | { kind: 'item'; size: number; groundPitchDeg?: number };
+
+/**
+ * The one game data entry a design is the model for. `key` identifies the entry within its table:
+ *  - enemies: the class id ('skeleton')
+ *  - weapons: `${seriesId}/${weaponType}` ('plain/1h Swords')
+ *  - armor: `${seriesId}/${slot}` ('apprentice/helm')
+ *  - offhands: the offhand's id ('buckler')
+ * Lint checks that the entry exists, that the design's label is exactly the entry's display name, and
+ * that the file name is that name slugged (see src/forge/dataRefs.ts).
+ */
+export interface DataRef {
+  table: 'enemies' | 'weapons' | 'armor' | 'offhands';
+  key: string;
+}
 
 export interface Design {
-  /** `${category}.${fileStem}`, e.g. 'creature.golem'. Lint enforces the match. */
+  /** `${category}.${fileStem}`, e.g. 'creature.skeleton'. Lint enforces the match. */
   id: string;
   category: Category;
+  /** Exactly the display name of the data entry in `source` (lint-enforced). */
   label: string;
+  /** The game data entry this design is the model for. */
+  source: DataRef;
   /** Bump when a change alters the look of existing seeds. */
   version: number;
   fit: FitSpec;
@@ -78,4 +97,6 @@ export interface Model {
   /** Final value of every parameter, whether drawn from the seed or pinned. */
   params: Params;
   mesh: MeshData;
+  /** Items only: the pitch (radians, about x) it lies at on the floor as loot. */
+  groundPitch?: number;
 }

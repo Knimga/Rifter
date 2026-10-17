@@ -13,6 +13,7 @@ const RUST: RGB = [128, 82, 58];
 
 const design: Design = {
   id: 'creature.skeleton',
+  source: { table: 'enemies', key: 'skeleton' }, // data/enemies.ts › skeleton
   category: 'creature',
   label: 'Skeleton',
   version: 1,

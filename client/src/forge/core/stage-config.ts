@@ -17,8 +17,43 @@ export const GAME_CAMERA = {
   elevationDeg: 60,
 };
 
-/** Inventory icon camera: lower angle than the game so items read as objects, not shapes. */
-export const ICON_CAMERA = { elevationDeg: 28, yawRad: 0.55, fovDeg: 28 };
+/**
+ * Inventory icon camera: straight-on (no elevation, no yaw), so an item's face is never tilted toward
+ * or away from the viewer. Items are built facing +z, so this shows their true outline.
+ */
+export const ICON_CAMERA = { elevationDeg: 0, yawRad: 0, fovDeg: 28 };
+
+/**
+ * Items on the map (loot) lie FLAT on their tile, face up: rotate the model -90° about X (its +z face
+ * turns up, its +y "tip" points up the screen), then lift it so it rests on the floor. The oblique game
+ * projection draws the ground plane without distortion, so a flat item shows its true outline,
+ * not tilted toward or away from the camera. Used by the game renderer, the forge game view and forge:sheet.
+ * A design can lie less tipped (fit.groundPitchDeg), e.g. a helm, so its open underside isn't on show.
+ */
+export const ITEM_GROUND_PITCH = -Math.PI / 2;
+
+/** The pitch an item design lies at on the floor: its fit.groundPitchDeg, or ITEM_GROUND_PITCH (flat). */
+export const itemGroundPitch = (fit: { groundPitchDeg?: number }): number =>
+  fit.groundPitchDeg !== undefined ? (fit.groundPitchDeg * Math.PI) / 180 : ITEM_GROUND_PITCH;
+
+/** A model point pitched by `pitch` about the x axis (same convention as three.js rotation.x). */
+export const pitchX = (p: Vec3, pitch: number): Vec3 => {
+  const c = Math.cos(pitch), s = Math.sin(pitch);
+  return [p[0], p[1] * c - p[2] * s, p[1] * s + p[2] * c];
+};
+
+/** Lift that rests an item pitched by `pitch` on the floor: minus its lowest pitched y. `positions` = xyz triples. */
+export function itemRestLift(positions: ArrayLike<number>, pitch: number): number {
+  let low = Infinity;
+  for (let i = 0; i < positions.length; i += 3) low = Math.min(low, pitchX([positions[i], positions[i + 1], positions[i + 2]], pitch)[1]);
+  return -low;
+}
+
+/** An item model point as it lies on the floor: pitched, then lifted by `lift` (from itemRestLift). */
+export const layItem = (p: Vec3, pitch: number, lift: number): Vec3 => {
+  const q = pitchX(p, pitch);
+  return [q[0], q[1] + lift, q[2]];
+};
 
 /** World-fixed key light. Direction points TOWARD the light: from upper-left, toward the camera. */
 export const LIGHT = {

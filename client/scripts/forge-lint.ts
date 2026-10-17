@@ -2,6 +2,7 @@
 import { buildModel } from '../src/forge/core/build';
 import type { Model } from '../src/forge/core/types';
 import { loadDesigns } from './load-designs';
+import { checkDataRefs } from '../src/forge/dataRefs';
 
 const args = process.argv.slice(2);
 const flag = (n: string) => args.includes(`--${n}`);
@@ -62,5 +63,11 @@ for (const { stem, source, design } of designs) {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${design.id.padEnd(18)} ${source === 'draft' ? '[draft] ' : ''}tris ${minTris}-${maxTris} / budget ${design.budget}`);
   for (const [k, v] of errs) console.log(`        ${k}: ${v}`);
 }
-console.log(failures ? `\n${failures} design(s) failed` : `\nall ${designs.length} design(s) passed (${N} seeds each)`);
-process.exit(failures ? 1 : 0);
+// Every design must be the model for exactly one game data entry, named exactly like it, and every
+// model link in the game data must point back at the design for that entry (see src/forge/dataRefs.ts).
+// Checked against ALL designs (approved + drafts) so a draft can't collide with an approved design.
+const dataProblems = checkDataRefs((await loadDesigns({ drafts: true })).map(({ design, stem }) => ({ design, stem })));
+console.log(dataProblems.length ? `\nFAIL  data links:\n${dataProblems.map((p) => `        ${p}`).join('\n')}` : '\nPASS  data links (every design names its exact data entry)');
+
+console.log(failures || dataProblems.length ? `\n${failures} design(s) failed${dataProblems.length ? `, ${dataProblems.length} data-link problem(s)` : ''}` : `\nall ${designs.length} design(s) passed (${N} seeds each)`);
+process.exit(failures || dataProblems.length ? 1 : 0);

@@ -2,9 +2,8 @@
 // so the builder page never needs more than one WebGL context.
 import * as THREE from 'three';
 import type { Model } from '../core/types';
-import { ICON_CAMERA } from '../core/stage-config';
 import { TILE_SIZE } from '../../data/constants';
-import { addForgeLights, fitGameCamera, makeGameCamera } from '../three/stage';
+import { addForgeLights, fitGameCamera, fitIconCamera, layItemOnGround, makeGameCamera } from '../three/stage';
 import { disposeObject, sharedMaterials, toThree } from '../three/toThree';
 
 export type CameraPreset = 'game' | 'icon' | 'top' | 'side';
@@ -39,7 +38,7 @@ export class ForgeView {
    *  new instance, so it always gets a fresh mesh instead of a stale cached one. */
   private objects = new Map<Model, THREE.Group>();
   private gameCam = makeGameCamera();
-  private persp = new THREE.PerspectiveCamera(ICON_CAMERA.fovDeg, 1, 0.01, 50);
+  private persp = new THREE.PerspectiveCamera();
   private ortho = new THREE.OrthographicCamera(-1, 1, 1, -1, -50, 50);
 
   constructor() {
@@ -82,13 +81,14 @@ export class ForgeView {
         this.scene.add(obj);
       }
       obj.visible = true;
-      obj.rotation.y = cell.yaw;
 
       const { min, max } = cell.model.mesh.bounds;
       const isItem = cell.model.mesh.anchors.center !== undefined;
       const game = opts.camera === 'game';
-      // Game view: items rest on the tile (their origin is their center); other views keep them centered.
-      obj.position.y = game && isItem ? -min[1] : 0;
+      // Game view: items lie flat on the tile, face up, resting on the floor, exactly as loot in the game;
+      // yaw then spins them in place on the floor. Other views keep items upright and centered.
+      if (game && isItem) layItemOnGround(obj, cell.model, cell.yaw);
+      else { obj.rotation.set(0, cell.yaw, 0, 'YXZ'); obj.position.y = 0; }
       this.ground.visible = opts.ground && !game; // game view: the page's DOM tiles are the ground
       this.ground.position.y = isItem ? min[1] - 0.02 : 0;
 
@@ -137,11 +137,7 @@ export class ForgeView {
     }
     const cy = (min[1] + max[1]) / 2;
     if (preset === 'icon') {
-      const e = (ICON_CAMERA.elevationDeg * Math.PI) / 180, d = span * 2.4;
-      this.persp.aspect = aspect;
-      this.persp.updateProjectionMatrix();
-      this.persp.position.set(Math.sin(ICON_CAMERA.yawRad) * Math.cos(e) * d, cy + Math.sin(e) * d, Math.cos(ICON_CAMERA.yawRad) * Math.cos(e) * d);
-      this.persp.lookAt(0, cy, 0);
+      fitIconCamera(this.persp, min, max, aspect);
       return this.persp;
     }
     // side: straight-on from the front (+z)
