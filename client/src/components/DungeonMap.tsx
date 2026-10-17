@@ -1,4 +1,4 @@
-import { useState, useMemo, createElement } from 'react';
+import { useState, useMemo, createElement, lazy, Suspense } from 'react';
 import { GiMagicPortal, GiDoorway } from 'react-icons/gi';
 import type { AreaType, TargetType } from '../data/classes';
 import type { ActiveBuff, ActiveHot, ActiveDot } from '../data/stats';
@@ -9,7 +9,23 @@ import { TILE_SIZE } from '../data/constants';
 import type { Item } from '../data/gear';
 import FloatingCombatText, { type FloatingText } from './FloatingCombatText';
 import ItemIcon from './ItemIcon';
-import { EffectDotRow, MoveLineOverlay, PartyToken, computeEffectDots, type PartyTokenData } from './mapParts';
+import { EffectDotRow, EnemyHpBar, MoveLineOverlay, PartyToken, TILE_BORDER_CLASS, computeEffectDots, type PartyTokenData } from './mapParts';
+import { isRenderable } from '../forge/registry.vite';
+
+// 3D enemy models over the tile grid. Lazy: it pulls in three.js (GameScreen preloads it on mount).
+const ModelLayer = lazy(() => import('./ModelLayer'));
+
+/** Above-the-head status for enemies drawn as models: effect dots (hoverable) over the HP bar. */
+function enemyOverlay(enemy: EnemyInstance) {
+  return (
+    <>
+      <div className="relative w-8 h-2 pointer-events-auto">
+        <EffectDotRow dots={computeEffectDots(enemy.buffs, enemy.hots, enemy.dots)} />
+      </div>
+      <EnemyHpBar hp={enemy.currentHp} maxHp={enemy.stats.hp} />
+    </>
+  );
+}
 
 interface Props {
   playerPos: Pos;                   // party leader (doors, portal and loot adjacency)
@@ -55,6 +71,8 @@ export default function DungeonMap({ playerPos, activeMoverPos, party, movement,
 
   // Per-tile lookups, built once per render instead of scanning lists for every tile
   const enemyByKey = useMemo(() => new Map(enemies.filter(e => e.currentHp > 0).map(e => [posKey(e.pos), e])), [enemies]);
+  // Living enemies drawn as models (stable array while `enemies` is unchanged, so ModelLayer can memo on it)
+  const modelEnemies = useMemo(() => enemies.filter(e => e.currentHp > 0 && isRenderable(e.classData.model)), [enemies]);
   const memberByKey = useMemo(() => new Map(party.map(m => [posKey(m.pos), m])), [party]);
   const doorByKey = useMemo(() => new Map(doors.map(d => [posKey(d.pos), d])), [doors]);
 
@@ -160,13 +178,13 @@ export default function DungeonMap({ playerPos, activeMoverPos, party, movement,
                   cellClass = 'border-gray-400/60';
                   cellBgColor = floorColor;
                 } else if (door) {
-                  cellClass = isDoorAdjacent && !inCombat ? 'border-gray-700/30 cursor-pointer' : 'border-gray-700/30';
+                  cellClass = isDoorAdjacent && !inCombat ? `${TILE_BORDER_CLASS} cursor-pointer` : TILE_BORDER_CLASS;
                   cellBgColor = wallColor;
                 } else if (!floor) {
-                  cellClass = 'border-gray-700/30';
+                  cellClass = TILE_BORDER_CLASS;
                   cellBgColor = wallColor;
                 } else {
-                  cellClass = 'border-gray-700/30';
+                  cellClass = TILE_BORDER_CLASS;
                   cellBgColor = !activeTarget && moveTargets.has(key) && hoveredTile && samePos(hoveredTile, p)
                     ? brightenHex(floorColor, 1.5)
                     : floorColor;
@@ -206,14 +224,14 @@ export default function DungeonMap({ playerPos, activeMoverPos, party, movement,
                     )}
                     {enemy && (
                       <div className="relative w-full h-full flex items-center justify-center cursor-pointer">
-                        {createElement(enemy.classData.token, { className: 'w-7 h-7' })}
-                        <div className="absolute bottom-0.5 left-1/2 -translate-x-1/2 w-8 h-1 bg-gray-700 rounded-full overflow-hidden">
-                          <div
-                            className="h-full bg-red-500 transition-all"
-                            style={{ width: `${(enemy.currentHp / enemy.stats.hp) * 100}%` }}
-                          />
-                        </div>
-                        <EffectDotRow dots={computeEffectDots(enemy.buffs, enemy.hots, enemy.dots)} />
+                        {/* Enemies linked to a model are drawn by ModelLayer; the rest keep their icon */}
+                        {!isRenderable(enemy.classData.model) && (
+                          <>
+                            {createElement(enemy.classData.token, { className: 'w-7 h-7' })}
+                            <EnemyHpBar hp={enemy.currentHp} maxHp={enemy.stats.hp} className="absolute bottom-0.5 left-1/2 -translate-x-1/2" />
+                            <EffectDotRow dots={computeEffectDots(enemy.buffs, enemy.hots, enemy.dots)} />
+                          </>
+                        )}
                       </div>
                     )}
                     {!member && !enemy && door && (
@@ -244,6 +262,10 @@ export default function DungeonMap({ playerPos, activeMoverPos, party, movement,
               })}
             </div>
           ))}
+
+          <Suspense fallback={null}>
+            <ModelLayer cols={width} rows={height} enemies={modelEnemies} renderOverlay={enemyOverlay} />
+          </Suspense>
 
           {!activeTarget && canAct && hoveredTile && moveTargets.has(posKey(hoveredTile)) && (
             <MoveLineOverlay from={activeMoverPos} to={hoveredTile} cols={width} rows={height} />

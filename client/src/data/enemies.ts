@@ -8,6 +8,7 @@ import type { IconType } from 'react-icons';
 import type { AttributeKey, SkillKey, ActiveBuff, ActiveHot, ActiveDot } from './stats';
 import { generateEnemyAttributePoints, calculateStats, recomputeStats } from './stats';
 import type { Stats } from './stats';
+import type { ModelLink } from '../forge/core/types';
 import type { Pos } from './dungeonHelpers';
 
 // ─── Enemy Class Definition ───────────────────────────────────────────────────
@@ -44,6 +45,9 @@ export interface EnemyClassData {
   scalingPassives?: ScalingPassive[];
 
   dropChance?: number;  // probability of dropping an item on death (default: LOOT_DROP_CHANCE)
+
+  // Forge model this enemy renders as (paste from the forge's "Copy for game"). Absent = not linked yet.
+  model?: ModelLink;
 }
 
 // ─── Enemy Instance ───────────────────────────────────────────────────────────
@@ -131,7 +135,8 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
         effects: [{ type: 'damage', appliesTo: 'target', damageElement: 'slashing', minDamage: 5, maxDamage: 8 }],
       },
     ],
-    dropChance: 0.50
+    dropChance: 0.50,
+    model: { design: 'creature.skeleton', version: 1, params: { helmet: false, shield: true } },
   },
   {
     id: 'zombie',
@@ -153,7 +158,8 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
         effects: [{ type: 'damage', appliesTo: 'target', damageElement: 'bludgeoning', minDamage: 4, maxDamage: 10 }],
       },
     ],
-    dropChance: 0.50
+    dropChance: 0.50,
+    model: { design: 'creature.zombie', version: 2, params: {} },
   },
 ];
 
@@ -203,7 +209,8 @@ export const BOSS_CLASSES: EnemyClassData[] = [
         ]
       }
     ],
-    dropChance: 1
+    dropChance: 1,
+    model: { design: 'creature.necromancer', version: 1, params: { skullPauldrons: true, robeHue: 250, glow: 'necrotic' } },
   }
 ];
 

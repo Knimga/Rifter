@@ -165,6 +165,8 @@ export default function GameScreen({ party, setParty }: Props) {
   useEffect(() => {
     setPartyHp(partyAllStats.map(s => s.hp));
     setPartyMp(partyAllStats.map(s => s.mp));
+    // Preload the 3D model layer (three.js, a separate chunk) while the party is still in the sanctum
+    void import('../components/ModelLayer');
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

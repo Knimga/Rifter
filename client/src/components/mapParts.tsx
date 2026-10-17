@@ -19,6 +19,9 @@ export interface PartyTokenData {
   partyIndex: number;
 }
 
+/** Border color of a plain floor/wall tile (tiles also use Tailwind's `border`). Shared by both maps and the forge's game view. */
+export const TILE_BORDER_CLASS = 'border-gray-700/30';
+
 // ─── Effect dots ──────────────────────────────────────────────────────────────
 
 interface EffectDot {
@@ -63,6 +66,17 @@ export function EffectDotRow({ dots }: { dots: EffectDot[] }) {
           </div>
         </Tooltip>
       ))}
+    </div>
+  );
+}
+
+// ─── Enemy HP bar ─────────────────────────────────────────────────────────────
+
+/** Enemy health bar. Positioned by the caller (`className`), e.g. at the tile bottom or above a model's head. */
+export function EnemyHpBar({ hp, maxHp, className = '' }: { hp: number; maxHp: number; className?: string }) {
+  return (
+    <div className={`w-8 h-1 bg-gray-700 rounded-full overflow-hidden ${className}`}>
+      <div className="h-full bg-red-500 transition-all" style={{ width: `${(hp / maxHp) * 100}%` }} />
     </div>
   );
 }

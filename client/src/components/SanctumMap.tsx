@@ -4,7 +4,7 @@ import type { TargetType } from '../data/classes';
 import { brightenHex, isAdjacent, isValidMoveTarget, posKey, type Pos } from '../data/dungeonHelpers';
 import { TILE_SIZE, SANCTUM_FLOOR_COLOR, SANCTUM_WALL_COLOR } from '../data/constants';
 import { SANCTUM, isSanctumPortal, isSanctumWall, isSanctumWalkable } from '../data/sanctum';
-import { MoveLineOverlay, PartyToken, type PartyTokenData } from './mapParts';
+import { MoveLineOverlay, PartyToken, TILE_BORDER_CLASS, type PartyTokenData } from './mapParts';
 
 interface Props {
   playerPos: Pos;
@@ -78,7 +78,7 @@ export default function SanctumMap({ playerPos, activeMoverPos, party, movement,
                   className={`shrink-0 border flex items-center justify-center text-xs ${
                     !isWall && allyHighlight
                       ? 'bg-green-900/40 border-2 border-green-400 cursor-crosshair'
-                      : 'border-gray-700/30'
+                      : TILE_BORDER_CLASS
                   }`}
                 >
                   {member && <PartyToken member={member} />}

@@ -25,7 +25,7 @@ export default function FloatingCombatText({ ft, onComplete }: Props) {
 
   return (
     <div
-      className="absolute pointer-events-none flex items-center justify-center"
+      className="absolute z-30 pointer-events-none flex items-center justify-center"
       style={{ left: ft.gridX * TILE_SIZE + ft.offsetX, top: ft.gridY * TILE_SIZE, width: TILE_SIZE, height: TILE_SIZE }}
     >
       <span
