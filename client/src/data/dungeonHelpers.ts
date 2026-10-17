@@ -1,6 +1,13 @@
 import type { AreaType } from './classes';
 
-// ─── Shared dungeon geometry utilities ────────────────────────────────────────
+// ─── Shared grid geometry utilities ───────────────────────────────────────────
+
+export type Pos = { x: number; y: number };
+
+/** Map/set key for a tile: "x,y". */
+export const posKey = (p: Pos) => `${p.x},${p.y}`;
+
+export const samePos = (a: Pos, b: Pos) => a.x === b.x && a.y === b.y;
 
 /** Scale each RGB channel of a hex color by `factor` (e.g. 1.4 to brighten). */
 export function brightenHex(hex: string, factor: number): string {
@@ -11,60 +18,52 @@ export function brightenHex(hex: string, factor: number): string {
   return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
 }
 
-export function chebyshev(a: { x: number; y: number }, b: { x: number; y: number }): number {
+export function chebyshev(a: Pos, b: Pos): number {
   return Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y));
 }
 
-/** Bresenham LOS: true if every tile between a and b (exclusive of endpoints) is floor. */
-export function hasLineOfSight(
-  a: { x: number; y: number },
-  b: { x: number; y: number },
-  floors: Set<string>,
-): boolean {
-  let x0 = a.x, y0 = a.y;
-  const x1 = b.x, y1 = b.y;
-  const dx = Math.abs(x1 - x0);
-  const dy = Math.abs(y1 - y0);
-  const sx = x0 < x1 ? 1 : -1;
-  const sy = y0 < y1 ? 1 : -1;
-  let err = dx - dy;
+/** One of the 8 tiles touching `a` (not `a` itself). */
+export const isAdjacent = (a: Pos, b: Pos) => chebyshev(a, b) === 1;
 
-  while (true) {
-    if ((x0 !== a.x || y0 !== a.y) && (x0 !== b.x || y0 !== b.y)) {
-      if (!floors.has(`${x0},${y0}`)) return false;
-    }
-    if (x0 === x1 && y0 === y1) break;
-    const e2 = 2 * err;
-    if (e2 > -dy) { err -= dy; x0 += sx; }
-    if (e2 < dx) { err += dx; y0 += sy; }
-  }
-  return true;
-}
-
-// ─── Area-of-effect tile computation ──────────────────────────────────────────
-
-type Pos = { x: number; y: number };
-
-/** Bresenham line from `from` to `to`, exclusive of `from`, inclusive of `to`. Stops at walls. */
-function getLineTiles(from: Pos, to: Pos, floors: Set<string>): Pos[] {
+/** Bresenham line from `a` to `b`, excluding `a`, including `b`. */
+function bresenham(a: Pos, b: Pos): Pos[] {
   const tiles: Pos[] = [];
-  let x = from.x, y = from.y;
-  const dx = Math.abs(to.x - from.x);
-  const dy = Math.abs(to.y - from.y);
-  const sx = from.x < to.x ? 1 : -1;
-  const sy = from.y < to.y ? 1 : -1;
+  let { x, y } = a;
+  const dx = Math.abs(b.x - x);
+  const dy = Math.abs(b.y - y);
+  const sx = x < b.x ? 1 : -1;
+  const sy = y < b.y ? 1 : -1;
   let err = dx - dy;
-
-  while (true) {
-    if (x === to.x && y === to.y) break;
+  while (x !== b.x || y !== b.y) {
     const e2 = 2 * err;
     if (e2 > -dy) { err -= dy; x += sx; }
     if (e2 < dx) { err += dx; y += sy; }
-    if (!floors.has(`${x},${y}`)) break; // wall stops the line
     tiles.push({ x, y });
-    if (x === to.x && y === to.y) break;
   }
   return tiles;
+}
+
+/** True if every tile strictly between a and b is floor. */
+export function hasLineOfSight(a: Pos, b: Pos, floors: Set<string>): boolean {
+  return bresenham(a, b).slice(0, -1).every(p => floors.has(posKey(p)));
+}
+
+/**
+ * Up to `count` tiles passing `isOpen`, searched ring by ring outward from `center`
+ * (radius 1..maxRadius, closest ring first). Excludes `center` itself.
+ */
+export function findOpenTilesNear(center: Pos, isOpen: (p: Pos) => boolean, count: number, maxRadius: number): Pos[] {
+  const found: Pos[] = [];
+  for (let r = 1; r <= maxRadius && found.length < count; r++) {
+    for (let dx = -r; dx <= r && found.length < count; dx++) {
+      for (let dy = -r; dy <= r && found.length < count; dy++) {
+        if (Math.abs(dx) < r && Math.abs(dy) < r) continue; // outer ring only
+        const p = { x: center.x + dx, y: center.y + dy };
+        if (isOpen(p)) found.push(p);
+      }
+    }
+  }
+  return found;
 }
 
 /**
@@ -83,34 +82,43 @@ export function isValidMoveTarget(
 ): boolean {
   if (!isWalkable(pos)) return false;
   if (isSpecialTile(pos)) return false;
-  if (pos.x === activeMoverPos.x && pos.y === activeMoverPos.y) return false;
+  if (samePos(pos, activeMoverPos)) return false;
   if (isOccupied(pos)) return false;
   if (chebyshev(activeMoverPos, pos) > movement) return false;
   return true;
 }
 
-/** Returns the set of floor tiles affected by an area ability centred on `target`. */
+// ─── Area-of-effect tile computation ──────────────────────────────────────────
+
+/** Returns the floor tiles affected by an area ability aimed at `target`. */
 export function getAffectedTiles(
   caster: Pos,
   target: Pos,
   area: AreaType | undefined,
   floors: Set<string>,
 ): Pos[] {
-  if (!area || area === 'single') return [target];
-
   if (area === 'blast1' || area === 'blast2') {
     const radius = area === 'blast1' ? 1 : 2;
     const tiles: Pos[] = [];
     for (let dx = -radius; dx <= radius; dx++) {
       for (let dy = -radius; dy <= radius; dy++) {
         const p = { x: target.x + dx, y: target.y + dy };
-        if (floors.has(`${p.x},${p.y}`)) tiles.push(p);
+        if (floors.has(posKey(p))) tiles.push(p);
       }
     }
     return tiles;
   }
 
-  if (area === 'line') return getLineTiles(caster, target, floors);
+  if (area === 'line') {
+    // Line from the caster toward the target; a wall stops it
+    const line = bresenham(caster, target);
+    const firstWall = line.findIndex(p => !floors.has(posKey(p)));
+    return firstWall === -1 ? line : line.slice(0, firstWall);
+  }
 
   return [target];
 }
+
+/** Keys of the tiles an ability aimed at `target` affects — for "which units are hit" lookups. */
+export const affectedKeys = (caster: Pos, target: Pos, area: AreaType | undefined, floors: Set<string>) =>
+  new Set(getAffectedTiles(caster, target, area, floors).map(posKey));

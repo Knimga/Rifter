@@ -1,35 +1,44 @@
 import { CLASSES } from './classes';
 import type { ClassKey, ClassData, Passive, ScalingPassive } from './classes';
-import { DAMAGE_ELEMENTS } from './gear';
-import type { DamageElement } from './gear';
 
-// ─── Attribute Types ──────────────────────────────────────────────────────────
+//
 
-export type AttributeKey = 'strength' | 'toughness' | 'finesse' | 'mind' | 'spirit' | 'speed';
-export const ATTRIBUTE_KEYS: AttributeKey[] = ['strength', 'toughness', 'finesse', 'mind', 'spirit', 'speed'];
+export const ATTRIBUTE_KEYS = ['strength', 'toughness', 'finesse', 'mind', 'spirit', 'speed'] as const;
+export const SKILL_KEYS = ['perception', 'stealth', 'expertise', 'spellcraft', 'evasion', 'redoubt', 'devotion'] as const;
+export const DAMAGE_ELEMENTS = ['slashing', 'piercing', 'bludgeoning', 'fire', 'ice', 'lightning', 'shadow', 'poison', 'holy', 'nature'] as const;
+const ELEMENT_STAT_SUFFIXES = ['Hit', 'Crit', 'Damage', 'Resistance', 'Penetration'] as const;
 
-// ─── Skills ───────────────────────────────────────────────────────────────────
+export type AttributeKey = typeof ATTRIBUTE_KEYS[number];
+export type SkillKey = typeof SKILL_KEYS[number];
+export type DamageElement = typeof DAMAGE_ELEMENTS[number];
+export type ElementStatKey = `${DamageElement}${typeof ELEMENT_STAT_SUFFIXES[number]}`;
 
-export type SkillKey = 'perception' | 'stealth' | 'expertise' | 'spellcraft' | 'evasion'
-  | 'redoubt' | 'devotion';
-export const SKILL_KEYS: SkillKey[] = ['perception', 'stealth', 'expertise', 'spellcraft', 
-  'evasion', 'redoubt', 'devotion'];
-
-// ─── Buff / Debuff System ─────────────────────────────────────────────────────
-
-/** Element-specific stat keys: e.g. 'fireResistance', 'iceHit', 'shadowDamage' */
-export type ElementStatKey = `${DamageElement}${'Hit' | 'Crit' | 'Damage' | 'Resistance' | 'Penetration'}`;
+const MISC_STATS = [
+  'hpRegen', 'mpRegen', 'initiative', 'movement',
+  'armor', 'dodge', 'parry', 'block', 'glancingBlow', 'magicResistance', 'healing',
+  'meleeHit', 'meleeDamage', 'meleeCrit', 'meleePenetration',
+  'rangedHit', 'rangedDamage', 'rangedCrit', 'rangedPenetration',
+  'magicHit', 'magicDamage', 'magicCrit', 'magicPenetration',
+  'threatMultiplier',
+] as const;
 
 /** Every stat that can be raised or lowered by a buff/debuff. */
 export type BuffableStat =
   | AttributeKey | SkillKey
-  | 'hpRegen' | 'mpRegen' | 'initiative' | 'movement'
-  | 'armor' | 'dodge' | 'parry' | 'block' | 'glancingBlow' | 'magicResistance' | 'healing'
-  | 'meleeHit' | 'meleeDamage' | 'meleeCrit' | 'meleePenetration'
-  | 'rangedHit' | 'rangedDamage' | 'rangedCrit' | 'rangedPenetration'
-  | 'magicHit' | 'magicDamage' | 'magicCrit' | 'magicPenetration'
-  | 'threatMultiplier'
+  | typeof MISC_STATS[number]
   | ElementStatKey;
+
+  /** Element-specific stat keys: e.g. 'fireResistance', 'iceHit', 'shadowDamage' */
+export const ELEMENT_STAT_KEYS: ElementStatKey[] = DAMAGE_ELEMENTS.flatMap(el =>
+  ELEMENT_STAT_SUFFIXES.map(suffix => `${el}${suffix}` as ElementStatKey)
+);
+
+export const BUFFABLE_STATS: BuffableStat[] = [
+  ...ATTRIBUTE_KEYS,
+  ...SKILL_KEYS,
+  ...MISC_STATS,
+  ...ELEMENT_STAT_KEYS,
+];
 
 interface AttackCategoryStats {
   hit:    number;
@@ -93,7 +102,7 @@ export interface ActiveDot {
   damagePerRound: number;
   roundsRemaining: number;
   sourcePartyIdx?: number;    // party member who applied this DoT (for threat attribution)
-  armorPenetration?: number;  // % points reducing armor DR on each tick
+  penetration?: number;       // % points reducing armor/MR DR on each tick
   elementPenetration?: number; // % points reducing element resistance on each tick
 }
 
@@ -114,6 +123,14 @@ export function statSuffix(key: string): string {
   return PERCENT_STATS.has(key) ? '%' : '';
 }
 
+/** Formats a stat value for display: 1 decimal place for percent stats, raw otherwise. */
+export function formatStatValue(key: string, value: number): string {
+  return PERCENT_STATS.has(key) ? value.toFixed(1) : String(value);
+}
+
+/** Formatted value plus its '%' suffix where applicable, e.g. formatStat('dodge', 7.25) → '7.3%'. */
+export const formatStat = (key: string, value: number) => `${formatStatValue(key, value)}${statSuffix(key)}`;
+
 // ─── Internal Helpers ─────────────────────────────────────────────────────────
 
 export const BASE_ATTRIBUTES = 5;
@@ -126,20 +143,64 @@ export const SKILL_POINTS_PER_LEVEL = 3;
 const fl = (n: number) => Math.floor(n);
 const ATTRIBUTE_KEYS_SET = new Set<string>(ATTRIBUTE_KEYS);
 
-type ElKeyEntry = { element: DamageElement; key: 'hit' | 'crit' | 'damage' | 'resistance' | 'penetration' };
-const ELEMENT_STAT_KEY_MAP = new Map<string, ElKeyEntry>(
-  DAMAGE_ELEMENTS.flatMap(el => [
-    [`${el}Hit`,         { element: el, key: 'hit'         }],
-    [`${el}Crit`,        { element: el, key: 'crit'        }],
-    [`${el}Damage`,      { element: el, key: 'damage'      }],
-    [`${el}Resistance`,  { element: el, key: 'resistance'  }],
-    [`${el}Penetration`, { element: el, key: 'penetration' }],
-  ] as [string, ElKeyEntry][])
-);
+// ─── Stat Accessors ───────────────────────────────────────────────────────────
+//
+// Every numeric stat that passives, scaling passives, and buffs can modify, keyed by its
+// passive / BuffableStat key. The modifier phases iterate this table instead of listing
+// each stat by hand.
+
+type ScalarStatKey = 'hp' | 'mp' | 'hpRegen' | 'mpRegen' | 'initiative' | 'movement' | 'armor' | 'dodge'
+  | 'parry' | 'block' | 'glancingBlow' | 'magicResistance' | 'healing' | 'threatMultiplier';
+
+interface StatAccessor {
+  key: string;
+  get: (s: Stats) => number;
+  set: (s: Stats, v: number) => void;
+  noFloor?: boolean;  // real-valued stat — percent modifiers are not floored
+  min?: number;       // lower clamp when buffs modify the stat (default 0)
+}
+
+const capitalize = (k: string) => k[0].toUpperCase() + k.slice(1);
+const EMPTY_ELEMENT_STATS: ElementStats = { hit: 0, crit: 0, damage: 0, resistance: 0, penetration: 0 };
+
+const scalar = (key: ScalarStatKey, opts: Partial<StatAccessor> = {}): StatAccessor =>
+  ({ key, get: s => s[key], set: (s, v) => { s[key] = v; }, ...opts });
+
+const STAT_ACCESSORS: StatAccessor[] = [
+  ...(['hp', 'mp', 'hpRegen', 'mpRegen', 'initiative', 'armor', 'dodge', 'parry', 'block', 'glancingBlow', 'magicResistance', 'healing'] as const)
+    .map(k => scalar(k)),
+  scalar('movement', { min: 1 }),
+  scalar('threatMultiplier', { noFloor: true, min: 0.1 }),
+  ...(['melee', 'ranged', 'magic'] as const).flatMap(cat =>
+    (['hit', 'damage', 'crit', 'penetration'] as const).map((f): StatAccessor => ({
+      key: `${cat}${capitalize(f)}`,
+      get: s => s[cat][f],
+      set: (s, v) => { s[cat][f] = v; },
+    }))),
+  ...DAMAGE_ELEMENTS.flatMap(el =>
+    (['hit', 'crit', 'damage', 'resistance', 'penetration'] as const).map((f): StatAccessor => ({
+      key: `${el}${capitalize(f)}`,
+      get: s => s.elementalStats[el]?.[f] ?? 0,
+      set: (s, v) => { s.elementalStats[el] = { ...(s.elementalStats[el] ?? EMPTY_ELEMENT_STATS), [f]: v }; },
+    }))),
+];
+
+/** Copy a Stats block deeply enough that STAT_ACCESSORS setters don't mutate the original. */
+function cloneStats(stats: Stats): Stats {
+  return { ...stats, melee: { ...stats.melee }, ranged: { ...stats.ranged }, magic: { ...stats.magic }, elementalStats: { ...stats.elementalStats } };
+}
+
+/** Drop all-zero elemental entries so consumers only see elements with real modifiers. */
+function pruneElementalStats(s: Stats): Stats {
+  for (const el of DAMAGE_ELEMENTS) {
+    const e = s.elementalStats[el];
+    if (e && !e.hit && !e.crit && !e.damage && !e.resistance && !e.penetration) delete s.elementalStats[el];
+  }
+  return s;
+}
 
 // ─── Enemy Attribute Point Generation ────────────────────────────────────────
 
-const ALL_ATTRIBUTES: AttributeKey[] = ['strength', 'toughness', 'finesse', 'mind', 'spirit', 'speed'];
 
 /**
  * Distribute attribute points for an enemy based on level and high/low preferences.
@@ -152,15 +213,15 @@ export function generateEnemyAttributePoints(
 ): Record<AttributeKey, number> {
   const total = STARTING_ATTR_POINTS + ATTRIBUTE_POINTS_PER_LEVEL * (level - 1);
   const alloc: Record<AttributeKey, number> = { strength: 0, toughness: 0, finesse: 0, mind: 0, spirit: 0, speed: 0 };
-  const neutral = ALL_ATTRIBUTES.filter(a => !highAttributes.includes(a) && !lowAttributes.includes(a));
+  const neutral = ATTRIBUTE_KEYS.filter(a => !highAttributes.includes(a) && !lowAttributes.includes(a));
 
   // Weighted random allocation
   const weight = (a: AttributeKey) => highAttributes.includes(a) ? 3 : lowAttributes.includes(a) ? 0.5 : 1;
-  const totalWeight = ALL_ATTRIBUTES.reduce((sum, a) => sum + weight(a), 0);
+  const totalWeight = ATTRIBUTE_KEYS.reduce((sum, a) => sum + weight(a), 0);
 
   for (let i = 0; i < total; i++) {
     let r = Math.random() * totalWeight;
-    for (const attr of ALL_ATTRIBUTES) {
+    for (const attr of ATTRIBUTE_KEYS) {
       r -= weight(attr);
       if (r <= 0) { alloc[attr]++; break; }
     }
@@ -253,35 +314,35 @@ function buildRawStats(
     level,
     attributes: attrs,
     skills,
-    hp:              fl(20 + (2 * tou) + (str / 3) + (2 * level)),
+    hp:              fl(20 + (2 * tou) + (str / 2) + (2 * level)),
     mp:              fl(10 + (3 * mnd) + spr + level),
     hpRegen:         1 + fl((spr / 6) + (tou / 12)),
     mpRegen:         1 + fl((spr / 6) + (mnd / 12) + (devotion / 6)),
-    initiative:      fl(3 + (spd / 4) + (fin / 8) + (perception / 4) + (stealth / 6)),
+    initiative:      fl(3 + (spd / 4) + (fin / 8) + (perception / 3) + (stealth / 6)),
     movement:        movement + fl(spd / 12),
-    armor:           tou + (armorBonus * (1 + redoubt * 0.02)),
-    dodge:           fl(3 + (spd / 4) + (fin / 6) + (evasion / 5)),
+    armor:           fl(tou + (armorBonus * (1 + redoubt * 0.02))),
+    dodge:           3 + (spd / 3) + (fin / 6) + (evasion / 4),
     parry:           (spd / 6) + (fin / 6) + (evasion / 6),
     block:           0,
-    glancingBlow:    (armorBonus * (0.1 + redoubt * 0.01)) + (spd / 4) + (evasion / 4),
+    glancingBlow:    (armorBonus * (0.05 + redoubt * 0.01)) + (spd / 4) + (evasion / 4),
     magicResistance: fl(spr + (mnd / 3) + devotion),
     healing:         fl((spr / 3) + (devotion / 4)),
     melee: {
-      hit:    fl((str / 4) + (fin / 3) + (expertise / 3)),
+      hit:         (str / 4) + (fin / 3) + (expertise / 3),
       damage:      fl((str / 3) + (fin / 6)),
-      crit:        fl(5 + (fin / 4) + (str / 4) + (expertise / 3)),
+      crit:        5 + (fin / 4) + (str / 4) + (expertise / 3),
       penetration: expertise / 3,
     },
     ranged: {
-      hit:    fl((fin / 2) + (expertise / 3)),
+      hit:         (fin / 2) + (expertise / 3),
       damage:      fl(fin / 3),
-      crit:        fl(5 + (fin / 2) + (expertise / 3)),
+      crit:        5 + (fin / 2) + (expertise / 3),
       penetration: expertise / 3,
     },
     magic: {
-      hit:    fl((mnd / 2) + (spellcraft / 3)),
+      hit:         (mnd / 2) + (spellcraft / 3),
       damage:      fl(mnd / 3),
-      crit:        fl(5 + (mnd / 2) + (spellcraft / 3)),
+      crit:        5 + (mnd / 2) + (spellcraft / 3),
       penetration: spellcraft / 3,
     },
     threatMultiplier: 1 - (stealth * 0.02),
@@ -291,44 +352,11 @@ function buildRawStats(
 
 /** Phase 2 — add flat class passive bonuses. Block's flat passive is scaled by Redoubt (via stats.skills). */
 function applyFlatPassives(stats: Stats, passives: Record<string, Passive>): Stats {
-  const pf = (key: string) => passives[key]?.flat ?? 0;
-  const { redoubt } = stats.skills;
-  const s = { ...stats, melee: { ...stats.melee }, ranged: { ...stats.ranged }, magic: { ...stats.magic }, elementalStats: { ...stats.elementalStats } };
-
-  s.hp              += pf('hp');
-  s.mp              += pf('mp');
-  s.hpRegen         += pf('hpRegen');
-  s.mpRegen         += pf('mpRegen');
-  s.initiative      += pf('initiative');
-  s.movement        += pf('movement');
-  s.armor           += pf('armor');
-  s.dodge           += pf('dodge');
-  s.parry           += pf('parry');
-  s.block            = pf('block') * (1 + redoubt * 0.02);
-  s.glancingBlow    += pf('glancingBlow');
-  s.magicResistance += pf('magicResistance');
-  s.healing         += pf('healing');
-  s.melee.hit       += pf('meleeHit');
-  s.melee.damage      += pf('meleeDamage');
-  s.melee.crit        += pf('meleeCrit');
-  s.melee.penetration += pf('meleePenetration');
-  s.ranged.hit        += pf('rangedHit');
-  s.ranged.damage      += pf('rangedDamage');
-  s.ranged.crit        += pf('rangedCrit');
-  s.ranged.penetration += pf('rangedPenetration');
-  s.magic.hit         += pf('magicHit');
-  s.magic.damage      += pf('magicDamage');
-  s.magic.crit        += pf('magicCrit');
-  s.magic.penetration += pf('magicPenetration');
-  s.threatMultiplier  += pf('threatMultiplier');
-
-  for (const el of DAMAGE_ELEMENTS) {
-    const hit = pf(`${el}Hit`), crit = pf(`${el}Crit`), damage = pf(`${el}Damage`);
-    const resistance = pf(`${el}Resistance`), penetration = pf(`${el}Penetration`);
-    if (hit || crit || damage || resistance || penetration) {
-      const cur = s.elementalStats[el] ?? { hit: 0, crit: 0, damage: 0, resistance: 0, penetration: 0 };
-      s.elementalStats[el] = { hit: cur.hit + hit, crit: cur.crit + crit, damage: cur.damage + damage, resistance: cur.resistance + resistance, penetration: cur.penetration + penetration };
-    }
+  const s = cloneStats(stats);
+  const blockScale = 1 + stats.skills.redoubt * 0.02;
+  for (const a of STAT_ACCESSORS) {
+    const flat = passives[a.key]?.flat;
+    if (flat) a.set(s, a.get(s) + (a.key === 'block' ? flat * blockScale : flat));
   }
   return s;
 }
@@ -339,82 +367,23 @@ function applyScalingAndPctPassives(
   passives: Record<string, Passive>,
   scalingPassives: ScalingPassive[],
 ): Stats {
-  const s = { ...stats, melee: { ...stats.melee }, ranged: { ...stats.ranged }, magic: { ...stats.magic }, elementalStats: { ...stats.elementalStats } };
+  const s = cloneStats(stats);
 
   const attrSource: Record<string, number> = { ...stats.attributes, level: stats.level };
   const scalingBonus: Record<string, number> = {};
   for (const sp of scalingPassives) {
     scalingBonus[sp.targetKey] = (scalingBonus[sp.targetKey] ?? 0) + fl((attrSource[sp.source] ?? 0) * sp.factor);
   }
-  const sb = (key: string) => scalingBonus[key] ?? 0;
 
-  s.hp              += sb('hp');
-  s.mp              += sb('mp');
-  s.hpRegen         += sb('hpRegen');
-  s.mpRegen         += sb('mpRegen');
-  s.initiative      += sb('initiative');
-  s.movement        += sb('movement');
-  s.armor           += sb('armor');
-  s.dodge           += sb('dodge');
-  s.parry           += sb('parry');
-  s.block           += sb('block');
-  s.glancingBlow    += sb('glancingBlow');
-  s.magicResistance += sb('magicResistance');
-  s.healing         += sb('healing');
-  s.melee.hit    += sb('meleeHit');
-  s.melee.damage      += sb('meleeDamage');
-  s.melee.crit        += sb('meleeCrit');
-  s.melee.penetration += sb('meleePenetration');
-  s.ranged.hit    += sb('rangedHit');
-  s.ranged.damage      += sb('rangedDamage');
-  s.ranged.crit        += sb('rangedCrit');
-  s.ranged.penetration += sb('rangedPenetration');
-  s.magic.hit    += sb('magicHit');
-  s.magic.damage      += sb('magicDamage');
-  s.magic.crit        += sb('magicCrit');
-  s.magic.penetration += sb('magicPenetration');
-  s.threatMultiplier  += sb('threatMultiplier');
-
-  const withPct = (val: number, key: string): number => { const p = passives[key]?.percent; return p ? fl(val * (1 + p / 100)) : val; };
-
-  s.hp              = withPct(s.hp,              'hp');
-  s.mp              = withPct(s.mp,              'mp');
-  s.hpRegen         = withPct(s.hpRegen,         'hpRegen');
-  s.mpRegen         = withPct(s.mpRegen,         'mpRegen');
-  s.initiative      = withPct(s.initiative,      'initiative');
-  s.movement        = withPct(s.movement,        'movement');
-  s.armor           = withPct(s.armor,           'armor');
-  s.dodge           = withPct(s.dodge,           'dodge');
-  s.parry           = withPct(s.parry,           'parry');
-  s.block           = withPct(s.block,           'block');
-  s.glancingBlow    = withPct(s.glancingBlow,    'glancingBlow');
-  s.magicResistance = withPct(s.magicResistance, 'magicResistance');
-  s.healing         = withPct(s.healing,         'healing');
-  s.melee.hit       = withPct(s.melee.hit,    'meleeHit');
-  s.melee.damage      = withPct(s.melee.damage,      'meleeDamage');
-  s.melee.crit        = withPct(s.melee.crit,        'meleeCrit');
-  s.melee.penetration = withPct(s.melee.penetration, 'meleePenetration');
-  s.ranged.hit        = withPct(s.ranged.hit,    'rangedHit');
-  s.ranged.damage      = withPct(s.ranged.damage,      'rangedDamage');
-  s.ranged.crit        = withPct(s.ranged.crit,        'rangedCrit');
-  s.ranged.penetration = withPct(s.ranged.penetration, 'rangedPenetration');
-  s.magic.hit         = withPct(s.magic.hit,    'magicHit');
-  s.magic.damage      = withPct(s.magic.damage,      'magicDamage');
-  s.magic.crit        = withPct(s.magic.crit,        'magicCrit');
-  s.magic.penetration = withPct(s.magic.penetration, 'magicPenetration');
-  // threatMultiplier is a real-valued multiplier — not floored
-  const threatPct = passives['threatMultiplier']?.percent;
-  if (threatPct) s.threatMultiplier *= (1 + threatPct / 100);
-
-  for (const el of DAMAGE_ELEMENTS) {
-    const cur = s.elementalStats[el] ?? { hit: 0, crit: 0, damage: 0, resistance: 0, penetration: 0 };
-    const hit = withPct(cur.hit + sb(`${el}Hit`), `${el}Hit`), crit = withPct(cur.crit + sb(`${el}Crit`), `${el}Crit`);
-    const damage = withPct(cur.damage + sb(`${el}Damage`), `${el}Damage`), resistance = withPct(cur.resistance + sb(`${el}Resistance`), `${el}Resistance`);
-    const penetration = withPct(cur.penetration + sb(`${el}Penetration`), `${el}Penetration`);
-    if (hit || crit || damage || resistance || penetration) s.elementalStats[el] = { hit, crit, damage, resistance, penetration };
-    else delete s.elementalStats[el];
+  for (const a of STAT_ACCESSORS) {
+    const bonus = scalingBonus[a.key] ?? 0;
+    const pct = passives[a.key]?.percent;
+    if (!bonus && !pct) continue;
+    let v = a.get(s) + bonus;
+    if (pct) v = a.noFloor ? v * (1 + pct / 100) : fl(v * (1 + pct / 100));
+    a.set(s, v);
   }
-  return s;
+  return pruneElementalStats(s);
 }
 
 export function calculateStats(input: PlayerStatInput | EnemyStatInput): Stats {
@@ -483,16 +452,6 @@ export function calculateStats(input: PlayerStatInput | EnemyStatInput): Stats {
  * so all derived values are recomputed correctly.
  */
 export function applyStatBuffs(stats: Stats, buffs: ActiveBuff[]): Stats {
-  if (buffs.length === 0) return stats;
-  const s = {
-    ...stats,
-    melee: { ...stats.melee },
-    ranged: { ...stats.ranged },
-    magic: { ...stats.magic },
-    elementalStats: { ...stats.elementalStats },
-  };
-
-  // Collect flat and percent totals per non-attribute stat
   const flatMap = new Map<string, number>();
   const pctMap  = new Map<string, number>();
   for (const buff of buffs) {
@@ -502,51 +461,15 @@ export function applyStatBuffs(stats: Stats, buffs: ActiveBuff[]): Stats {
   }
   if (flatMap.size === 0 && pctMap.size === 0) return stats;
 
-  // (base + flat) * (1 + pct/100), floored and clamped
-  const apply = (st: string, base: number, minVal = 0, noFloor = false): number => {
-    const f = flatMap.get(st) ?? 0;
-    const p = pctMap.get(st)  ?? 0;
-    if (f === 0 && p === 0) return base;
-    const withFlat = base + f;
-    const result = p !== 0 ? withFlat * (1 + p / 100) : withFlat;
-    return Math.max(minVal, noFloor ? result : fl(result));
-  };
-
-  s.hpRegen         = apply('hpRegen',         s.hpRegen);
-  s.mpRegen         = apply('mpRegen',          s.mpRegen);
-  s.initiative      = apply('initiative',       s.initiative);
-  s.movement        = apply('movement',         s.movement,        1);
-  s.armor           = apply('armor',            s.armor);
-  s.dodge           = apply('dodge',            s.dodge);
-  s.parry           = apply('parry',            s.parry);
-  s.block           = apply('block',            s.block);
-  s.glancingBlow    = apply('glancingBlow',     s.glancingBlow);
-  s.magicResistance = apply('magicResistance',  s.magicResistance);
-  s.healing         = apply('healing',          s.healing);
-  s.melee.hit       = apply('meleeHit',          s.melee.hit);
-  s.melee.damage      = apply('meleeDamage',       s.melee.damage);
-  s.melee.crit        = apply('meleeCrit',         s.melee.crit);
-  s.melee.penetration = apply('meleePenetration',  s.melee.penetration);
-  s.ranged.hit        = apply('rangedHit',         s.ranged.hit);
-  s.ranged.damage      = apply('rangedDamage',      s.ranged.damage);
-  s.ranged.crit        = apply('rangedCrit',        s.ranged.crit);
-  s.ranged.penetration = apply('rangedPenetration', s.ranged.penetration);
-  s.magic.hit         = apply('magicHit',          s.magic.hit);
-  s.magic.damage      = apply('magicDamage',       s.magic.damage);
-  s.magic.crit        = apply('magicCrit',         s.magic.crit);
-  s.magic.penetration = apply('magicPenetration',  s.magic.penetration);
-  s.threatMultiplier = apply('threatMultiplier', s.threatMultiplier, 0.1, true);
-
-  // Element stat buffs — route to elementalStats map
-  for (const [statKey, entry] of ELEMENT_STAT_KEY_MAP) {
-    const f = flatMap.get(statKey) ?? 0;
-    const p = pctMap.get(statKey)  ?? 0;
+  const s = cloneStats(stats);
+  for (const a of STAT_ACCESSORS) {
+    const f = flatMap.get(a.key) ?? 0;
+    const p = pctMap.get(a.key)  ?? 0;
     if (f === 0 && p === 0) continue;
-    const cur = s.elementalStats[entry.element] ?? { hit: 0, crit: 0, damage: 0, resistance: 0, penetration: 0 };
-    s.elementalStats[entry.element] = { ...cur, [entry.key]: apply(statKey, cur[entry.key]) };
+    const result = (a.get(s) + f) * (1 + p / 100);
+    a.set(s, Math.max(a.min ?? 0, a.noFloor ? result : fl(result)));
   }
-
-  return s;
+  return pruneElementalStats(s);
 }
 
 /**

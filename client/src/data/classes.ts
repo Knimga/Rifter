@@ -310,7 +310,7 @@ export const CLASSES: Record<ClassKey, ClassData> = {
         target: 'enemy',
         attackCategory: 'ranged',
         effects: [
-          { type: 'debuff', appliesTo: 'target', stats: { movement: -3 }, rounds: 3 }
+          { type: 'debuff', appliesTo: 'target', stats: { movement: -4 }, rounds: 3 }
         ]
       }
     ],
@@ -358,7 +358,7 @@ export const CLASSES: Record<ClassKey, ClassData> = {
   shaman: {
     name: 'Shaman',
     color: '#9333ea',
-    description: 'A wise primalist who can heal themselves and curse enemies.',
+    description: 'A wise primalist who can heal allies and weaken enemies.',
     attributes: { toughness: 2, mind: 3, spirit: 3 },
     skills: { devotion: 3, spellcraft: 3, perception: 2 },
     passives: {
@@ -369,15 +369,16 @@ export const CLASSES: Record<ClassKey, ClassData> = {
     weaponProficiencies: ['Daggers', '1h Maces', 'Wands', 'Staves', 'Shields'],
     abilities: [
       {
-        name: 'Curse',
+        name: 'Wither',
         icon: GiCursedStar,
         mpCost: 8,
         range: 5,
         target: 'enemy',
+        area: 'blast1',
         displayElement: 'shadow',
         attackCategory: 'magic',
         effects: [
-          { type: 'dot', appliesTo: 'target', damageElement: 'shadow', damagePerRound: 5, rounds: 3 },
+          { type: 'debuff', appliesTo: 'target', damageElement: 'shadow', stats: { meleeDamage: -5, magicDamage: -5 }, rounds: 3 },
         ]
       },
       {
@@ -392,7 +393,8 @@ export const CLASSES: Record<ClassKey, ClassData> = {
         ]
       }
     ]
-  }
+  },
+
 };
 
 export const STARTING_CHEST: Record<ClassKey, ArmorProficiency> = {

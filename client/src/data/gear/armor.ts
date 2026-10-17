@@ -34,7 +34,6 @@ export interface ArmorSeries {
   name: string;               // e.g. 'Leather', 'Chainmail'
   armorType: ArmorProficiency;
   requiredLevel: number;
-  armorMultiplier: number;    // scales base armor relative to tier 1 for this armor type
   names: Record<ArmorSlot, string>;   // unique item name per slot
   icons: Record<ArmorSlot, IconType>; // icon component per slot
 }
@@ -42,37 +41,32 @@ export interface ArmorSeries {
 export const ARMOR_SERIES: ArmorSeries[] = [
   // ── Cloth ─────────────────────────────────────────────────────────────────
   {
-    id: 'apprentice', name: 'Apprentice', armorType: 'Cloth', requiredLevel: 1, armorMultiplier: 1.0,
+    id: 'apprentice', name: 'Apprentice', armorType: 'Cloth', requiredLevel: 1,
     names: { helm: 'Hood',     chest: 'Robes',      gloves: 'Handwraps', boots: 'Shoes'   },
     icons: { helm: GiHood,     chest: GiNinjaArmor, gloves: GiGloves,    boots: GiSonicShoes },
   },
 
   // ── Light ─────────────────────────────────────────────────────────────────
   {
-    id: 'leather', name: 'Leather', armorType: 'Light', requiredLevel: 1, armorMultiplier: 1.0,
+    id: 'leather', name: 'Leather', armorType: 'Light', requiredLevel: 1,
     names: { helm: 'Cap',         chest: 'Jerkin',        gloves: 'Gloves',  boots: 'Boots'       },
     icons: { helm: GiLightHelm,   chest: GiLeatherArmor,  gloves: GiGloves,  boots: GiLeatherBoot },
   },
 
   // ── Medium ────────────────────────────────────────────────────────────────
   {
-    id: 'hide', name: 'Hide', armorType: 'Medium', requiredLevel: 1, armorMultiplier: 1.0,
+    id: 'hide', name: 'Hide', armorType: 'Medium', requiredLevel: 1,
     names: { helm: 'Skullcap',  chest: 'Hauberk',        gloves: 'Gauntlets', boots: 'Greaves' },
     icons: { helm: GiBarbute,   chest: GiShoulderArmor,  gloves: GiGauntlet,  boots: GiBoots   },
   },
 
   // ── Heavy ─────────────────────────────────────────────────────────────────
   {
-    id: 'iron', name: 'Iron', armorType: 'Heavy', requiredLevel: 1, armorMultiplier: 1.0,
+    id: 'iron', name: 'Iron', armorType: 'Heavy', requiredLevel: 1,
     names: { helm: 'Helm',            chest: 'Breastplate',  gloves: 'Gauntlets', boots: 'Sabatons' },
     icons: { helm: GiBlackKnightHelm, chest: GiBreastplate,  gloves: GiGauntlet,  boots: GiGreaves  },
   },
 ];
-
-// ─── Armor Type Data ─────────────────────────────────────────────────────────
-
-
-
 
 // ─── Armor Type Implicits ─────────────────────────────────────────────────────────
 
@@ -126,17 +120,6 @@ export const ARMOR_IMPLICITS: Record<ArmorProficiency, ArmorImplicitDef> = {
     },
   },
 };
-
-/*
-  | AttributeKey
-  | 'hpRegen' | 'mpRegen' | 'initiative' | 'movement'
-  | 'armor' | 'dodge' | 'parry' | 'block' | 'glancingBlow' | 'magicResistance' | 'healing'
-  | 'meleeHit' | 'meleeDamage' | 'meleeCrit'
-  | 'rangedHit' | 'rangedDamage' | 'rangedCrit'
-  | 'magicHit' | 'magicDamage' | 'magicCrit'
-  | 'threatMultiplier'
-  | ElementStatKey;
-*/
 
 export const ARMOR_INVALID_AFFIXES: Record<ArmorProficiency, BuffableStat[]> = {
   Cloth: ['strength', 'finesse', 'block', 'parry', 'glancingBlow', ...rangedStats],

@@ -1,7 +1,9 @@
 import type { EnemyInstance } from './enemies';
-import type { Stats } from './stats';
-import { recomputeStats } from './stats';
-import { applyDR } from './attackResolution';
+import { withEnemyBuffs } from './enemies';
+import type { ActiveDot, ActiveHot, Stats } from './stats';
+import type { Pos } from './dungeonHelpers';
+import { tickDots, tickDurations, tickHots } from './abilityExecution';
+import { randInt } from './random';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -25,7 +27,7 @@ export interface CombatState {
 
 // ─── Functions ───────────────────────────────────────────────────────────────
 
-const d20 = () => 1 + Math.floor(Math.random() * 20);
+const d20 = () => randInt(1, 20);
 
 export function startCombat(
   partyMembers: Array<{ stats: Stats; name: string }>,
@@ -95,6 +97,9 @@ export function joinCombat(state: CombatState, newEnemies: EnemyInstance[]): Com
   };
 }
 
+/** Party indices currently at 0 HP. */
+export const deadPartyIndices = (partyHp: number[]) => new Set(partyHp.flatMap((hp, i) => hp <= 0 ? [i] : []));
+
 export function advanceTurn(
   state: CombatState,
   enemies: EnemyInstance[],
@@ -129,71 +134,50 @@ export function advanceTurn(
   };
 }
 
-/** Per-enemy DoT tick result, used to spawn floating text and attribute threat. */
-export interface DotTickEvent {
-  enemyId: string;
-  pos: { x: number; y: number };
-  damage: number;
-  threatSources: Array<{ partyIdx: number; damage: number }>;
+/** One unit's top-of-round result: regen + HoT heals + DoT damage (after DR). Shared by party and enemies. */
+export interface RoundTick {
+  hp: number;
+  mp: number;
+  heal: number;                     // HoT healing this round
+  dotDamage: number;                // DoT damage this round
+  dotSources: Map<number, number>;  // partyIdx → DoT damage dealt, for threat
 }
 
-/** Apply all top-of-round effects to enemies (regen, DoT ticks, etc.). */
-export function applyTopOfRound(enemies: EnemyInstance[]): { enemies: EnemyInstance[]; dotTicks: DotTickEvent[] } {
-  const dotTicks: DotTickEvent[] = [];
+export function tickRound(stats: Stats, hp: number, mp: number, hots: ActiveHot[], dots: ActiveDot[]): RoundTick {
+  const heal = tickHots(hots);
+  const { damage, bySource } = tickDots(dots, stats);
+  return {
+    hp: Math.max(0, Math.min(stats.hp, hp + stats.hpRegen + heal) - damage),
+    mp: Math.min(stats.mp, mp + stats.mpRegen),
+    heal,
+    dotDamage: damage,
+    dotSources: bySource,
+  };
+}
+
+/** Per-enemy tick event, used to spawn floating text and attribute DoT threat. */
+export interface EnemyTickEvent {
+  pos: Pos;
+  tick: RoundTick;
+}
+
+/** Apply all top-of-round effects to enemies: buff expiry, regen, HoT and DoT ticks. */
+export function applyTopOfRound(enemies: EnemyInstance[]): { enemies: EnemyInstance[]; events: EnemyTickEvent[] } {
+  const events: EnemyTickEvent[] = [];
 
   const updated = enemies.map(e => {
     if (e.currentHp <= 0) return e;
 
-    // Buff expiry — decrement duration, remove expired, recompute stats if anything changed
-    const newBuffs = e.buffs
-      .map(b => ({ ...b, roundsRemaining: b.roundsRemaining - 1 }))
-      .filter(b => b.roundsRemaining > 0);
-    const buffsChanged = newBuffs.length !== e.buffs.length;
-    const s = buffsChanged ? recomputeStats({ mode: 'enemy', classData: e.classData, pointsSpent: e.pointsSpent, level: e.level }, newBuffs) : e.stats;
+    // Buff expiry first so regen/DR use the post-expiry stats
+    const buffs = tickDurations(e.buffs);
+    const next = buffs.length !== e.buffs.length ? withEnemyBuffs(e, buffs) : { ...e, buffs };
 
-    // Regen (using current effective stats)
-    let hp = Math.min(s.hp, e.currentHp + s.hpRegen);
-    const mp = Math.min(s.mp, e.currentMp + s.mpRegen);
-
-    // Tick HoTs
-    const remainingHots = e.hots
-      .map(h => ({ ...h, roundsRemaining: h.roundsRemaining - 1 }))
-      .filter(h => h.roundsRemaining > 0);
-    if (e.hots.length > 0) {
-      const hotHeal = e.hots.reduce((sum, h) => sum + h.healPerRound + Math.floor(s.healing / 2), 0);
-      hp = Math.min(s.hp, hp + hotHeal);
-    }
-
-    // Tick DoTs
-    let totalDotDamage = 0;
-    const threatSourceMap = new Map<number, number>();
-    const remainingDots = e.dots
-      .map(dot => {
-        const tickDamage = applyDR(dot.damagePerRound, dot.damageElement, s.armor, s.magicResistance, undefined, dot.armorPenetration, dot.elementPenetration);
-        totalDotDamage += tickDamage;
-        if (dot.sourcePartyIdx !== undefined) {
-          threatSourceMap.set(dot.sourcePartyIdx, (threatSourceMap.get(dot.sourcePartyIdx) ?? 0) + tickDamage);
-        }
-        return dot.roundsRemaining > 1
-          ? { ...dot, roundsRemaining: dot.roundsRemaining - 1 }
-          : null;
-      })
-      .filter((d): d is NonNullable<typeof d> => d !== null);
-
-    if (totalDotDamage > 0) {
-      hp = Math.max(0, hp - totalDotDamage);
-      dotTicks.push({
-        enemyId: e.id,
-        pos: e.pos,
-        damage: totalDotDamage,
-        threatSources: Array.from(threatSourceMap.entries()).map(([partyIdx, damage]) => ({ partyIdx, damage })),
-      });
-    }
-
-    return { ...e, currentHp: hp, currentMp: mp, dots: remainingDots, hots: remainingHots, buffs: newBuffs, stats: s };
+    const tick = tickRound(next.stats, e.currentHp, e.currentMp, e.hots, e.dots);
+    events.push({ pos: e.pos, tick });
+    return { ...next, currentHp: tick.hp, currentMp: tick.mp, hots: tickDurations(e.hots), dots: tickDurations(e.dots) };
   });
 
-  return { enemies: updated, dotTicks };
+  return { enemies: updated, events };
 }
 
 export function getCurrentCombatant(state: CombatState): Combatant | null {

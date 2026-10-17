@@ -1,13 +1,12 @@
-import { CLASSES, type ClassKey } from '../data/classes';
+import { CLASSES } from '../data/classes';
 import type { Stats } from '../data/stats';
-import type { CombatState, Combatant } from '../data/combat';
+import type { CombatState } from '../data/combat';
 import type { EnemyInstance } from '../data/enemies';
 import type { ZoneData } from '../data/dungeonGen';
 import type { PartyMemberConfig } from '../data/party';
 import TurnOrderBar from './TurnOrderBar';
 
 interface Props {
-  selectedClass: ClassKey;
   stats: Stats;
   location: 'sanctum' | 'dungeon';
   zone: ZoneData | null;
@@ -18,7 +17,6 @@ interface Props {
   combat: CombatState;
   activePartyIdx: number;
   zoneEnemies: EnemyInstance[];
-  currentCombatant: Combatant | null;
   onShowCharSheet: () => void;
 }
 

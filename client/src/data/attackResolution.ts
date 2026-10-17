@@ -1,128 +1,115 @@
-import { PHYSICAL_ELEMENTS, type DamageElement } from './gear';
+import { PHYSICAL_ELEMENTS, type AttackCategory, type DamageElement } from './gear';
+import type { Stats } from './stats';
+import { randInt } from './random';
 
 // ─── Tuning Constants ────────────────────────────────────────────────────────
 
 const BASE_HIT_CHANCE = 75;           // base % chance any attack lands
 const DR_DIVISOR = 50;                // higher value = slower scaling of DR
 const DR_CAP = 0.75;                  // lower value = more threatening endgame damage
+const CRIT_MULTIPLIER = 2;
+const GLANCING_MULTIPLIER = 0.7;      // glancing blows deal 30% less damage
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
-export interface AttackParams {
-  hit: number;                // attacker's hit% for this attackCategory (melee/ranged/magic)
-  damageBonus: number;        // attacker's category damage bonus (melee/ranged/magic rules — see callers)
-  critChance: number;         // attacker's crit% for this attackCategory
-  minDamage: number;          // weapon / ability min damage
-  maxDamage: number;          // weapon / ability max damage
-  damageElement: DamageElement; // determines which defense stat applies
-  targetDodge: number;        // target's dodge stat (dodge of 5 = 5%)
-  targetArmor: number;        // target's armor stat
-  targetMagicResistance: number; // target's magic resistance stat
-  targetParry?: number;             // target's parry% — negates the attack entirely (default 0)
-  targetBlock?: number;             // target's block% — negates the attack entirely (default 0)
-  targetGlancingBlow?: number;      // target's glancing blow% — reduces hit damage by 30% (default 0)
-  // Element-specific bonuses/resistances (all optional, default 0)
-  elementHit?: number;              // attacker's extra hit% for this element (stacks with hit)
-  elementCrit?: number;             // attacker's extra crit% for this element (stacks with critChance)
-  elementDamage?: number;           // attacker's element-specific flat damage (stacks with damageBonus)
-  targetElementResistance?: number; // target's % damage reduction for this element
-  // Penetration (all optional, default 0)
-  categoryPenetration?: number;     // reduces armor/MR DR% by this many % points
-  elementPenetration?: number;      // reduces target element resistance by this many % points
+/** An attacker's effective offense for one attackCategory + damageElement pairing. */
+export interface Offense {
+  hit: number;                // category hit% + element hit%
+  crit: number;               // category crit% + element crit%
+  damage: number;             // routed category damage + element damage
+  penetration: number;        // routed category penetration — % points off armor/MR DR
+  elementPenetration: number; // % points off the target's element resistance
 }
 
-export interface AttackResult {
-  hit: boolean;
-  dodged: boolean;
-  parried: boolean;
-  blocked: boolean;
-  glancingBlow: boolean;      // hit landed but damage reduced by 30%
+/** Outcomes that stop an attack before damage: miss, dodge, parry, block. */
+export type HitOutcome = 'miss' | 'dodge' | 'parry' | 'block' | 'hit';
+
+export interface HitRoll {
+  outcome: HitOutcome;
   crit: boolean;
-  weaponRoll: number;         // random roll within weapon min/max
-  rawDamage: number;          // weaponRoll + damageBonus (doubled on crit, reduced on glancing)
-  damageReduction: number;    // amount subtracted by DR
-  finalDamage: number;        // actual damage dealt (min 1 on hit)
+  glancing: boolean;          // landed hit whose damage is reduced (only possible when outcome === 'hit')
+}
+
+export interface DamageRoll {
+  roll: number;               // random roll within min/max
+  raw: number;                // roll + offense damage, after crit/glancing multipliers
+  final: number;              // after DR and element resistance
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function rand(min: number, max: number): number {
-  return min + Math.floor(Math.random() * (max - min + 1));
-}
+const roll100 = () => randInt(1, 100);
 
-function roll100(): number {
-  return rand(1, 100);
+/**
+ * Hit/crit come from the attackCategory. Damage/penetration come from the category for physical
+ * elements, but from magic for magical elements — and a magic attackCategory routes ALL elements
+ * (even physical) through magic damage/penetration.
+ */
+export function getOffense(stats: Stats, category: AttackCategory, element: DamageElement): Offense {
+  const cat = stats[category];
+  const routed = (!PHYSICAL_ELEMENTS.has(element) || category === 'magic') ? stats.magic : cat;
+  const el = stats.elementalStats[element];
+  return {
+    hit: cat.hit + (el?.hit ?? 0),
+    crit: cat.crit + (el?.crit ?? 0),
+    damage: routed.damage + (el?.damage ?? 0),
+    penetration: routed.penetration,
+    elementPenetration: el?.penetration ?? 0,
+  };
 }
 
 // ─── Damage Reduction ─────────────────────────────────────────────────────────
 
-/** Calculate damage after DR. Used by both attack resolution and DoT ticks. */
+/** Damage after armor/MR DR, then element resistance. Used by attacks and DoT ticks. Min 1. */
 export function applyDR(
   rawDamage: number,
-  damageElement: DamageElement,
-  targetArmor: number,
-  targetMagicResistance: number,
-  targetElementResistance = 0,  // % reduction for this element, e.g. 25 = 25% less damage
-  armorPenetration = 0,         // % points subtracted from armor DR (e.g. 5 reduces 15% DR to 10%)
-  elementPenetration = 0,       // % points subtracted from element resistance
+  element: DamageElement,
+  target: Stats,
+  penetration = 0,          // % points subtracted from armor/MR DR (e.g. 5 reduces 15% DR to 10%)
+  elementPenetration = 0,   // % points subtracted from element resistance
 ): number {
-  let effectiveDefense: number;
-  if (PHYSICAL_ELEMENTS.has(damageElement)) {
-    effectiveDefense = targetArmor;
-  } else {
-    effectiveDefense = targetArmor * 0.5 + targetMagicResistance;
-  }
-  const baseDRPercent = (effectiveDefense / (effectiveDefense + DR_DIVISOR)) * DR_CAP;
-  const drPercent = Math.max(0, baseDRPercent - armorPenetration / 100);
-  const damageReduction = Math.floor(rawDamage * drPercent);
-  const afterArmor = Math.max(1, rawDamage - damageReduction);
-  const effectiveElementRes = Math.max(0, targetElementResistance - elementPenetration);
-  if (effectiveElementRes === 0) return afterArmor;
-  return Math.max(1, Math.round(afterArmor * (1 - effectiveElementRes / 100)));
+  const defense = PHYSICAL_ELEMENTS.has(element)
+    ? target.armor
+    : target.armor * 0.5 + target.magicResistance;
+  const drPercent = Math.max(0, (defense / (defense + DR_DIVISOR)) * DR_CAP - penetration / 100);
+  const afterArmor = Math.max(1, rawDamage - Math.floor(rawDamage * drPercent));
+  const elementRes = Math.max(0, (target.elementalStats[element]?.resistance ?? 0) - elementPenetration);
+  if (elementRes === 0) return afterArmor;
+  return Math.max(1, Math.round(afterArmor * (1 - elementRes / 100)));
 }
 
 // ─── Resolve ─────────────────────────────────────────────────────────────────
 
-export function resolveAttack(params: AttackParams): AttackResult {
-  const {
-    hit, damageBonus, critChance,
-    minDamage, maxDamage, damageElement,
-    targetDodge, targetArmor, targetMagicResistance,
-    targetParry = 0, targetBlock = 0, targetGlancingBlow = 0,
-    elementHit = 0, elementCrit = 0, elementDamage = 0, targetElementResistance = 0,
-    categoryPenetration = 0, elementPenetration = 0,
-  } = params;
+/**
+ * Roll whether an attack connects. Miss, dodge, parry and block each prevent the hit entirely;
+ * glancing blow and crit are only rolled once the attack has landed.
+ */
+export function rollHit(offense: Offense, target: Stats): HitRoll {
+  const stopped = (outcome: HitOutcome): HitRoll => ({ outcome, crit: false, glancing: false });
+  if (roll100() > BASE_HIT_CHANCE + offense.hit) return stopped('miss');
+  if (roll100() <= target.dodge) return stopped('dodge');
+  if (roll100() <= target.parry) return stopped('parry');
+  if (roll100() <= target.block) return stopped('block');
+  return {
+    outcome: 'hit',
+    glancing: roll100() <= target.glancingBlow,
+    crit: roll100() <= offense.crit,
+  };
+}
 
-  const miss = { hit: false, dodged: false, parried: false, blocked: false, glancingBlow: false, crit: false, weaponRoll: 0, rawDamage: 0, damageReduction: 0, finalDamage: 0 };
-
-  // 1. Hit check — base 75% + attacker's hit% + element hit bonus
-  const hitChance = BASE_HIT_CHANCE + hit + elementHit;
-  if (roll100() > hitChance) return miss;
-
-  // 2. Dodge check — target's dodge value is their dodge %
-  if (roll100() <= targetDodge) return { ...miss, hit: true, dodged: true };
-
-  // 3. Parry check
-  if (targetParry > 0 && roll100() <= targetParry) return { ...miss, hit: true, parried: true };
-
-  // 4. Block check
-  if (targetBlock > 0 && roll100() <= targetBlock) return { ...miss, hit: true, blocked: true };
-
-  // 5. Glancing blow check — damage is dealt but reduced by 30%
-  const isGlancing = targetGlancingBlow > 0 && roll100() <= targetGlancingBlow;
-
-  // 6. Crit check — attacker's crit value is their crit % + element crit bonus
-  const crit = roll100() <= (critChance + elementCrit);
-
-  // 7. Damage roll
-  const weaponRoll = rand(minDamage, maxDamage);
-  let rawDamage = weaponRoll + damageBonus + elementDamage;
-  if (crit) rawDamage *= 2;
-  if (isGlancing) rawDamage = Math.floor(rawDamage * 0.7);
-
-  // 8. Damage reduction (armor/MR) then element resistance
-  const finalDamage = applyDR(rawDamage, damageElement, targetArmor, targetMagicResistance, targetElementResistance, categoryPenetration, elementPenetration);
-  const damageReduction = rawDamage - finalDamage;
-
-  return { hit: true, dodged: false, parried: false, blocked: false, glancingBlow: isGlancing, crit, weaponRoll, rawDamage, damageReduction, finalDamage };
+/** Roll one damage component of a landed hit. Every component of the hit shares its crit/glancing result. */
+export function rollDamage(
+  offense: Offense,
+  element: DamageElement,
+  minDamage: number,
+  maxDamage: number,
+  target: Stats,
+  hit: HitRoll,
+): DamageRoll {
+  const roll = randInt(minDamage, maxDamage);
+  let raw = roll + offense.damage;
+  if (hit.crit) raw *= CRIT_MULTIPLIER;
+  if (hit.glancing) raw = Math.floor(raw * GLANCING_MULTIPLIER);
+  const final = applyDR(raw, element, target, offense.penetration, offense.elementPenetration);
+  return { roll, raw, final };
 }

@@ -21,8 +21,5 @@ export function useFloatingText() {
 
   const clearFloats = useCallback(() => setFloatingTexts([]), []);
 
-  const spawnFloatRef = useRef(spawnFloat);
-  spawnFloatRef.current = spawnFloat;
-
-  return { floatingTexts, spawnFloat, removeFloat, clearFloats, spawnFloatRef };
+  return { floatingTexts, spawnFloat, removeFloat, clearFloats };
 }

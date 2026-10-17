@@ -4,6 +4,10 @@ node_modules/
 # Claude Code
 .claude/
 
+# Dev-only
+docs/
+handoff/
+
 # Build output
 dist/
 

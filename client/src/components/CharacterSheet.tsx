@@ -2,38 +2,34 @@ import { useState, useRef, useEffect } from 'react';
 import {
   X, Crown, Shirt, Hand, Footprints, Sword, Shield,
 } from 'lucide-react';
-import { CLASSES, type ClassKey } from '../data/classes';
-import type { AttributeKey, SkillKey, ActiveBuff } from '../data/stats';
-import { calculateStats, statSuffix, type Stats } from '../data/stats';
-import {
-  GEAR_SLOTS, getGearArmorBonus, isArmorItem, isShieldItem, isWeaponItem,
-  SHIELD_ICON,
-  type GearSlots, type GearSlot, type Item
-} from '../data/gear';
+import { CLASSES } from '../data/classes';
+import { ATTRIBUTE_KEYS, recomputeStats, formatStat, type Stats } from '../data/stats';
+import { GEAR_SLOTS, getGearArmorBonus, getGearBuffs, type GearSlots, type GearSlot, type Item } from '../data/gear';
+import type { PartyMemberConfig } from '../data/party';
 import type { ComponentType } from 'react';
-import { Tooltip, WeaponTooltipContent, ArmorTooltipContent } from './Tooltip';
-import { INVENTORY_COLS, INVENTORY_ROWS, isProficient, type Inventory } from '../data/inventory';
+import { Tooltip, ItemTooltipContent } from './Tooltip';
+import ItemIcon from './ItemIcon';
+import { INVENTORY_COLS, INVENTORY_ROWS, INVENTORY_SIZE, canEquip, canUnequip, isProficient, type Inventory } from '../data/inventory';
 import { AttributeTooltips, ATTR_LABEL, SLOT_LABEL } from '../data/detailStrings';
 
-interface PartyEntry {
-  characterName: string;
-  selectedClass: ClassKey;
-  pointsSpent: Record<AttributeKey, number>;
-  skillPointsSpent: Partial<Record<SkillKey, number>>;
-  gear: GearSlots;
-}
-
 interface Props {
-  party: PartyEntry[];
+  party: PartyMemberConfig[];
   partyHp: number[];
   partyStats: Stats[];
-  partyBuffs: ActiveBuff[][];
   inventory: Inventory;
   onClose: () => void;
   onEquipItem?: (inventoryIdx: number, charIdx: number) => void;
+  onUnequipItem?: (slot: GearSlot, charIdx: number) => void;
 }
 
-const ATTRIBUTES: AttributeKey[] = ['strength', 'toughness', 'finesse', 'mind', 'spirit'];
+// Stats pane rows: [label, stat key]. Values go through formatStat (adds % where applicable).
+type StatRowKey = 'hpRegen' | 'mp' | 'mpRegen' | 'initiative' | 'movement' | 'armor' | 'dodge'
+  | 'parry' | 'block' | 'glancingBlow' | 'magicResistance' | 'healing';
+const STAT_ROWS: [string, StatRowKey][] = [
+  ['HP Regen', 'hpRegen'], ['MP', 'mp'], ['MP Regen', 'mpRegen'], ['Initiative', 'initiative'], ['Movement', 'movement'],
+  ['Armor', 'armor'], ['Dodge', 'dodge'], ['Parry', 'parry'], ['Block', 'block'], ['Glancing Blow', 'glancingBlow'],
+  ['Magic Res', 'magicResistance'], ['Healing', 'healing'],
+];
 
 const SLOT_ICON: Record<GearSlot, ComponentType<{ className?: string }>> = {
   helm: Crown, chest: Shirt, gloves: Hand, boots: Footprints,
@@ -60,52 +56,41 @@ function Stat({ label, value, delta }: { label: string; value: string | number; 
   );
 }
 
-function GearSlotPane({ slot, gear, stats }: { slot: GearSlot; gear: GearSlots; stats: Stats }) {
+/** Right-click handler that suppresses the browser menu on item cells and runs `action` when allowed. */
+const rightClick = (hasItem: boolean, action: (() => void) | null) => (e: React.MouseEvent) => {
+  if (!hasItem) return;
+  e.preventDefault();
+  action?.();
+};
+
+function GearSlotPane({ slot, gear, stats, onUnequip }: { slot: GearSlot; gear: GearSlots; stats: Stats; onUnequip: (() => void) | null }) {
   const item = gear[slot];
   const EmptyIcon = SLOT_ICON[slot];
 
-  const tooltipContent = item
-    ? isWeaponItem(item)
-      ? <WeaponTooltipContent item={item} stats={stats} />
-      : (isArmorItem(item) || isShieldItem(item))
-        ? <ArmorTooltipContent item={item} />
-        : null
-    : null;
-
-  let iconContent;
-  if (item && isWeaponItem(item) && item.iconPath) {
-    iconContent = <img src={item.iconPath} alt="" className="w-9 h-9" />;
-  } else if (item && isShieldItem(item)) {
-    const Icon = SHIELD_ICON;
-    iconContent = <Icon className="w-9 h-9 text-gray-200" />;
-  } else if (item && isArmorItem(item) && item.icon) {
-    const Icon = item.icon;
-    iconContent = <Icon className="w-9 h-9 text-gray-200" />;
-  } else {
-    iconContent = <EmptyIcon className={item ? 'w-9 h-9 text-gray-200' : 'w-5 h-5 text-gray-600 opacity-30'} />;
-  }
-
   return (
     <Tooltip
-      content={tooltipContent}
+      content={item && <ItemTooltipContent item={item} stats={stats} clickAction={onUnequip ? 'Unequip' : undefined} />}
       className="flex flex-col items-center"
       style={{ gridColumn: SLOT_POS[slot].col, gridRow: SLOT_POS[slot].row }}
     >
       <div
         className={`w-14 h-14 rounded-lg border flex flex-col items-center pt-1 ${
           item ? 'bg-gray-700 border-gray-500' : 'bg-gray-800 border-gray-700'
-        }`}
+        } ${item && onUnequip ? 'cursor-pointer' : ''}`}
+        onContextMenu={rightClick(!!item, onUnequip)}
       >
         <span className="text-[9px] font-semibold text-gray-500 leading-none">{SLOT_LABEL[slot]}</span>
         <div className="flex-1 flex items-center justify-center">
-          {iconContent}
+          {item
+            ? <ItemIcon item={item} className="w-9 h-9" />
+            : <EmptyIcon className="w-5 h-5 text-gray-600 opacity-30" />}
         </div>
       </div>
     </Tooltip>
   );
 }
 
-export default function CharacterSheet({ party, partyHp, partyStats, partyBuffs, inventory, onClose, onEquipItem }: Props) {
+export default function CharacterSheet({ party, partyHp, partyStats, inventory, onClose, onEquipItem, onUnequipItem }: Props) {
   const [selectedIdx, setSelectedIdx] = useState(0);
   const statsScrollRef = useRef<HTMLDivElement>(null);
 
@@ -116,11 +101,14 @@ export default function CharacterSheet({ party, partyHp, partyStats, partyBuffs,
   const member = party[selectedIdx];
   const { characterName, selectedClass, pointsSpent, skillPointsSpent, gear } = member;
   const stats = partyStats[selectedIdx];
-  const classData = CLASSES[selectedClass];
+  const classData = CLASSES[selectedClass!];
   const playerHp = partyHp[selectedIdx] ?? stats.hp;
 
-  // Base stats (no buffs) for delta coloring
-  const baseStats = calculateStats({ mode: 'player', classKey: selectedClass, pointsSpent, skillPointsSpent, gearArmorBonus: getGearArmorBonus(gear) });
+  // Base stats (gear affixes, no combat buffs) for delta coloring
+  const baseStats = recomputeStats(
+    { mode: 'player', classKey: selectedClass, pointsSpent, skillPointsSpent, gearArmorBonus: getGearArmorBonus(gear) },
+    getGearBuffs(gear),
+  );
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center" onClick={onClose}>
@@ -137,7 +125,7 @@ export default function CharacterSheet({ party, partyHp, partyStats, partyBuffs,
           <div className="space-y-2">
             {party.map((m, i) => {
               const isActive = selectedIdx === i;
-              const cd = CLASSES[m.selectedClass];
+              const cd = CLASSES[m.selectedClass!];
 
               return (
                 <button
@@ -187,7 +175,10 @@ export default function CharacterSheet({ party, partyHp, partyStats, partyBuffs,
               <h3 className="text-xs font-bold uppercase tracking-wide text-gray-500 mb-3">Equipment</h3>
               <div className="grid grid-cols-3 gap-2 justify-items-center" style={{ gridTemplateRows: 'repeat(4, auto)' }}>
                 {GEAR_SLOTS.map(slot => (
-                  <GearSlotPane key={slot} slot={slot} gear={gear} stats={stats} />
+                  <GearSlotPane
+                    key={slot} slot={slot} gear={gear} stats={stats}
+                    onUnequip={onUnequipItem && canUnequip(inventory, gear, slot) ? () => onUnequipItem(slot, selectedIdx) : null}
+                  />
                 ))}
               </div>
             </div>
@@ -200,7 +191,7 @@ export default function CharacterSheet({ party, partyHp, partyStats, partyBuffs,
                 <div className="bg-gray-800 rounded-lg p-4">
                   <h3 className="text-xs font-bold uppercase tracking-wide text-gray-500 mb-3">Attributes</h3>
                   <div className="space-y-1.5 text-sm">
-                    {ATTRIBUTES.map(attr => {
+                    {ATTRIBUTE_KEYS.map(attr => {
                       const value = stats.attributes[attr];
                       const delta = value - baseStats.attributes[attr];
                       const color = delta > 0 ? 'text-green-400' : delta < 0 ? 'text-red-400' : 'text-white';
@@ -227,15 +218,9 @@ export default function CharacterSheet({ party, partyHp, partyStats, partyBuffs,
                     className="space-y-1.5 text-sm overflow-y-auto max-h-[168px] thin-scrollbar pr-1"
                   >
                     <Stat label="HP" value={`${playerHp} / ${stats.hp}`} delta={stats.hp - baseStats.hp} />
-                    <Stat label="HP Regen" value={stats.hpRegen} delta={stats.hpRegen - baseStats.hpRegen} />
-                    <Stat label="MP" value={stats.mp} delta={stats.mp - baseStats.mp} />
-                    <Stat label="MP Regen" value={stats.mpRegen} delta={stats.mpRegen - baseStats.mpRegen} />
-                    <Stat label="Initiative" value={stats.initiative} delta={stats.initiative - baseStats.initiative} />
-                    <Stat label="Movement" value={stats.movement} delta={stats.movement - baseStats.movement} />
-                    <Stat label="Armor" value={stats.armor} delta={stats.armor - baseStats.armor} />
-                    <Stat label="Dodge" value={`${stats.dodge}${statSuffix('dodge')}`} delta={stats.dodge - baseStats.dodge} />
-                    <Stat label="Magic Res" value={stats.magicResistance} delta={stats.magicResistance - baseStats.magicResistance} />
-                    <Stat label="Healing" value={stats.healing} delta={stats.healing - baseStats.healing} />
+                    {STAT_ROWS.map(([label, key]) => (
+                      <Stat key={key} label={label} value={formatStat(key, stats[key])} delta={stats[key] - baseStats[key]} />
+                    ))}
                   </div>
                 </div>
               </div>
@@ -246,9 +231,9 @@ export default function CharacterSheet({ party, partyHp, partyStats, partyBuffs,
                   <div key={key} className="bg-gray-800 rounded-lg p-4">
                     <h3 className={`text-xs font-bold uppercase tracking-wide mb-3 ${color}`}>{label}</h3>
                     <div className="space-y-1.5 text-sm">
-                      <Stat label="Hit" value={`${stats[key].hit}${statSuffix(`${key}Hit`)}`} delta={stats[key].hit - baseStats[key].hit} />
+                      <Stat label="Hit" value={formatStat(`${key}Hit`, stats[key].hit)} delta={stats[key].hit - baseStats[key].hit} />
                       <Stat label="Damage" value={`+${stats[key].damage}`} delta={stats[key].damage - baseStats[key].damage} />
-                      <Stat label="Crit" value={`${stats[key].crit}${statSuffix(`${key}Crit`)}`} delta={stats[key].crit - baseStats[key].crit} />
+                      <Stat label="Crit" value={formatStat(`${key}Crit`, stats[key].crit)} delta={stats[key].crit - baseStats[key].crit} />
                     </div>
                   </div>
                 ))}
@@ -257,51 +242,26 @@ export default function CharacterSheet({ party, partyHp, partyStats, partyBuffs,
               {/* Inventory */}
               <div className="bg-gray-800 rounded-lg p-4">
                 <h3 className="text-xs font-bold uppercase tracking-wide text-gray-500 mb-3">
-                  Inventory <span className="text-gray-600 font-normal normal-case tracking-normal">{inventory.length} / {INVENTORY_COLS * INVENTORY_ROWS}</span>
+                  Inventory <span className="text-gray-600 font-normal normal-case tracking-normal">{inventory.length} / {INVENTORY_SIZE}</span>
                 </h3>
                 <div
                   className="grid gap-px"
                   style={{ gridTemplateColumns: `repeat(${INVENTORY_COLS}, 40px)`, gridTemplateRows: `repeat(${INVENTORY_ROWS}, 40px)` }}
                 >
-                  {Array.from({ length: INVENTORY_COLS * INVENTORY_ROWS }).map((_, i) => {
+                  {Array.from({ length: INVENTORY_SIZE }).map((_, i) => {
                     const item: Item | undefined = inventory[i];
                     const proficient = item ? isProficient(classData, item) : undefined;
-                    const tooltipContent = item
-                      ? isWeaponItem(item)
-                        ? <WeaponTooltipContent item={item} stats={stats} proficient={proficient} />
-                        : (isArmorItem(item) || isShieldItem(item))
-                          ? <ArmorTooltipContent item={item} proficient={proficient} />
-                          : null
-                      : null;
-
-                    let iconContent: React.ReactNode = null;
-                    if (item) {
-                      if ((isWeaponItem(item) || isShieldItem(item)) && item.iconPath) {
-                        iconContent = <img src={item.iconPath} alt={item.name} className="w-7 h-7 object-contain" />;
-                      } else if (isArmorItem(item) && item.icon) {
-                        const Icon = item.icon;
-                        iconContent = <Icon className="w-7 h-7 text-gray-200" />;
-                      } else if (isShieldItem(item)) {
-                        const Icon = SHIELD_ICON;
-                        iconContent = <Icon className="w-7 h-7 text-gray-200" />;
-                      }
-                    }
-
-                    const handleRightClick = (e: React.MouseEvent) => {
-                      if (!item || !proficient || !onEquipItem) return;
-                      e.preventDefault();
-                      onEquipItem(i, selectedIdx);
-                    };
+                    const equip = onEquipItem && canEquip(classData, item) ? () => onEquipItem(i, selectedIdx) : null;
 
                     return (
-                      <Tooltip key={i} content={tooltipContent}>
+                      <Tooltip key={i} content={item && <ItemTooltipContent item={item} stats={stats} proficient={proficient} clickAction={equip ? 'Equip' : undefined} />}>
                         <div
                           className={`w-full h-full flex items-center justify-center border rounded-sm ${
                             item ? 'bg-gray-700 border-gray-500' : 'bg-gray-900/50 border-gray-700/50'
-                          } ${proficient ? 'cursor-pointer' : ''}`}
-                          onContextMenu={handleRightClick}
+                          } ${equip ? 'cursor-pointer' : ''}`}
+                          onContextMenu={rightClick(!!item, equip)}
                         >
-                          {iconContent}
+                          {item && <ItemIcon item={item} className="w-7 h-7" />}
                         </div>
                       </Tooltip>
                     );

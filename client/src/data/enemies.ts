@@ -8,6 +8,7 @@ import type { IconType } from 'react-icons';
 import type { AttributeKey, SkillKey, ActiveBuff, ActiveHot, ActiveDot } from './stats';
 import { generateEnemyAttributePoints, calculateStats, recomputeStats } from './stats';
 import type { Stats } from './stats';
+import type { Pos } from './dungeonHelpers';
 
 // ─── Enemy Class Definition ───────────────────────────────────────────────────
 //
@@ -52,11 +53,10 @@ export interface EnemyInstance {
   classData: EnemyClassData;        // template — name, token, color, abilities
   level: number;                    // the level this enemy was generated at
   pointsSpent: Record<AttributeKey, number>;  // auto-generated, stored for buff recompute
-  attrs: Record<AttributeKey, number>;        // effective attribute values at generation
   buffs: ActiveBuff[];
   hots: ActiveHot[];
   stats: Stats;                     // current effective stats (recomputed when buffs change)
-  pos: { x: number; y: number };
+  pos: Pos;
   currentHp: number;
   currentMp: number;
   aggroed: boolean;
@@ -75,28 +75,18 @@ export function generateEnemyInstance(
   classData: EnemyClassData,
   level: number,
   id: string,
-  pos: { x: number; y: number },
+  pos: Pos,
   zoneId: number,
   groupId: number,
 ): EnemyInstance {
   const pointsSpent = generateEnemyAttributePoints(level, classData.highAttributes, classData.lowAttributes);
   const stats = calculateStats({ mode: 'enemy', classData, pointsSpent, level });
 
-  const attrs: Record<AttributeKey, number> = {
-    strength:  stats.attributes.strength,
-    toughness: stats.attributes.toughness,
-    finesse:   stats.attributes.finesse,
-    mind:      stats.attributes.mind,
-    spirit:    stats.attributes.spirit,
-    speed:     stats.attributes.speed
-  };
-
   return {
     id,
     classData,
     level,
     pointsSpent,
-    attrs,
     buffs: [],
     hots: [],
     stats,
@@ -112,9 +102,8 @@ export function generateEnemyInstance(
 
 // ─── Buff Helpers ─────────────────────────────────────────────────────────────
 
-/** Return a new EnemyInstance with the buff added and stats recomputed. */
-export function applyBuffToEnemy(enemy: EnemyInstance, buff: ActiveBuff): EnemyInstance {
-  const buffs = [...enemy.buffs, buff];
+/** Return a new EnemyInstance with its buff list replaced and stats recomputed. */
+export function withEnemyBuffs(enemy: EnemyInstance, buffs: ActiveBuff[]): EnemyInstance {
   const stats = recomputeStats({ mode: 'enemy', classData: enemy.classData, pointsSpent: enemy.pointsSpent, level: enemy.level }, buffs);
   return { ...enemy, buffs, stats };
 }

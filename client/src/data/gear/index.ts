@@ -3,18 +3,20 @@ import type { IconType } from 'react-icons';
 import type { ArmorProficiency } from '../classes';
 
 export * from './types';
-import type {
-  ArmorSlot, WeaponType, DamageElement, GearSlots,
-  Item, ArmorItem, ShieldItem, WeaponItem,
-} from './types';
-import { ARMOR_SLOTS } from './types';
+export type { DamageElement } from '../stats';
+export { DAMAGE_ELEMENTS } from '../stats';
+import { BUFFABLE_STATS, DAMAGE_ELEMENTS } from '../stats';
+import type { DamageElement, BuffableStat, ActiveBuff } from '../stats';
+import type { ArmorSlot, WeaponType, GearSlots, Item, ArmorItem, ShieldItem, WeaponItem, Affix, Rarity, ImplicitDef } from './types';
+import { ARMOR_SLOTS, GEAR_SLOTS, PHYSICAL_ELEMENTS, RarityPerAffixCount } from './types';
 
-import { ARMOR_TYPE_BASE_VALUE, ARMOR_SLOT_MULTIPLIER } from './armor';
+import { ARMOR_TYPE_BASE_VALUE, ARMOR_SLOT_MULTIPLIER, ARMOR_INVALID_AFFIXES, ARMOR_SERIES, ARMOR_IMPLICITS } from './armor';
 import { SHIELD_ARMOR_MULTIPLIER, SHIELDS, SHIELD_IMPLICIT } from './offhands';
+import { WEAPON_SERIES, WEAPON_TYPE_DATA } from './weapons';
+import { PotencyBonusDivisor, STAT_POTENCY } from './affixes';
+import { chance, pick, randInt } from '../random';
 
-const MAGIC_ELEMENTS: DamageElement[] = [
-  'fire', 'ice', 'lightning', 'shadow', 'poison', 'holy', 'nature',
-];
+const MAGIC_ELEMENTS = DAMAGE_ELEMENTS.filter(el => !PHYSICAL_ELEMENTS.has(el));
 
 export const EMPTY_GEAR: GearSlots = {
   helm: null,
@@ -24,6 +26,8 @@ export const EMPTY_GEAR: GearSlots = {
   mainhand: null,
   offhand: null,
 };
+
+export const SHIELD_ICON: IconType = GiEdgedShield;
 
 // ─── Type Guards ──────────────────────────────────────────────────────────────
 
@@ -39,161 +43,147 @@ export function isWeaponItem(item: Item): item is WeaponItem {
   return item.slot === 'mainhand';
 }
 
-export function getGearArmorBonus(gear: GearSlots): number {
-  const fromArmor = ARMOR_SLOTS.reduce((total, slot) => {
+// ─── Equipped gear → stats ────────────────────────────────────────────────────
+
+/** Every implicit and affix on equipped gear, as permanent buffs. */
+export function getGearBuffs(gear: GearSlots): ActiveBuff[] {
+  return GEAR_SLOTS.flatMap((slot, slotIdx) => {
     const item = gear[slot];
-    return total + (item && isArmorItem(item) ? item.armorValue : 0);
-  }, 0);
-  const offhand = gear.offhand;
-  const fromShield = offhand && isShieldItem(offhand) ? offhand.armorValue : 0;
-  return fromArmor + fromShield;
+    if (!item) return [];
+    const mods = item.implicit ? [item.implicit, ...item.affixes] : item.affixes;
+    return mods.map((mod, i) => ({
+      id: `gear_${slotIdx}_${i}`,
+      stat: mod.stat,
+      amount: mod.value,
+      roundsRemaining: Infinity,
+    }));
+  });
 }
 
-
-
-
-
-export function generateArmorItem(
-  slot: ArmorSlot,
-  level: number,
-  armorType: ArmorProficiency
-): ArmorItem {
-  const series = ARMOR_SERIES.filter(s => s.armorType === armorType)
-    .sort((a, b) => a.requiredLevel - b.requiredLevel)[0] ?? ARMOR_SERIES[0];
-  return {
-    name: series.names[slot],
-    slot,
-    armorType,
-    armorValue: ARMOR_TYPE_BASE_VALUE[armorType] * level * ARMOR_SLOT_MULTIPLIER[slot],
-    icon: series.icons[slot],
-  };
+export function getGearArmorBonus(gear: GearSlots): number {
+  return Object.values(gear).reduce((total, item) =>
+    total + (item && (isArmorItem(item) || isShieldItem(item)) ? item.armorValue : 0), 0);
 }
 
-export function generateShieldItem(
-  level: number,
-  armorType: ArmorProficiency
-): ShieldItem {
-  const template = SHIELDS.find(s => s.type === armorType) ?? SHIELDS[0];
-  return {
-    name: template.name,
-    slot: 'offhand',
-    armorType,
-    armorValue: ARMOR_TYPE_BASE_VALUE[armorType] * level * SHIELD_ARMOR_MULTIPLIER,
-    iconPath: template.icon,
-  };
+// ─── Item Generation ──────────────────────────────────────────────────────────
+//
+// One generator per item kind, used for both starting gear (affixes: false) and loot drops.
+
+interface GenerateOptions {
+  affixes?: boolean;  // roll random affixes (default true); starting gear has none
 }
 
-// ─── Weapon Generation ────────────────────────────────────────────────────────
+/** Pick a series within ±3 levels; fall back to the nearest one below. */
+function pickSeriesForLevel<T extends { requiredLevel: number }>(series: T[], level: number): T {
+  const inRange = series.filter(s => Math.abs(s.requiredLevel - level) <= 3);
+  if (inRange.length > 0) return pick(inRange);
+  const below = series.filter(s => s.requiredLevel < level - 3).sort((a, b) => b.requiredLevel - a.requiredLevel);
+  return below[0] ?? series[0];
+}
 
-export const SHIELD_ICON: IconType = GiEdgedShield;
+function resolveImplicit(def: ImplicitDef, level: number): Affix {
+  return { stat: def.statKey, value: Math.round(def.baseValue + def.growthPerLevel * (level - 1)) };
+}
 
-import { WEAPON_SERIES, WEAPON_TYPE_DATA } from './weapons';
-import { ARMOR_SERIES, ARMOR_IMPLICITS } from './armor';
+function rollAffixes(invalidAffixes: BuffableStat[], level: number, enabled: boolean): { affixes: Affix[]; rarity: Rarity } {
+  const affixes: Affix[] = [];
+  if (enabled) {
+    const invalid = new Set(invalidAffixes);
+    const used = new Set<BuffableStat>();
+    while (affixes.length < 4 && chance(0.5)) {
+      const available = BUFFABLE_STATS.filter(s => !invalid.has(s) && !used.has(s));
+      if (available.length === 0) break;
+      const stat = pick(available);
+      used.add(stat);
+      const potency = STAT_POTENCY.get(stat) ?? 'low';
+      affixes.push({ stat, value: Math.ceil(randInt(1, level) / PotencyBonusDivisor[potency]) });
+    }
+  }
+  return { affixes, rarity: RarityPerAffixCount[affixes.length] };
+}
 
-export function generateWeaponItem(
+export function generateWeapon(
   level: number,
   weaponType: WeaponType,
-  element?: DamageElement
+  { element, affixes = true }: GenerateOptions & { element?: DamageElement } = {},
 ): WeaponItem {
-  const series = WEAPON_SERIES.find(s => s.id === 'plain') ?? WEAPON_SERIES[0];
   const data = WEAPON_TYPE_DATA[weaponType]!;
+  const series = pickSeriesForLevel(WEAPON_SERIES, level);
   const m = series.damageMultiplier;
-  const damageElement = element
-    ?? data.defaultDamageElement
-    ?? MAGIC_ELEMENTS[Math.floor(Math.random() * MAGIC_ELEMENTS.length)];
-
   return {
     name: series.weapons[weaponType]?.name ?? weaponType,
     slot: 'mainhand',
+    ...rollAffixes(data.invalidAffixes, level, affixes),
     weaponType,
     attackCategory: data.defaultAttackCategory,
-    damageElement,
+    damageElement: element ?? data.defaultDamageElement ?? pick(MAGIC_ELEMENTS),
     level,
     minDamage: Math.max(1, Math.round(data.baseDamage.min * m)),
     maxDamage: Math.max(1, Math.round(data.baseDamage.max * m)),
     range: data.range,
     iconPath: series.weapons[weaponType]?.icon,
+    implicit: data.implicits ? resolveImplicit(data.implicits, level) : undefined,
   };
 }
 
-// ─── Loot Drop Generation ─────────────────────────────────────────────────────
-
-export const LOOT_DROP_CHANCE = 0.10;
-const WEAPON_LOOT_WEIGHT = 0.30; // 30% weapon, 10% shield, 60% armor
-const SHIELD_LOOT_WEIGHT = 0.10;
-
-/** Pick a series within ±3 dungeon levels; fall back to the nearest one below. */
-function pickSeriesForLevel<T extends { requiredLevel: number }>(series: T[], dungeonLevel: number): T {
-  const inRange = series.filter(s => Math.abs(s.requiredLevel - dungeonLevel) <= 3);
-  if (inRange.length > 0) return inRange[Math.floor(Math.random() * inRange.length)];
-  const below = series.filter(s => s.requiredLevel < dungeonLevel - 3).sort((a, b) => b.requiredLevel - a.requiredLevel);
-  return below[0] ?? series[0];
-}
-
-/** Compute an implicit's resolved value at a given dungeon level. */
-function resolveImplicit(def: { statKey: string; baseValue: number; growthPerLevel: number }, dungeonLevel: number) {
-  const value = Math.round(def.baseValue + def.growthPerLevel * (dungeonLevel - 1));
-  return { statKey: def.statKey, value, displayValue: `${value}` };
-}
-
-export function generateWeaponDrop(dungeonLevel: number): WeaponItem {
-  const droppableTypes = Object.keys(WEAPON_TYPE_DATA) as WeaponType[];
-  const weaponType = droppableTypes[Math.floor(Math.random() * droppableTypes.length)];
-  const data = WEAPON_TYPE_DATA[weaponType]!;
-  const series = pickSeriesForLevel(WEAPON_SERIES, dungeonLevel);
-  const m = series.damageMultiplier;
-  const damageElement = data.defaultDamageElement
-    ?? MAGIC_ELEMENTS[Math.floor(Math.random() * MAGIC_ELEMENTS.length)];
-
-  return {
-    name: series.weapons[weaponType]?.name ?? weaponType,
-    slot: 'mainhand',
-    weaponType,
-    attackCategory: data.defaultAttackCategory,
-    damageElement,
-    level: dungeonLevel,
-    minDamage: Math.max(1, Math.round(data.baseDamage.min * m)),
-    maxDamage: Math.max(1, Math.round(data.baseDamage.max * m)),
-    range: data.range,
-    iconPath: series.weapons[weaponType]?.icon,
-    implicit: data.implicits ? resolveImplicit(data.implicits, dungeonLevel) : undefined,
-  };
-}
-
-export function generateArmorDrop(dungeonLevel: number): ArmorItem {
-  const series = pickSeriesForLevel(ARMOR_SERIES, dungeonLevel);
-  const slot = ARMOR_SLOTS[Math.floor(Math.random() * ARMOR_SLOTS.length)];
-  const { armorType } = series;
-  const implicitDef = ARMOR_IMPLICITS[armorType];
-  const slotScaling = implicitDef.slots[slot];
-
+export function generateArmor(
+  level: number,
+  slot: ArmorSlot,
+  armorType?: ArmorProficiency,
+  { affixes = true }: GenerateOptions = {},
+): ArmorItem {
+  const series = pickSeriesForLevel(armorType ? ARMOR_SERIES.filter(s => s.armorType === armorType) : ARMOR_SERIES, level);
+  const type = series.armorType;
+  const implicitDef = ARMOR_IMPLICITS[type];
   return {
     name: series.names[slot],
     slot,
-    armorType,
-    armorValue: ARMOR_TYPE_BASE_VALUE[armorType] * dungeonLevel * ARMOR_SLOT_MULTIPLIER[slot],
+    ...rollAffixes(ARMOR_INVALID_AFFIXES[type], level, affixes),
+    armorType: type,
+    armorValue: Math.round(ARMOR_TYPE_BASE_VALUE[type] * level * ARMOR_SLOT_MULTIPLIER[slot]),
     icon: series.icons[slot],
-    implicit: resolveImplicit({ ...implicitDef, ...slotScaling }, dungeonLevel),
+    implicit: resolveImplicit({ statKey: implicitDef.statKey, ...implicitDef.slots[slot] }, level),
   };
 }
 
-export function generateShieldDrop(dungeonLevel: number): ShieldItem {
-  const eligible = SHIELDS.filter(s => s.type !== 'Cloth');
-  const template = pickSeriesForLevel(eligible.map(s => ({ ...s, requiredLevel: s.level })), dungeonLevel);
+export function generateShield(
+  level: number,
+  armorType?: ArmorProficiency,
+  { affixes = true }: GenerateOptions = {},
+): ShieldItem {
+  const template = pickSeriesForLevel(armorType ? SHIELDS.filter(s => s.type === armorType) : SHIELDS, level);
   return {
     name: template.name,
     slot: 'offhand',
+    ...rollAffixes(ARMOR_INVALID_AFFIXES[template.type], level, affixes),
     armorType: template.type,
-    armorValue: ARMOR_TYPE_BASE_VALUE[template.type] * dungeonLevel * SHIELD_ARMOR_MULTIPLIER,
+    armorValue: Math.round(ARMOR_TYPE_BASE_VALUE[template.type] * level * SHIELD_ARMOR_MULTIPLIER),
     iconPath: template.icon,
-    implicit: resolveImplicit(SHIELD_IMPLICIT, dungeonLevel),
+    implicit: resolveImplicit(SHIELD_IMPLICIT, level),
   };
 }
 
+// ─── Loot Drops ───────────────────────────────────────────────────────────────
+
+export const LOOT_DROP_CHANCE = 0.10;
+
+type LootEntry =
+  | { kind: 'weapon'; weaponType: WeaponType }
+  | { kind: 'armor';  slot: ArmorSlot }
+  | { kind: 'shield' };
+
+const LOOT_POOL: LootEntry[] = [
+  ...(Object.keys(WEAPON_TYPE_DATA) as WeaponType[]).map(weaponType => ({ kind: 'weapon' as const, weaponType })),
+  ...ARMOR_SLOTS.map(slot => ({ kind: 'armor' as const, slot })),
+  { kind: 'shield' },
+];
+
 export function generateLootDrop(dungeonLevel: number, dropChance = LOOT_DROP_CHANCE): Item | null {
-  if (Math.random() >= dropChance) return null;
-  const roll = Math.random();
-  if (roll < WEAPON_LOOT_WEIGHT) return generateWeaponDrop(dungeonLevel);
-  if (roll < WEAPON_LOOT_WEIGHT + SHIELD_LOOT_WEIGHT) return generateShieldDrop(dungeonLevel);
-  return generateArmorDrop(dungeonLevel);
+  if (!chance(dropChance)) return null;
+  const entry = pick(LOOT_POOL);
+  switch (entry.kind) {
+    case 'weapon': return generateWeapon(dungeonLevel, entry.weaponType);
+    case 'armor':  return generateArmor(dungeonLevel, entry.slot);
+    case 'shield': return generateShield(dungeonLevel);
+  }
 }

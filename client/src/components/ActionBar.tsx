@@ -150,7 +150,7 @@ export default function ActionBar({ gear, abilities, slots, onSlotsChange, activ
                 </div>
               )}
               {slot !== null && (
-                <span className={`text-[9px] leading-none text-center px-0.5 truncate w-full text-center ${isActive ? 'text-gray-800' : 'text-gray-100'}`}>
+                <span className={`text-[9px] leading-none text-center px-0.5 truncate w-full ${isActive ? 'text-gray-800' : 'text-gray-100'}`}>
                   {slot === 'weapon-attack' ? (weapon?.name ?? 'Attack') : slot.name}
                 </span>
               )}

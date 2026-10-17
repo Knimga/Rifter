@@ -1,33 +1,13 @@
-type Pos = { x: number; y: number };
+import { chebyshev, findOpenTilesNear, posKey, samePos, type Pos } from './dungeonHelpers';
 
-// Find up to `count` walkable floor tiles near `center` (ring search, closest first).
-// Excludes the center tile itself.
-export function findFollowerSpawns(
-  center: Pos,
-  floors: Set<string>,
-  count: number,
-): Pos[] {
-  const found: Pos[] = [];
-  for (let r = 1; r <= 5 && found.length < count; r++) {
-    for (let dx = -r; dx <= r && found.length < count; dx++) {
-      for (let dy = -r; dy <= r && found.length < count; dy++) {
-        if (Math.abs(dx) < r && Math.abs(dy) < r) continue; // only outer ring
-        const pos = { x: center.x + dx, y: center.y + dy };
-        if (
-          floors.has(`${pos.x},${pos.y}`) &&
-          !found.some(p => p.x === pos.x && p.y === pos.y)
-        ) {
-          found.push(pos);
-        }
-      }
-    }
-  }
+/** Up to `count` walkable tiles near `center` (closest first); pads with `center` if too few. */
+export function findFollowerSpawns(center: Pos, floors: Set<string>, count: number): Pos[] {
+  const found = findOpenTilesNear(center, p => floors.has(posKey(p)), count, 5);
   while (found.length < count) found.push({ ...center });
   return found;
 }
 
 // Compute new follower positions after the leader moves to `newLeaderPos`.
-// `floors` is the walkable tile set; pass null for the sanctum (uses bounds check).
 // `f1Move` and `f2Move` are the movement stats for each follower.
 export function computeFollowerPositions(
   newLeaderPos: Pos,
@@ -36,15 +16,12 @@ export function computeFollowerPositions(
   oldF2Pos: Pos,
   f1Move: number,
   f2Move: number,
-  floors: Set<string> | null,
+  isWalkable: (pos: Pos) => boolean,
 ): { f1: Pos; f2: Pos } {
   const leaderDx = Math.sign(newLeaderPos.x - oldLeaderPos.x);
   const leaderDy = Math.sign(newLeaderPos.y - oldLeaderPos.y);
 
-  const isWalkable = (pos: Pos) => {
-    if (floors) return floors.has(`${pos.x},${pos.y}`);
-    return pos.x > 0 && pos.x < 10 && pos.y > 0 && pos.y < 10;
-  };
+  const isOpen = (p: Pos, blocked: ReadonlySet<string>) => isWalkable(p) && !blocked.has(posKey(p));
 
   const stepN = (from: Pos, to: Pos, n: number, blocked: ReadonlySet<string>): Pos => {
     let cur = from;
@@ -56,9 +33,9 @@ export function computeFollowerPositions(
       const horiz = { x: cur.x + dx, y: cur.y };
       const vert  = { x: cur.x, y: cur.y + dy };
       const next =
-        (isWalkable(diag)  && !blocked.has(`${diag.x},${diag.y}`))               ? diag  :
-        (dx !== 0 && isWalkable(horiz) && !blocked.has(`${horiz.x},${horiz.y}`)) ? horiz :
-        (dy !== 0 && isWalkable(vert)  && !blocked.has(`${vert.x},${vert.y}`))   ? vert  :
+        isOpen(diag, blocked)               ? diag  :
+        (dx !== 0 && isOpen(horiz, blocked)) ? horiz :
+        (dy !== 0 && isOpen(vert, blocked))  ? vert  :
         null;
       if (!next) break;
       cur = next;
@@ -66,44 +43,27 @@ export function computeFollowerPositions(
     return cur;
   };
 
-  const findNearestOpen = (from: Pos, blocked: ReadonlySet<string>): Pos => {
-    for (let r = 1; r <= 5; r++) {
-      for (let dx = -r; dx <= r; dx++) {
-        for (let dy = -r; dy <= r; dy++) {
-          if (Math.abs(dx) !== r && Math.abs(dy) !== r) continue;
-          const candidate = { x: from.x + dx, y: from.y + dy };
-          if (isWalkable(candidate) && !blocked.has(`${candidate.x},${candidate.y}`)) return candidate;
-        }
-      }
-    }
-    return from;
-  };
+  const findNearestOpen = (from: Pos, blocked: ReadonlySet<string>): Pos =>
+    findOpenTilesNear(from, p => isOpen(p, blocked), 1, 5)[0] ?? from;
 
   const targetF1 = { x: newLeaderPos.x - leaderDx, y: newLeaderPos.y - leaderDy };
   const targetF2 = { x: newLeaderPos.x - 2 * leaderDx, y: newLeaderPos.y - 2 * leaderDy };
 
-  const occupied = new Set<string>([`${newLeaderPos.x},${newLeaderPos.y}`]);
+  const occupied = new Set<string>([posKey(newLeaderPos)]);
 
   // Bump any follower that is already standing on the leader's new tile.
-  let f1 = oldF1Pos;
-  let f2 = oldF2Pos;
-  if (`${oldF1Pos.x},${oldF1Pos.y}` === `${newLeaderPos.x},${newLeaderPos.y}`) {
-    f1 = findNearestOpen(oldF1Pos, occupied);
-  }
-  if (`${oldF2Pos.x},${oldF2Pos.y}` === `${newLeaderPos.x},${newLeaderPos.y}`) {
-    f2 = findNearestOpen(oldF2Pos, occupied);
-  }
+  let f1 = samePos(oldF1Pos, newLeaderPos) ? findNearestOpen(oldF1Pos, occupied) : oldF1Pos;
+  let f2 = samePos(oldF2Pos, newLeaderPos) ? findNearestOpen(oldF2Pos, occupied) : oldF2Pos;
 
-  const dist = (a: Pos, b: Pos) => Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y));
-
+  // Step each follower toward its trailing slot, but never end farther from the leader than before
   const preStepF1 = f1;
   f1 = stepN(f1, targetF1, f1Move, occupied);
-  if (dist(f1, newLeaderPos) > dist(preStepF1, newLeaderPos)) f1 = preStepF1;
-  occupied.add(`${f1.x},${f1.y}`);
+  if (chebyshev(f1, newLeaderPos) > chebyshev(preStepF1, newLeaderPos)) f1 = preStepF1;
+  occupied.add(posKey(f1));
 
   const preStepF2 = f2;
   f2 = stepN(f2, targetF2, f2Move, occupied);
-  if (dist(f2, newLeaderPos) > dist(preStepF2, newLeaderPos)) f2 = preStepF2;
+  if (chebyshev(f2, newLeaderPos) > chebyshev(preStepF2, newLeaderPos)) f2 = preStepF2;
 
   return { f1, f2 };
 }

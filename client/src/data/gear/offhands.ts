@@ -1,41 +1,23 @@
-import { ArmorProficiency } from "../classes";
-import { BuffableStat } from "../stats";
+import type { ArmorProficiency } from '../classes';
+import type { ImplicitDef } from './types';
 
-export interface ShieldItem {
-    name: string;
-    type: ArmorProficiency;
-    level: number;
-    icon: string;
-}
-
-export interface ShieldSeries {
-  id: string;
+export interface ShieldTemplate {
   name: string;
+  type: ArmorProficiency;
   requiredLevel: number;
-  armorMultiplier: number; // scales base shield armor
+  icon: string;
 }
 
 export const SHIELD_ARMOR_MULTIPLIER = 0.80;
 
-export const SHIELDS: ShieldItem[] = [
-    { 
-        level: 1, type: 'Light', name: 'Buckler',
-        icon: '/gearIcons/weapons/plain/shield_round.png'
-    },
-    { 
-        level: 1, type: 'Medium', name: 'Roundel',
-        icon: '/gearIcons/weapons/plain/shield_round.png'
-    },
-    { 
-        level: 1, type: 'Heavy', name: 'Kite Shield',
-        icon: '/gearIcons/weapons/plain/shield.png'
-    },
-]
+export const SHIELDS: ShieldTemplate[] = [
+  { requiredLevel: 1, type: 'Light',  name: 'Buckler',     icon: '/gearIcons/weapons/plain/shield_round.png' },
+  { requiredLevel: 1, type: 'Medium', name: 'Roundel',     icon: '/gearIcons/weapons/plain/shield_round.png' },
+  { requiredLevel: 1, type: 'Heavy',  name: 'Kite Shield', icon: '/gearIcons/weapons/plain/shield.png' },
+];
 
-export const SHIELD_IMPLICIT: {
-    statKey: BuffableStat, baseValue: number; growthPerLevel: number;
-} = {
-    statKey: 'block',
-    baseValue: 5,
-    growthPerLevel: 0.2
-}
+export const SHIELD_IMPLICIT: ImplicitDef = {
+  statKey: 'block',
+  baseValue: 5,
+  growthPerLevel: 0.2,
+};
