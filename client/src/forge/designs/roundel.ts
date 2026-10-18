@@ -1,4 +1,4 @@
 // Model for Roundel (data/gear/offhands.ts › SHIELDS roundel).
 import { roundelDesign } from '../designs/_shield';
 
-export default roundelDesign(1);
+export default roundelDesign();

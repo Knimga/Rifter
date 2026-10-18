@@ -1,6 +1,8 @@
 import type { ActiveBuff, ActiveDot, ActiveHot } from '../data/stats';
 import type { ClassKey } from '../data/classes';
-import { CLASSES } from '../data/classes';
+import type { ModelLink } from '../forge/core/types';
+import type { HeldWeapon } from '../forge/equip';
+import type { MapPartyMember } from './ModelLayer';
 import type { Pos } from '../data/dungeonHelpers';
 import { DAMAGE_ELEMENT_COLOR, TILE_SIZE } from '../data/constants';
 import { Tooltip } from './Tooltip';
@@ -17,6 +19,57 @@ export interface PartyTokenData {
   mp: number;
   maxMp: number;
   partyIndex: number;
+  /** The member whose turn it is (in combat) or whose action bar is shown (out of combat). */
+  active: boolean;
+  /** Equipped weapon and shield, as the member's 3D model holds them (none = nothing in that hand). */
+  weapon?: HeldWeapon;
+  shield?: ModelLink;
+}
+
+/** The 3D model layer's view of a party member, with its over-head HP/MP bars and effect dots. */
+export function toMapMember(m: PartyTokenData, dots: EffectDot[] = []): MapPartyMember {
+  return {
+    id: `party-${m.partyIndex}`,
+    classKey: m.classKey,
+    pos: m.pos,
+    weapon: m.weapon,
+    shield: m.shield,
+    overlay: <PartyOverlay member={m} dots={dots} />,
+  };
+}
+
+/**
+ * Floor glow under the active party member (drawn on the tile, beneath the model): a faint oval centered
+ * on the feet, wider than tall, so it reads as lying on the floor in the game camera's perspective.
+ */
+export function ActiveGlow() {
+  return (
+    <div
+      className="absolute pointer-events-none"
+      style={{
+        left: '14%', right: '14%', top: '29%', bottom: '29%',
+        // closest-side: the gradient reaches 0 exactly at the oval's edge, so it fades out with no rim
+        background: 'radial-gradient(ellipse closest-side, rgba(240, 232, 196, 0.32) 0%, rgba(240, 232, 196, 0.14) 50%, rgba(240, 232, 196, 0) 100%)',
+      }}
+    />
+  );
+}
+
+/** Above a party model's head: effect dots over HP and MP bars. */
+function PartyOverlay({ member, dots }: { member: PartyTokenData; dots: EffectDot[] }) {
+  return (
+    <>
+      {dots.length > 0 && <div className="relative h-2 w-8 pointer-events-auto"><EffectDotRow dots={dots} /></div>}
+      <div className="w-8 flex flex-col gap-px">
+        <div className="h-1 bg-gray-700 rounded-full overflow-hidden">
+          <div className="h-full bg-red-500 transition-all" style={{ width: `${(member.hp / member.maxHp) * 100}%` }} />
+        </div>
+        <div className="h-1 bg-gray-700 rounded-full overflow-hidden">
+          <div className="h-full bg-blue-500 transition-all" style={{ width: `${(member.mp / member.maxMp) * 100}%` }} />
+        </div>
+      </div>
+    </>
+  );
 }
 
 /** Border color of a plain floor/wall tile (tiles also use Tailwind's `border`). Shared by both maps and the forge's game view. */
@@ -30,7 +83,7 @@ interface EffectDot {
   sign: '+' | '-';
 }
 
-/** One dot per buff source, HoT and DoT on a unit (party member or enemy). */
+/** One dot per buff source, HoT and DoT on a unit (party member or enemy), shown above its model's head. */
 export function computeEffectDots(buffs: ActiveBuff[], hots: ActiveHot[], dots: ActiveDot[]): EffectDot[] {
   const result: EffectDot[] = [];
   const seen = new Set<string>();
@@ -72,33 +125,11 @@ export function EffectDotRow({ dots }: { dots: EffectDot[] }) {
 
 // ─── Enemy HP bar ─────────────────────────────────────────────────────────────
 
-/** Enemy health bar. Positioned by the caller (`className`), e.g. at the tile bottom or above a model's head. */
-export function EnemyHpBar({ hp, maxHp, className = '' }: { hp: number; maxHp: number; className?: string }) {
+/** Enemy health bar, above its model's head. */
+export function EnemyHpBar({ hp, maxHp }: { hp: number; maxHp: number }) {
   return (
-    <div className={`w-8 h-1 bg-gray-700 rounded-full overflow-hidden ${className}`}>
+    <div className="w-8 h-1 bg-gray-700 rounded-full overflow-hidden">
       <div className="h-full bg-red-500 transition-all" style={{ width: `${(hp / maxHp) * 100}%` }} />
-    </div>
-  );
-}
-
-// ─── Party token ──────────────────────────────────────────────────────────────
-
-/** Class-colored circle with HP/MP bars. The leader is drawn slightly larger and fully opaque. */
-export function PartyToken({ member, dots = [] }: { member: PartyTokenData; dots?: EffectDot[] }) {
-  const isLeader = member.partyIndex === 0;
-  const size = isLeader ? 'w-8' : 'w-7';
-  return (
-    <div className="relative w-full h-full flex items-center justify-center">
-      <div className={`${size} ${isLeader ? 'h-8' : 'h-7 opacity-75'} rounded-full`} style={{ backgroundColor: CLASSES[member.classKey].color }} />
-      <div className={`absolute bottom-0.5 left-1/2 -translate-x-1/2 ${size} flex flex-col gap-px`}>
-        <div className="h-0.5 bg-gray-700 rounded-full overflow-hidden">
-          <div className="h-full bg-red-500 transition-all" style={{ width: `${(member.hp / member.maxHp) * 100}%` }} />
-        </div>
-        <div className="h-0.5 bg-gray-700 rounded-full overflow-hidden">
-          <div className="h-full bg-blue-500 transition-all" style={{ width: `${(member.mp / member.maxMp) * 100}%` }} />
-        </div>
-      </div>
-      <EffectDotRow dots={dots} />
     </div>
   );
 }

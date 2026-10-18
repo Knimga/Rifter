@@ -41,19 +41,18 @@ export function swordGrip(m: Mesh, gy: number, gl: number, wraps: number, leathe
   blob(m, [0, gy - 0.05 - gl - 0.07, 0], [0.1, 0.1, 0.1], 0, 0.1, trim);
 }
 
-export function swordDesign(seriesId: string, weaponType: '1h Swords' | '2h Swords', version: number): Design {
+export function swordDesign(seriesId: string, weaponType: '1h Swords' | '2h Swords'): Design {
   const { id, label, source, palette } = weaponEntry(seriesId, weaponType);
   const twoHanded = weaponType === '2h Swords';
   return {
-    id, label, source, version,
+    id, label, source,
     category: 'weapon',
     fit: { kind: 'item', size: 0.8 },
     budget: 500,
     build(c) {
       const m = c.mesh;
       const { rf } = c;
-      // ---- parameters first, fixed order ----
-      const guard = c.choice('guard', ['bar', 'wing', 'hook']);
+      const guard = c.pick(['bar', 'wing', 'hook'] as const);
       const { metal, trim, leather } = palette;
 
       // A two-hander has a much longer, broader blade (long relative to its hilt, so it reads clearly
@@ -63,8 +62,9 @@ export function swordDesign(seriesId: string, weaponType: '1h Swords' | '2h Swor
       const t = rf(0.05, 0.085);
       swordBlade(m, L, w, t, metal);
 
-      // Guard half-width. A two-hander's is capped lower: a very wide guard makes its long blade look short.
-      const gw = w * (twoHanded ? rf(2.0, 2.5) : rf(2.2, 3.2)) + 0.1, gy = -0.04;
+      // Guard half-width, relative to the blade's. A one-hander's is narrow; a two-hander's is wider, but
+      // capped: a very wide guard makes its long blade look short.
+      const gw = twoHanded ? w * rf(2.0, 2.5) + 0.1 : w * rf(1.5, 1.8) + 0.05, gy = -0.04;
       swordGuard(m, guard, gw, gy, trim);
 
       const gl = twoHanded ? rf(0.8, 1.0) : rf(0.45, 0.55);

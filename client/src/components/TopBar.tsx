@@ -1,4 +1,4 @@
-import { CLASSES } from '../data/classes';
+import { PARTY_MEMBER_COLOR } from '../data/constants';
 import type { Stats } from '../data/stats';
 import type { CombatState } from '../data/combat';
 import type { EnemyInstance } from '../data/enemies';
@@ -51,7 +51,7 @@ export default function TopBar({
               const isActive = combat.active && activePartyIdx === i;
               return (
                 <div key={i} className={`bg-gray-800 px-3 py-2 rounded text-xs min-w-[120px] ${isActive ? 'ring-2 ring-yellow-400' : ''}`}>
-                  <div className="font-semibold mb-1" style={{ color: CLASSES[m.selectedClass!].color }}>{m.characterName}</div>
+                  <div className="font-semibold mb-1" style={{ color: PARTY_MEMBER_COLOR }}>{m.characterName}</div>
                   <div className="flex items-center gap-1 mb-0.5">
                     <span className="text-red-400 font-bold w-6">HP</span>
                     <div className="flex-1 h-2 bg-gray-700 rounded-full overflow-hidden">
@@ -79,7 +79,7 @@ export default function TopBar({
               currentTurnIndex={combat.currentTurnIndex}
               enemies={zoneEnemies}
               partyNames={party.map(m => m.characterName)}
-              partyColors={party.map(m => m.selectedClass ? CLASSES[m.selectedClass].color : '#fff')}
+              partyColors={party.map(() => PARTY_MEMBER_COLOR)}
             />
           )}
         </div>

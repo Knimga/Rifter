@@ -2,7 +2,8 @@ import type { Design } from '../core/types';
 import { blob, box, frustum } from '../core/primitives';
 import { add, mixC, mulC, rotZ, type RGB, type Vec3 } from '../core/vec';
 
-// Identity: always ivory bone (narrow range), always armed. Seeds vary build, gear and eye glow.
+// Identity: always ivory bone (narrow range), armed, with a shield and no helmet. Seeds vary build,
+// weapon and eye glow.
 const EYES = {
   ember: [255, 120, 40],
   frost: [120, 220, 255],
@@ -16,18 +17,13 @@ const design: Design = {
   source: { table: 'enemies', key: 'skeleton' }, // data/enemies.ts › skeleton
   category: 'creature',
   label: 'Skeleton',
-  version: 1,
   fit: { kind: 'standing', height: 1.12, maxRadius: 0.54 }, // ~12% bigger (uniform: height is the limiting fit)
   budget: 900,
   build(c) {
     const m = c.mesh;
     const { rf } = c;
-    // ---- parameters first, fixed order ----
-    const eyeKey = c.choice('eyes', Object.keys(EYES) as (keyof typeof EYES)[]);
-    const weapon = c.choice('weapon', ['sword', 'cleaver']);
-    const helmet = c.chance('helmet', 0.35);
-    const shield = c.chance('shield', 0.3);
-    // ---- incidental detail ----
+    const eyeKey = c.pick(Object.keys(EYES) as (keyof typeof EYES)[]);
+    const weapon = c.pick(['sword', 'cleaver'] as const);
     const bone = mulC([226, 214, 186], rf(0.92, 1.04));
     const boneDark = mulC(bone, 0.62);
     const eye: RGB = [...EYES[eyeKey]];
@@ -76,14 +72,7 @@ const design: Design = {
       blob(m, [sx * 0.07, 2.0, 0.16], [0.05, 0.045, 0.03], 0, 0.05, [24, 18, 22]);
       blob(m, [sx * 0.07, 2.0, 0.18], [0.025, 0.022, 0.012], 0, 0.05, eye, { e: 1 });
     }
-    if (helmet) {
-      // Rusted iron skullcap with a brim, sitting above the sockets
-      const iron = mixC(RUST, [96, 98, 106], 0.55);
-      blob(m, [0, 2.08, 0.0], [0.2, 0.15, 0.2], 0, 0.06, iron, { floorY: 2.06 });
-      frustum(m, [0, 2.04, 0.0], [0, 2.08, 0.0], 0.23, 0.22, 7, mulC(iron, 0.8));
-    }
-
-    // Arms: the right arm (-x) holds the weapon forward, the left hangs or carries a shield
+    // Arms: the right arm (-x) holds the weapon forward, the left carries a shield
     for (const sx of [-1, 1]) {
       // Shoulders sit just outside the ribcage so the thin arms stay visible beside it
       const sh: Vec3 = [sx * 0.29, 1.72, -0.02];
@@ -110,12 +99,10 @@ const design: Design = {
     // blade at the viewer from some facing and it collapses to a stub (see style guide, "Camera").
     m.xf(s0, (p) => add(rotZ(p, 0.45), grip));
 
-    if (shield) {
-      m.part('shield');
-      const at: Vec3 = [0.4, 1.18, 0.1]; // beside hand_l
-      blob(m, at, [0.04, 0.22, 0.2], 0, 0.12, mixC(RUST, [96, 72, 52], 0.5));
-      blob(m, add(at, [0.03, 0, 0]), [0.02, 0.05, 0.05], 0, 0.1, RUST);
-    }
+    m.part('shield');
+    const at: Vec3 = [0.4, 1.18, 0.1]; // beside hand_l
+    blob(m, at, [0.04, 0.22, 0.2], 0, 0.12, mixC(RUST, [96, 72, 52], 0.5));
+    blob(m, add(at, [0.03, 0, 0]), [0.02, 0.05, 0.05], 0, 0.1, RUST);
 
     const title = eyeKey[0].toUpperCase() + eyeKey.slice(1);
     return `${title}-Eyed Skeleton${weapon === 'cleaver' ? ' Butcher' : ''}`;

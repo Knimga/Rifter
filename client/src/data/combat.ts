@@ -139,19 +139,21 @@ export interface RoundTick {
   hp: number;
   mp: number;
   heal: number;                     // HoT healing this round
-  dotDamage: number;                // DoT damage this round
-  dotSources: Map<number, number>;  // partyIdx → DoT damage dealt, for threat
+  dotDamage: number;                // DoT damage to HP this round
+  mpDotDamage: number;              // DoT damage to MP this round (damagesMP DoTs)
+  dotSources: Map<number, number>;  // partyIdx → threat from the DoTs they applied
 }
 
 export function tickRound(stats: Stats, hp: number, mp: number, hots: ActiveHot[], dots: ActiveDot[]): RoundTick {
   const heal = tickHots(hots);
-  const { damage, bySource } = tickDots(dots, stats);
+  const { damage, mpDamage, threatBySource } = tickDots(dots, stats);
   return {
     hp: Math.max(0, Math.min(stats.hp, hp + stats.hpRegen + heal) - damage),
-    mp: Math.min(stats.mp, mp + stats.mpRegen),
+    mp: Math.max(0, Math.min(stats.mp, mp + stats.mpRegen) - mpDamage),
     heal,
     dotDamage: damage,
-    dotSources: bySource,
+    mpDotDamage: mpDamage,
+    dotSources: threatBySource,
   };
 }
 

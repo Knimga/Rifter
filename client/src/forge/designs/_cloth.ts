@@ -8,18 +8,16 @@ import { armorEntry, band, ell, fanCap, footwearPair, glovePair, opening } from 
 
 // ─── Hood (helm) ──────────────────────────────────────────────────────────────
 
-export function hoodDesign(seriesId: string, version: number): Design {
+export function hoodDesign(seriesId: string): Design {
   const { id, label, source, palette } = armorEntry(seriesId, 'helm');
   return {
-    id, label, source, version,
+    id, label, source,
     category: 'armor',
     fit: { kind: 'item', size: 0.6 },
     budget: 400,
     build(c) {
       const m = c.mesh;
       const { rf } = c;
-      // ---- parameters first, fixed order ----
-      const peak = c.choice('peak', ['rounded', 'pointed']);
       const { main: cloth, shadow, trim } = palette;
 
       // Cowl: lofted from crown to hem. Flat on the sides (narrow in x, deep in z), it narrows where the
@@ -40,10 +38,6 @@ export function hoodDesign(seriesId: string, version: number): Design {
       loft(m, rings, cloth, { caps: false });
       fanCap(m, rings[0], cloth, [0, 0.55, 0]); // crown
       fanCap(m, rings[rings.length - 1], shadow, [0, 0.55, 0]); // the dark inside, seen from below
-      if (peak === 'pointed') {
-        // A drooping point at the back of the crown, showing above the cowl from the front
-        frustum(m, [0, 0.87, -0.1], [rf(-0.06, 0.06), 1.15, -0.32], 0.14, 0.015, 6, cloth);
-      }
       // Face opening: a linen-edged oval with a deep shadow inside, set into the flat front
       blob(m, [0, 0.56, 0.3], [w * 0.7, 0.27, 0.11], 1, 0, trim);
       blob(m, [0, 0.54, 0.33], [w * 0.55, 0.22, 0.1], 1, 0, shadow);
@@ -54,10 +48,10 @@ export function hoodDesign(seriesId: string, version: number): Design {
 
 // ─── Robes (chest) ────────────────────────────────────────────────────────────
 
-export function robesDesign(seriesId: string, version: number): Design {
+export function robesDesign(seriesId: string): Design {
   const { id, label, source, palette } = armorEntry(seriesId, 'chest');
   return {
-    id, label, source, version,
+    id, label, source,
     category: 'armor',
     fit: { kind: 'item', size: 0.85 },
     budget: 600,
@@ -100,10 +94,10 @@ export function robesDesign(seriesId: string, version: number): Design {
 
 // ─── Handwraps (gloves) ───────────────────────────────────────────────────────
 
-export function handwrapsDesign(seriesId: string, version: number): Design {
+export function handwrapsDesign(seriesId: string): Design {
   const { id, label, source, palette } = armorEntry(seriesId, 'gloves');
   return {
-    id, label, source, version,
+    id, label, source,
     category: 'armor',
     fit: { kind: 'item', size: 0.65 },
     budget: 700,
@@ -130,10 +124,10 @@ export function handwrapsDesign(seriesId: string, version: number): Design {
 
 // ─── Shoes (boots) ────────────────────────────────────────────────────────────
 
-export function shoesDesign(seriesId: string, version: number): Design {
+export function shoesDesign(seriesId: string): Design {
   const { id, label, source, palette } = armorEntry(seriesId, 'boots');
   return {
-    id, label, source, version,
+    id, label, source,
     category: 'armor',
     fit: { kind: 'item', size: 0.6 },
     budget: 400,

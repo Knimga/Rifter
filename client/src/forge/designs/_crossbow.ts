@@ -1,22 +1,20 @@
 // Crossbow shape (Crossbows), shared by every crossbow design (e.g. plain-crossbow.ts): seen from above,
 // a wooden stock with an iron prod across the front and the string drawn back to the nut.
 import type { Design } from '../core/types';
-import { bipyr, box, frustum } from '../core/primitives';
+import { box, frustum } from '../core/primitives';
 import { mulC, rotZ, type Vec3 } from '../core/vec';
 import { WEAPON_ROLL, weaponEntry } from './_weapon';
 
-export function crossbowDesign(seriesId: string, version: number): Design {
+export function crossbowDesign(seriesId: string): Design {
   const { id, label, source, palette } = weaponEntry(seriesId, 'Crossbows');
   return {
-    id, label, source, version,
+    id, label, source,
     category: 'weapon',
     fit: { kind: 'item', size: 0.8 },
     budget: 500,
     build(c) {
       const m = c.mesh;
       const { rf } = c;
-      // ---- parameters first, fixed order ----
-      const loaded = c.chance('loaded', 0.5);
       const { metal, trim, wood, string } = palette;
 
       // Stock: a broad butt, then a narrower tiller running up to the prod
@@ -42,13 +40,6 @@ export function crossbowDesign(seriesId: string, version: number): Design {
       m.part('string');
       for (const sx of [-1, 1]) frustum(m, prodPoint(sx, 1), nut, 0.014, 0.014, 3, string);
       box(m, nut, [0.18, 0.06, 0.18], trim, 0.05);
-
-      if (loaded) {
-        // A bolt lying in the groove, its iron head just past the nose
-        m.part('bolt');
-        frustum(m, [0, nut[1], 0.09], [0, Ls + 0.12, 0.09], 0.022, 0.022, 4, mulC(wood, 1.2));
-        bipyr(m, [0, Ls + 0.2, 0.09], 0.04, 0.09, 4, metal);
-      }
 
       m.anchor('grip', [0, 0.5, 0]);
       m.anchor('tip', [0, Ls + 0.1, 0]);

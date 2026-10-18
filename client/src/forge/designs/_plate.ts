@@ -14,10 +14,10 @@ function rivet(m: Parameters<typeof blob>[0], c: Vec3, col: RGB): void {
 
 // ─── Helm (helm) ──────────────────────────────────────────────────────────────
 
-export function helmDesign(seriesId: string, version: number): Design {
+export function helmDesign(seriesId: string): Design {
   const { id, label, source, palette } = armorEntry(seriesId, 'helm');
   return {
-    id, label, source, version,
+    id, label, source,
     category: 'armor',
     fit: { kind: 'item', size: 0.6, groundPitchDeg: -55 }, // as loot it rests tipped back, not flat: the open underside stays out of view
     budget: 500,
@@ -48,10 +48,10 @@ export function helmDesign(seriesId: string, version: number): Design {
 
 // ─── Breastplate (chest) ──────────────────────────────────────────────────────
 
-export function breastplateDesign(seriesId: string, version: number): Design {
+export function breastplateDesign(seriesId: string): Design {
   const { id, label, source, palette } = armorEntry(seriesId, 'chest');
   return {
-    id, label, source, version,
+    id, label, source,
     category: 'armor',
     fit: { kind: 'item', size: 0.8 },
     budget: 600,
@@ -89,10 +89,10 @@ export function breastplateDesign(seriesId: string, version: number): Design {
 
 // ─── Gauntlets (gloves) ───────────────────────────────────────────────────────
 
-export function gauntletsDesign(seriesId: string, version: number): Design {
+export function gauntletsDesign(seriesId: string): Design {
   const { id, label, source, palette } = armorEntry(seriesId, 'gloves');
   return {
-    id, label, source, version,
+    id, label, source,
     category: 'armor',
     fit: { kind: 'item', size: 0.7 },
     budget: 900,
@@ -126,10 +126,10 @@ export function gauntletsDesign(seriesId: string, version: number): Design {
 
 // ─── Sabatons (boots) ─────────────────────────────────────────────────────────
 
-export function sabatonsDesign(seriesId: string, version: number): Design {
+export function sabatonsDesign(seriesId: string): Design {
   const { id, label, source, palette } = armorEntry(seriesId, 'boots');
   return {
-    id, label, source, version,
+    id, label, source,
     category: 'armor',
     fit: { kind: 'item', size: 0.65 },
     budget: 700,

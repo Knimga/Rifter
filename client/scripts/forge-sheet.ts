@@ -3,15 +3,20 @@
 // meant so Claude Code can SEE what it just built. Final look is judged in /dev/forge.
 //
 //   npm run forge:sheet -- --design golem --seeds 8 --yaws 0,90,180,270 --out sheet.png
-//   --design <substr>   filter by design id            --seeds <n | a,b,c>   seed count or explicit list (default 6)
-//   --yaws <deg,deg>    facings (default 0)            --params k=v,k=v      pin params on every cell
+//   --design <substr>   filter by design id            --seeds <n | a,b,c>   seed count or explicit list (default 6);
+//                                                       items have one look (ITEM_SEED) and ignore it
+//   --yaws <deg,deg>    facings (default 0)
 //   --drafts            include src/forge/drafts       --only-drafts         draft designs only
 //   --elev <deg>        camera elevation (default GAME_CAMERA)   --cols <n> (default 6)   --cell <px> (default 200)
+//   --weapon "<type>"   class designs: hold this weapon type (posed for its hold), e.g. "Crossbows";
+//                       default = the class's starting gear
 import { writeFileSync } from 'node:fs';
-import { buildModel } from '../src/forge/core/build';
 import { GAME_CAMERA, ITEM_GROUND_PITCH, LIGHT, SHEET_SHADING, itemRestLift, layItem, obliqueProject } from '../src/forge/core/stage-config';
-import type { Design, Model, Params } from '../src/forge/core/types';
+import type { Design, Model } from '../src/forge/core/types';
+import { ITEM_SEED, oneLook } from '../src/forge/core/link';
 import { loadDesigns } from './load-designs';
+import { buildPreview } from '../src/forge/equip';
+import type { WeaponType } from '../src/data/gear/types';
 import { encodePNG } from './png';
 
 const args = process.argv.slice(2);
@@ -27,11 +32,6 @@ const elev = (elevDeg * Math.PI) / 180;
 const cols = Number(opt('cols', '6'));
 const CELL = Number(opt('cell', '200'));
 const out = opt('out', 'forge-sheet.png');
-const pinned: Params = {};
-for (const kv of opt('params', '').split(',').filter(Boolean)) {
-  const [k, v] = kv.split('=');
-  pinned[k] = v === 'true' ? true : v === 'false' ? false : Number.isNaN(Number(v)) ? v : Number(v);
-}
 
 const SS = 2; // supersampling
 const BG = [30, 28, 40], GROUND = [58, 56, 70], GROUND_EDGE = [110, 108, 128];
@@ -150,12 +150,14 @@ if (!loaded.length) {
 
 type Cell = { label: string; pix: Uint8Array };
 const blocks: Cell[][] = [];
+// Character (class) designs are drawn holding their class's starting gear, built from the approved item designs
+const approvedById = Object.fromEntries((await loadDesigns()).map((l) => [l.design.id, l.design]));
 const manifest: string[] = [];
 for (const { design, source } of loaded) {
   const cells: Cell[] = [];
-  for (const seed of seeds)
+  for (const seed of oneLook(design) ? [ITEM_SEED] : seeds)
     for (const yaw of yaws) {
-      const model = buildModel(design, seed, pinned);
+      const model = buildPreview(design, seed, approvedById, (opt('weapon', '') || undefined) as WeaponType | undefined);
       cells.push({ label: '', pix: renderCell(model, design, yaw) });
       manifest.push(`${design.id}${source === 'draft' ? '[draft]' : ''} seed=${seed} yaw=${Math.round((yaw * 180) / Math.PI)} tris=${model.mesh.triCount} "${model.name}"`);
     }

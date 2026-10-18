@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 
 import { CLASSES } from '../data/classes';
 import { recomputeStats, type ActiveBuff, type ActiveHot, type ActiveDot } from '../data/stats';
-import { getGearArmorBonus, getGearBuffs, isWeaponItem, generateLootDrop, type GearSlot, type GearSlots, type Item } from '../data/gear';
+import { getGearArmorBonus, getGearBuffs, isShieldItem, isWeaponItem, generateLootDrop, type GearSlot, type GearSlots, type Item } from '../data/gear';
 import { isFull, addItem, canEquip, canUnequip, equipFromInventory, unequipToInventory, type Inventory } from '../data/inventory';
 import { OUT_OF_COMBAT_REGEN_INTERVAL_MS } from '../data/constants';
 import type { PartyMemberConfig } from '../data/party';
@@ -13,7 +13,8 @@ import { SANCTUM, isSanctumWalkable } from '../data/sanctum';
 import { generateDungeon, spawnDungeonEnemies, type DungeonData, type ZoneData } from '../data/dungeonGen';
 import { DUNGEON_PRESETS } from '../data/dungeonPresets';
 import { startCombat, joinCombat, advanceTurn, applyTopOfRound, tickRound, getCurrentCombatant, deadPartyIndices, type CombatState, type RoundTick } from '../data/combat';
-import { executeAction, toAction, tickDurations, type ActionOutcome, type CombatUnit, type UnitChange } from '../data/abilityExecution';
+import { MP_DAMAGE_COLOR, executeAction, toAction, tickDurations, unitKey, type ActionOutcome, type CombatUnit, type UnitChange } from '../data/abilityExecution';
+import type { UnitAim } from '../components/ModelLayer';
 import { findFollowerSpawns, computeFollowerPositions } from '../data/movementHelpers';
 import { useEnemyTurn, type EnemyAoePreview } from '../hooks/useEnemyTurn';
 import { useFloatingText } from '../hooks/useFloatingText';
@@ -33,6 +34,30 @@ interface Props {
 
 const AGGRO_RANGE = 5;
 
+/** A party member's combat state, indexed like `party`. */
+interface MemberState {
+  hp: number;
+  mp: number;
+  buffs: ActiveBuff[];
+  hots: ActiveHot[];
+  dots: ActiveDot[];
+}
+
+/** A member's effective stats: class + gear, with active buffs and gear affixes applied. */
+const memberStats = (m: PartyMemberConfig, buffs: ActiveBuff[]) => recomputeStats(
+  { mode: 'player', classKey: m.selectedClass, gearArmorBonus: getGearArmorBonus(m.gear) },
+  [...buffs, ...getGearBuffs(m.gear)],
+);
+
+// Identity of a buff list. Lists are immutable (a change makes a new array), so a member's stats only need
+// recomputing when one of these ids changes.
+const listIds = new WeakMap<object, number>();
+let nextListId = 0;
+const listId = (list: object) => {
+  let id = listIds.get(list);
+  if (id === undefined) listIds.set(list, (id = nextListId++));
+  return id;
+};
 
 const INITIAL_COMBAT: CombatState = {
   active: false,
@@ -60,12 +85,20 @@ export default function GameScreen({ party, setParty }: Props) {
   const [followerPositions, setFollowerPositions] = useState<Pos[]>([...SANCTUM.followerStarts]);
   const [inventory, setInventory] = useState<Inventory>([]);
 
-  // ─── Per-member state (Phase 3) ──────────────────────────────────────────
-  const [partyHp, setPartyHp] = useState<number[]>([]);
-  const [partyMp, setPartyMp] = useState<number[]>([]);
-  const [partyBuffs, setPartyBuffs] = useState<ActiveBuff[][]>(() => party.map(() => []));
-  const [partyHots, setPartyHots] = useState<ActiveHot[][]>(() => party.map(() => []));
-  const [partyDots, setPartyDots] = useState<ActiveDot[][]>(() => party.map(() => []));
+  // ─── Per-member state ────────────────────────────────────────────────────
+  // Combat state (starts at full HP/MP; no auto-restore on combat end), and each member's action bar
+  const [members, setMembers] = useState<MemberState[]>(() => party.map(m => {
+    const s = memberStats(m, []);
+    return { hp: s.hp, mp: s.mp, buffs: [], hots: [], dots: [] };
+  }));
+  /** Apply `fn` to the listed members' state (others unchanged). */
+  const updateMembers = useCallback((fn: (m: MemberState, i: number) => MemberState, only?: (i: number) => boolean) =>
+    setMembers(prev => prev.map((m, i) => (!only || only(i) ? fn(m, i) : m))), []);
+  const partyHp = useMemo(() => members.map(m => m.hp), [members]);
+  const partyMp = useMemo(() => members.map(m => m.mp), [members]);
+  const partyBuffs = useMemo(() => members.map(m => m.buffs), [members]);
+  const partyHots = useMemo(() => members.map(m => m.hots), [members]);
+  const partyDots = useMemo(() => members.map(m => m.dots), [members]);
   const [partySlots, setPartySlots] = useState<SlotContent[][]>(() =>
     party.map(m => {
       const abilities = m.selectedClass ? CLASSES[m.selectedClass].abilities : [];
@@ -76,15 +109,19 @@ export default function GameScreen({ party, setParty }: Props) {
   );
   const [partyActiveSlot, setPartyActiveSlot] = useState<(number | null)[]>(() => party.map(() => null));
   const [barViewIdx, setBarViewIdx] = useState(0);
+  // Where each unit last aimed an ability (unit id → tile + sequence): its model turns to face it
+  const [unitAims, setUnitAims] = useState<Record<string, UnitAim>>({});
+  const aimSeqRef = useRef(0);
 
 
   // ─── Per-member stats ────────────────────────────────────────────────────
 
-  // Memoized: a full stat recompute per member is too costly to redo on every render
-  const partyAllStats = useMemo(() => party.map((m, i) => recomputeStats(
-    { mode: 'player', classKey: m.selectedClass, pointsSpent: m.pointsSpent, skillPointsSpent: m.skillPointsSpent, gearArmorBonus: getGearArmorBonus(m.gear) },
-    [...(partyBuffs[i] ?? []), ...getGearBuffs(m.gear)],
-  )), [party, partyBuffs]);
+  // Memoized: a full stat recompute per member is too costly to redo on every render (or every HP change)
+  const buffsKey = members.map(m => listId(m.buffs)).join(',');
+  const partyAllStats = useMemo(
+    () => party.map((m, i) => memberStats(m, members[i]?.buffs ?? [])),
+    [party, buffsKey], // eslint-disable-line react-hooks/exhaustive-deps
+  );
 
   // Alias for the leader — keeps most existing code unchanged
   const stats = partyAllStats[0];
@@ -97,7 +134,7 @@ export default function GameScreen({ party, setParty }: Props) {
   const activeStats = partyAllStats[activePartyIdx] ?? stats;
   const activeGear = party[activePartyIdx]?.gear ?? gear;
   const activeWeapon = activeGear.mainhand && isWeaponItem(activeGear.mainhand) ? activeGear.mainhand : null;
-  const activeMp = partyMp[activePartyIdx] ?? 0;
+  const activeMp = members[activePartyIdx]?.mp ?? 0;
 
   // Active slot / ability for the currently acting member
   const activeSlot = partyActiveSlot[activePartyIdx] ?? null;
@@ -111,15 +148,23 @@ export default function GameScreen({ party, setParty }: Props) {
 
   // Party members as drawn on the maps: the leader always, followers only while alive
   const partyPositions = [playerPos, ...followerPositions].slice(0, party.length);
-  const partyTokens: PartyTokenData[] = party.map((m, i) => ({
-    pos: partyPositions[i],
-    classKey: m.selectedClass!,
-    hp: partyHp[i] ?? partyAllStats[i].hp,
-    maxHp: partyAllStats[i].hp,
-    mp: partyMp[i] ?? partyAllStats[i].mp,
-    maxMp: partyAllStats[i].mp,
-    partyIndex: i,
-  })).filter(t => t.partyIndex === 0 || t.hp > 0);
+  const partyTokens: PartyTokenData[] = party.map((m, i) => {
+    // Equipped items, as the member's 3D model holds them
+    const main = m.gear.mainhand && isWeaponItem(m.gear.mainhand) ? m.gear.mainhand : null;
+    const off = m.gear.offhand && isShieldItem(m.gear.offhand) ? m.gear.offhand : null;
+    return {
+      pos: partyPositions[i],
+      classKey: m.selectedClass!,
+      hp: members[i].hp,
+      maxHp: partyAllStats[i].hp,
+      mp: members[i].mp,
+      maxMp: partyAllStats[i].mp,
+      partyIndex: i,
+      active: i === activePartyIdx,
+      weapon: main ? { link: main.model, weaponType: main.weaponType } : undefined,
+      shield: off?.model,
+    };
+  }).filter(t => t.partyIndex === 0 || t.hp > 0);
 
   // Selected action, normalised (weapon folded in) — drives map targeting and range
   const activeAction = activeAbility ? toAction(activeAbility, activeWeapon) : null;
@@ -132,10 +177,8 @@ export default function GameScreen({ party, setParty }: Props) {
   zoneRef.current = zone;
   const currentZoneRef = useRef(currentZone);
   currentZoneRef.current = currentZone;
-  const partyHotsRef = useRef(partyHots);
-  partyHotsRef.current = partyHots;
-  const partyDotsRef = useRef(partyDots);
-  partyDotsRef.current = partyDots;
+  const membersRef = useRef(members);
+  membersRef.current = members;
   const followerPositionsRef = useRef(followerPositions);
   followerPositionsRef.current = followerPositions;
 
@@ -144,10 +187,8 @@ export default function GameScreen({ party, setParty }: Props) {
   partyPosRef.current = partyPositions;
   const partyStatsRef = useRef(partyAllStats);
   partyStatsRef.current = partyAllStats;
-  const partyHpRef = useRef(partyHp);
+  const partyHpRef = useRef(partyHp); // for the enemy AI (useEnemyTurn)
   partyHpRef.current = partyHp;
-  const partyMpRef = useRef(partyMp);
-  partyMpRef.current = partyMp;
   const partyNamesRef = useRef(party.map(m => m.characterName));
   partyNamesRef.current = party.map(m => m.characterName);
   const partyThreatRef = useRef(combat.partyThreat);
@@ -156,27 +197,20 @@ export default function GameScreen({ party, setParty }: Props) {
   dungeonRef.current = dungeon;
   const applyOutcomeRef = useRef<(outcome: ActionOutcome, caster: CombatUnit) => void>(() => {});
 
-  // ─── HP/MP init ──────────────────────────────────────────────────────────
+  // ─── HP/MP limits ────────────────────────────────────────────────────────
 
-  const hpKey = partyAllStats.map(s => s.hp).join(',');
-  const mpKey = partyAllStats.map(s => s.mp).join(',');
-
-  // Initialize to full on first load only — no auto-restore on combat end
-  useEffect(() => {
-    setPartyHp(partyAllStats.map(s => s.hp));
-    setPartyMp(partyAllStats.map(s => s.mp));
-    // Preload the 3D model layer (three.js, a separate chunk) while the party is still in the sanctum
-    void import('../components/ModelLayer');
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // Preload the 3D model layer (three.js, a separate chunk) while the party is still in the sanctum
+  useEffect(() => { void import('../components/ModelLayer'); }, []);
 
   // Clamp HP/MP to effective max whenever stats change (buff expiry, gear swap)
+  const maxKey = partyAllStats.map(s => `${s.hp}/${s.mp}`).join(',');
   useEffect(() => {
-    if (partyHp.length === 0) return;
-    setPartyHp(prev => prev.map((hp, i) => Math.min(hp, partyAllStats[i]?.hp ?? hp)));
-    setPartyMp(prev => prev.map((mp, i) => Math.min(mp, partyAllStats[i]?.mp ?? mp)));
+    updateMembers((m, i) => {
+      const s = partyAllStats[i];
+      return s && (m.hp > s.hp || m.mp > s.mp) ? { ...m, hp: Math.min(m.hp, s.hp), mp: Math.min(m.mp, s.mp) } : m;
+    });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hpKey, mpKey]);
+  }, [maxKey]);
 
   // Sync barViewIdx to active party member during combat
   useEffect(() => {
@@ -207,22 +241,25 @@ export default function GameScreen({ party, setParty }: Props) {
     const showTick = (pos: Pos, tick: RoundTick) => {
       if (tick.heal > 0) spawnFloat(pos.x, pos.y, `+${tick.heal}`, 'green');
       if (tick.dotDamage > 0) spawnFloat(pos.x, pos.y, `-${tick.dotDamage}`, 'purple');
-      for (const [i, dmg] of tick.dotSources) addThreat(i, dmg);
+      if (tick.mpDotDamage > 0) spawnFloat(pos.x, pos.y, `-${tick.mpDotDamage} MP`, MP_DAMAGE_COLOR);
+      for (const [i, threat] of tick.dotSources) addThreat(i, threat);
     };
 
     // Dead members don't tick
-    const ticks = partyHpRef.current.map((hp, i) => {
-      if (hp <= 0) return null;
-      const tick = tickRound(partyStatsRef.current[i], hp, partyMpRef.current[i] ?? 0, partyHotsRef.current[i] ?? [], partyDotsRef.current[i] ?? []);
+    const ticks = membersRef.current.map((m, i) => {
+      if (m.hp <= 0) return null;
+      const tick = tickRound(partyStatsRef.current[i], m.hp, m.mp, m.hots, m.dots);
       showTick(partyPosRef.current[i], tick);
       addThreat(i, tick.heal * 1.5);
       return tick;
     });
-    setPartyHp(prev => prev.map((hp, i) => ticks[i]?.hp ?? hp));
-    setPartyMp(prev => prev.map((mp, i) => ticks[i]?.mp ?? mp));
-    setPartyBuffs(prev => prev.map(tickDurations));
-    setPartyHots(prev => prev.map(tickDurations));
-    setPartyDots(prev => prev.map(tickDurations));
+    updateMembers((m, i) => ({
+      hp: ticks[i]?.hp ?? m.hp,
+      mp: ticks[i]?.mp ?? m.mp,
+      buffs: tickDurations(m.buffs),
+      hots: tickDurations(m.hots),
+      dots: tickDurations(m.dots),
+    }));
 
     const { enemies: updated, events } = applyTopOfRound(enemiesRef.current);
     for (const { pos, tick } of events) showTick(pos, tick);
@@ -231,7 +268,7 @@ export default function GameScreen({ party, setParty }: Props) {
     if (threatGain.size > 0) {
       setCombat(prev => ({ ...prev, partyThreat: prev.partyThreat.map((t, i) => t + (threatGain.get(i) ?? 0)) }));
     }
-  }, [spawnFloat]);
+  }, [spawnFloat, updateMembers]);
 
   useEffect(() => {
     if (combat.round > 1) applyRoundTick();
@@ -242,18 +279,19 @@ export default function GameScreen({ party, setParty }: Props) {
   /** Bring any member at 0 HP/MP back to 10% (TPK, portal return, end of combat, out of combat). */
   const reviveDowned = useCallback(() => {
     const tenPercent = (max: number | undefined) => Math.max(1, Math.floor((max ?? 10) * 0.1));
-    setPartyHp(prev => prev.map((hp, i) => hp <= 0 ? tenPercent(partyStatsRef.current[i]?.hp) : hp));
-    setPartyMp(prev => prev.map((mp, i) => mp <= 0 ? tenPercent(partyStatsRef.current[i]?.mp) : mp));
-  }, []);
+    updateMembers((m, i) => m.hp > 0 && m.mp > 0 ? m : {
+      ...m,
+      hp: m.hp <= 0 ? tenPercent(partyStatsRef.current[i]?.hp) : m.hp,
+      mp: m.mp <= 0 ? tenPercent(partyStatsRef.current[i]?.mp) : m.mp,
+    });
+  }, [updateMembers]);
 
   const handleLocationChange = (next: 'sanctum' | 'dungeon') => {
     reviveDowned();
     setLocation(next);
     setCombat(INITIAL_COMBAT);
     clearFloats();
-    setPartyBuffs(party.map(() => []));
-    setPartyHots(party.map(() => []));
-    setPartyDots(party.map(() => []));
+    updateMembers(m => ({ ...m, buffs: [], hots: [], dots: [] }));
 
     if (next === 'dungeon') {
       const config = DUNGEON_PRESETS.crypt;
@@ -275,7 +313,6 @@ export default function GameScreen({ party, setParty }: Props) {
   // ─── Death checks ────────────────────────────────────────────────────────
 
   useEffect(() => {
-    if (partyHp.length === 0) return;
     if (partyHp.every(hp => hp <= 0)) {
       handleLocationChange('sanctum');
       return;
@@ -453,8 +490,15 @@ export default function GameScreen({ party, setParty }: Props) {
 
   // ─── Action outcomes (shared by party and enemy actions) ─────────────────
 
-  const applyActionOutcome = useCallback((outcome: ActionOutcome, caster: CombatUnit) => {
+  const applyActionOutcome = useCallback((outcome: ActionOutcome, caster: CombatUnit, aimAt?: Pos) => {
     for (const f of outcome.floats) spawnFloat(f.pos.x, f.pos.y, f.text, f.color);
+    // The caster's model turns to face where the ability was aimed (view state only)
+    if (aimAt && !samePos(aimAt, caster.pos)) {
+      const id = unitKey(caster.ref);
+      aimSeqRef.current += 1;
+      const seq = aimSeqRef.current;
+      setUnitAims(prev => ({ ...prev, [id]: { x: aimAt.x, y: aimAt.y, seq } }));
+    }
 
     const partyChanges = new Map<number, UnitChange>();
     const enemyChanges = new Map<string, UnitChange>();
@@ -465,13 +509,17 @@ export default function GameScreen({ party, setParty }: Props) {
     const nextHp = (hp: number, c: UnitChange, maxHp: number) => Math.max(0, Math.min(maxHp, hp - c.damage + c.heal));
 
     if (partyChanges.size > 0) {
-      const mapParty = <T,>(prev: T[], fn: (v: T, c: UnitChange, i: number) => T) =>
-        prev.map((v, i) => { const c = partyChanges.get(i); return c ? fn(v, c, i) : v; });
-      setPartyHp(prev => mapParty(prev, (hp, c, i) => nextHp(hp, c, partyStatsRef.current[i]?.hp ?? hp)));
-      setPartyMp(prev => mapParty(prev, (mp, c) => Math.max(0, mp - c.mpSpent)));
-      setPartyBuffs(prev => mapParty(prev, (list, c) => c.buffs.length ? [...list, ...c.buffs] : list));
-      setPartyHots(prev => mapParty(prev, (list, c) => c.hots.length ? [...list, ...c.hots] : list));
-      setPartyDots(prev => mapParty(prev, (list, c) => c.dots.length ? [...list, ...c.dots] : list));
+      const add = <T,>(list: T[], more: T[]) => (more.length ? [...list, ...more] : list);
+      updateMembers((m, i) => {
+        const c = partyChanges.get(i)!;
+        return {
+          hp: nextHp(m.hp, c, partyStatsRef.current[i]?.hp ?? m.hp),
+          mp: Math.max(0, m.mp - c.mpSpent),
+          buffs: add(m.buffs, c.buffs),
+          hots: add(m.hots, c.hots),
+          dots: add(m.dots, c.dots),
+        };
+      }, i => partyChanges.has(i));
     }
 
     if (enemyChanges.size > 0) {
@@ -516,7 +564,7 @@ export default function GameScreen({ party, setParty }: Props) {
         ? { ...prev, partyThreat: prev.partyThreat.map((t, i) => i === idx ? t + gained : t) }
         : prev);
     }
-  }, [spawnFloat, updateCurrentZone]);
+  }, [spawnFloat, updateCurrentZone, updateMembers]);
   applyOutcomeRef.current = applyActionOutcome;
 
   // ─── Player action ───────────────────────────────────────────────────────
@@ -565,7 +613,7 @@ export default function GameScreen({ party, setParty }: Props) {
       }));
     }
 
-    applyActionOutcome(executeAction(caster, action, targets), caster);
+    applyActionOutcome(executeAction(caster, action, targets), caster, targetPos);
     clearActiveSlot();
     if (combat.active) setCombat(prev => ({ ...prev, playerActedThisTurn: true }));
   }, [combat.active, isPlayerTurn, combat.playerActedThisTurn, activePartyIdx, activeAction, zoneEnemies, activePartyPos, activeMp, activeStats, partyAllStats, partyPositions, party, zone, applyActionOutcome]);
@@ -628,6 +676,7 @@ export default function GameScreen({ party, setParty }: Props) {
               playerPos={playerPos}
               activeMoverPos={playerPos}
               party={partyTokens}
+              aims={unitAims}
               movement={stats.movement}
               onMove={handleMove}
               onLocationChange={handleLocationChange}
@@ -642,6 +691,7 @@ export default function GameScreen({ party, setParty }: Props) {
               playerPos={playerPos}
               activeMoverPos={combat.active ? activePartyPos : playerPos}
               party={partyTokens}
+              aims={unitAims}
               movement={combat.active ? combat.movementRemaining : activeStats.movement}
               onMove={handleMove}
               onLocationChange={handleLocationChange}

@@ -14,10 +14,10 @@ function toggle(m: Parameters<typeof frustum>[0], c: Vec3, len: number, col: [nu
 
 // ─── Skullcap (helm) ──────────────────────────────────────────────────────────
 
-export function skullcapDesign(seriesId: string, version: number): Design {
+export function skullcapDesign(seriesId: string): Design {
   const { id, label, source, palette } = armorEntry(seriesId, 'helm');
   return {
-    id, label, source, version,
+    id, label, source,
     category: 'armor',
     fit: { kind: 'item', size: 0.55 },
     budget: 400,
@@ -47,10 +47,10 @@ export function skullcapDesign(seriesId: string, version: number): Design {
 
 // ─── Hauberk (chest) ──────────────────────────────────────────────────────────
 
-export function hauberkDesign(seriesId: string, version: number): Design {
+export function hauberkDesign(seriesId: string): Design {
   const { id, label, source, palette } = armorEntry(seriesId, 'chest');
   return {
-    id, label, source, version,
+    id, label, source,
     category: 'armor',
     fit: { kind: 'item', size: 0.85 },
     budget: 700,
@@ -97,10 +97,10 @@ export function hauberkDesign(seriesId: string, version: number): Design {
 
 // ─── Gauntlets (gloves) ───────────────────────────────────────────────────────
 
-export function gauntletsDesign(seriesId: string, version: number): Design {
+export function gauntletsDesign(seriesId: string): Design {
   const { id, label, source, palette } = armorEntry(seriesId, 'gloves');
   return {
-    id, label, source, version,
+    id, label, source,
     category: 'armor',
     fit: { kind: 'item', size: 0.7 },
     budget: 900,
@@ -131,10 +131,10 @@ export function gauntletsDesign(seriesId: string, version: number): Design {
 
 // ─── Boots (boots) ────────────────────────────────────────────────────────────
 
-export function bootsDesign(seriesId: string, version: number): Design {
+export function bootsDesign(seriesId: string): Design {
   const { id, label, source, palette } = armorEntry(seriesId, 'boots');
   return {
-    id, label, source, version,
+    id, label, source,
     category: 'armor',
     fit: { kind: 'item', size: 0.65 },
     budget: 600,

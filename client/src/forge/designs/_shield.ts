@@ -89,10 +89,10 @@ function roundShield(m: Mesh, r: number, face: RGB | ColorFn, bossR: number, rim
 
 // ─── Buckler (Light) ──────────────────────────────────────────────────────────
 
-export function bucklerDesign(version: number): Design {
+export function bucklerDesign(): Design {
   const { id, label, source } = shieldEntry('buckler');
   return {
-    id, label, source, version,
+    id, label, source,
     category: 'offhand',
     fit: { kind: 'item', size: 0.5 },
     budget: 500,
@@ -106,10 +106,10 @@ export function bucklerDesign(version: number): Design {
 
 // ─── Roundel (Medium) ─────────────────────────────────────────────────────────
 
-export function roundelDesign(version: number): Design {
+export function roundelDesign(): Design {
   const { id, label, source } = shieldEntry('roundel');
   return {
-    id, label, source, version,
+    id, label, source,
     category: 'offhand',
     fit: { kind: 'item', size: 0.68 },
     budget: 800,
@@ -169,10 +169,10 @@ function slab(m: Mesh, pts: [number, number][], t: number, dome: number, center:
   }
 }
 
-export function kiteShieldDesign(version: number): Design {
+export function kiteShieldDesign(): Design {
   const { id, label, source } = shieldEntry('kite-shield');
   return {
-    id, label, source, version,
+    id, label, source,
     category: 'offhand',
     fit: { kind: 'item', size: 0.82 },
     budget: 600,

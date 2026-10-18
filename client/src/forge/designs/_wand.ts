@@ -5,10 +5,10 @@ import { bipyr, blob, frustum } from '../core/primitives';
 import { mixC, rotZ, type RGB } from '../core/vec';
 import { PALE_CRYSTALS, WEAPON_ROLL, weaponEntry } from './_weapon';
 
-export function wandDesign(seriesId: string, version: number): Design {
+export function wandDesign(seriesId: string): Design {
   const { id, label, source, palette } = weaponEntry(seriesId, 'Wands'); // the series' metal isn't used
   return {
-    id, label, source, version,
+    id, label, source,
     category: 'weapon',
     // Smaller than other weapons (0.8): items are scaled to fill their fit size, so a wand at 0.8 would
     // be stretched to staff length. This keeps it a short, one-handed rod on the tile and in its icon.

@@ -24,6 +24,12 @@ export const GAME_CAMERA = {
 export const ICON_CAMERA = { elevationDeg: 0, yawRad: 0, fovDeg: 28 };
 
 /**
+ * Standing height of a player character, in tiles: the reference size for people. Matches the skeleton
+ * (creature.skeleton fit height). Held weapon and shield sizes are fractions of it (src/forge/equip.ts).
+ */
+export const CHARACTER_HEIGHT = 1.12;
+
+/**
  * Items on the map (loot) lie FLAT on their tile, face up: rotate the model -90° about X (its +z face
  * turns up, its +y "tip" points up the screen), then lift it so it rests on the floor. The oblique game
  * projection draws the ground plane without distortion, so a flat item shows its true outline,

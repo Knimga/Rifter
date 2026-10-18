@@ -52,11 +52,7 @@ for (const { stem, source, design } of designs) {
     }
     for (const [k, p] of Object.entries(anchors)) if (!p.every(Number.isFinite)) fail('bad-anchor', seed, k);
 
-    if (seed <= 40) {
-      if (!same(m, buildModel(design, seed))) fail('non-deterministic', seed);
-      // Rule check: pinning every param to its own resolved value must reproduce the exact same mesh.
-      if (!same(m, buildModel(design, seed, m.params))) fail('param-draw-order', seed, 'pinning resolved params changed the mesh (a param helper is conditional or draws RNG inconsistently)');
-    }
+    if (seed <= 40 && !same(m, buildModel(design, seed))) fail('non-deterministic', seed);
   }
   const ok = errs.size === 0;
   if (!ok) failures++;

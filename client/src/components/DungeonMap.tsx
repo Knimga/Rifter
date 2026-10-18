@@ -1,4 +1,4 @@
-import { useState, useMemo, createElement, lazy, Suspense } from 'react';
+import { useState, useMemo, lazy, Suspense } from 'react';
 import { GiMagicPortal, GiDoorway } from 'react-icons/gi';
 import type { AreaType, TargetType } from '../data/classes';
 import type { ActiveBuff, ActiveHot, ActiveDot } from '../data/stats';
@@ -8,12 +8,10 @@ import { affectedKeys, brightenHex, chebyshev, hasLineOfSight, isAdjacent, isVal
 import { TILE_SIZE } from '../data/constants';
 import type { Item } from '../data/gear';
 import FloatingCombatText, { type FloatingText } from './FloatingCombatText';
-import ItemIcon from './ItemIcon';
-import { EffectDotRow, EnemyHpBar, MoveLineOverlay, PartyToken, TILE_BORDER_CLASS, computeEffectDots, type PartyTokenData } from './mapParts';
-import { isRenderable } from '../forge/registry.vite';
-import type { MapLoot } from './ModelLayer';
+import { ActiveGlow, EffectDotRow, EnemyHpBar, MoveLineOverlay, TILE_BORDER_CLASS, computeEffectDots, toMapMember, type PartyTokenData } from './mapParts';
+import type { MapLoot, UnitAim } from './ModelLayer';
 
-// 3D enemy and loot models over the tile grid. Lazy: it pulls in three.js (GameScreen preloads it on mount).
+// 3D party, enemy and loot models over the tile grid. Lazy: it pulls in three.js (GameScreen preloads it on mount).
 const ModelLayer = lazy(() => import('./ModelLayer'));
 
 /** Above-the-head status for enemies drawn as models: effect dots (hoverable) over the HP bar. */
@@ -60,9 +58,11 @@ interface Props {
   enemyTargetPartyIdx: number | null;
   droppedItems?: Record<string, Item[]>;
   onLootClick?: (pos: Pos) => void;
+  /** Where each unit last aimed an ability; its model turns to face it. */
+  aims?: Record<string, UnitAim>;
 }
 
-export default function DungeonMap({ playerPos, activeMoverPos, party, movement, onMove, onLocationChange, onDoorClick, activeTarget, activeAbilityArea, aoeHighlightColor, actionRange, onAbilityUse, onAbilityDeselect, onMemberSelect, enemies, inCombat, isPlayerTurn, activeCombatantId, floatingTexts, onFloatingTextComplete, zone, portalPos, partyBuffs, partyHots, partyDots, floorColor, wallColor, enemyAoePreviewTiles, enemyTargetPartyIdx, droppedItems = {}, onLootClick }: Props) {
+export default function DungeonMap({ playerPos, activeMoverPos, party, movement, onMove, onLocationChange, onDoorClick, activeTarget, activeAbilityArea, aoeHighlightColor, actionRange, onAbilityUse, onAbilityDeselect, onMemberSelect, enemies, inCombat, isPlayerTurn, activeCombatantId, floatingTexts, onFloatingTextComplete, zone, portalPos, partyBuffs, partyHots, partyDots, floorColor, wallColor, enemyAoePreviewTiles, enemyTargetPartyIdx, droppedItems = {}, onLootClick, aims }: Props) {
   const { width, height, floors, doors } = zone;
   const [hoveredTile, setHoveredTile] = useState<Pos | null>(null);
 
@@ -73,21 +73,24 @@ export default function DungeonMap({ playerPos, activeMoverPos, party, movement,
   // Per-tile lookups, built once per render instead of scanning lists for every tile
   const enemyByKey = useMemo(() => new Map(enemies.filter(e => e.currentHp > 0).map(e => [posKey(e.pos), e])), [enemies]);
   // Living enemies drawn as models (stable array while `enemies` is unchanged, so ModelLayer can memo on it)
-  const modelEnemies = useMemo(() => enemies.filter(e => e.currentHp > 0 && isRenderable(e.classData.model)), [enemies]);
+  const modelEnemies = useMemo(() => enemies.filter(e => e.currentHp > 0), [enemies]);
   const memberByKey = useMemo(() => new Map(party.map(m => [posKey(m.pos), m])), [party]);
-  // Loot drawn as models: the top item of each pile, if it links to an approved design. Hidden under
-  // party members (their tokens are DOM, below the model canvas).
+  // Loot drawn as models: the top item of each pile
   const modelLoot = useMemo(() => {
     const out: MapLoot[] = [];
     for (const [key, items] of Object.entries(droppedItems)) {
       const top = items[0];
-      if (!top?.model || !isRenderable(top.model) || memberByKey.has(key)) continue;
+      if (!top) continue;
       const [x, y] = key.split(',').map(Number);
       out.push({ id: top.id, link: top.model, pos: { x, y } });
     }
     return out;
-  }, [droppedItems, memberByKey]);
-  const modelLootKeys = useMemo(() => new Set(modelLoot.map(l => posKey(l.pos))), [modelLoot]);
+  }, [droppedItems]);
+  // Party members drawn as their class models, with HP/MP bars and effect dots above their heads
+  const modelParty = useMemo(
+    () => party.map(m => toMapMember(m, computeEffectDots(partyBuffs[m.partyIndex] ?? [], partyHots[m.partyIndex] ?? [], partyDots[m.partyIndex] ?? []))),
+    [party, partyBuffs, partyHots, partyDots],
+  );
   const doorByKey = useMemo(() => new Map(doors.map(d => [posKey(d.pos), d])), [doors]);
 
   // Every tile the active mover can step to this turn
@@ -216,20 +219,11 @@ export default function DungeonMap({ playerPos, activeMoverPos, party, movement,
                     {tileItems?.[0] && (
                       <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-0">
                         <div className="relative">
-                          {modelLootKeys.has(key) ? (
-                            // Drawn by ModelLayer; a glow under it shows the pile can be picked up
-                            <div
-                              className={`w-8 h-8 rounded-full ${isLootAdjacent ? 'animate-pulse' : 'invisible'}`}
-                              style={{ boxShadow: '0 0 10px 3px rgba(234,179,8,0.6)' }}
-                            />
-                          ) : (
-                            <div
-                              className={`transition-all ${isLootAdjacent ? 'animate-pulse' : 'opacity-70'}`}
-                              style={isLootAdjacent ? { filter: 'drop-shadow(0 0 5px rgba(234,179,8,0.9))' } : undefined}
-                            >
-                              <ItemIcon item={tileItems[0]} className="w-5 h-5" iconClassName="text-yellow-200" />
-                            </div>
-                          )}
+                          {/* The pile is drawn by ModelLayer; a glow under it shows it can be picked up */}
+                          <div
+                            className={`w-8 h-8 rounded-full ${isLootAdjacent ? 'animate-pulse' : 'invisible'}`}
+                            style={{ boxShadow: '0 0 10px 3px rgba(234,179,8,0.6)' }}
+                          />
                           {tileItems.length > 1 && (
                             <span className="absolute -top-1 -right-1 bg-yellow-500 text-black text-[8px] font-bold rounded-full w-3 h-3 flex items-center justify-center leading-none">
                               {tileItems.length}
@@ -238,24 +232,9 @@ export default function DungeonMap({ playerPos, activeMoverPos, party, movement,
                         </div>
                       </div>
                     )}
-                    {member && (
-                      <PartyToken
-                        member={member}
-                        dots={computeEffectDots(partyBuffs[member.partyIndex] ?? [], partyHots[member.partyIndex] ?? [], partyDots[member.partyIndex] ?? [])}
-                      />
-                    )}
-                    {enemy && (
-                      <div className="relative w-full h-full flex items-center justify-center cursor-pointer">
-                        {/* Enemies linked to a model are drawn by ModelLayer; the rest keep their icon */}
-                        {!isRenderable(enemy.classData.model) && (
-                          <>
-                            {createElement(enemy.classData.token, { className: 'w-7 h-7' })}
-                            <EnemyHpBar hp={enemy.currentHp} maxHp={enemy.stats.hp} className="absolute bottom-0.5 left-1/2 -translate-x-1/2" />
-                            <EffectDotRow dots={computeEffectDots(enemy.buffs, enemy.hots, enemy.dots)} />
-                          </>
-                        )}
-                      </div>
-                    )}
+                    {/* Members and enemies are drawn by ModelLayer; the active member stands on a floor glow */}
+                    {member?.active && <ActiveGlow />}
+                    {enemy && <div className="w-full h-full cursor-pointer" />}
                     {!member && !enemy && door && (
                       <div
                         className={`transition-all ${isDoorAdjacent && !inCombat ? 'animate-pulse' : ''}`}
@@ -286,7 +265,7 @@ export default function DungeonMap({ playerPos, activeMoverPos, party, movement,
           ))}
 
           <Suspense fallback={null}>
-            <ModelLayer cols={width} rows={height} enemies={modelEnemies} loot={modelLoot} renderOverlay={enemyOverlay} />
+            <ModelLayer cols={width} rows={height} party={modelParty} enemies={modelEnemies} loot={modelLoot} renderEnemyOverlay={enemyOverlay} aims={aims} />
           </Suspense>
 
           {!activeTarget && canAct && hoveredTile && moveTargets.has(posKey(hoveredTile)) && (

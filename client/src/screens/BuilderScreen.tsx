@@ -1,9 +1,8 @@
 import { Check } from 'lucide-react';
-import { CLASSES, type Ability, type ClassKey } from '../data/classes';
-import type { AttributeKey, SkillKey } from '../data/stats';
-import { ATTRIBUTE_KEYS, BASE_ATTRIBUTES, STARTING_ATTR_POINTS, STARTING_SKILL_POINTS, SKILL_KEYS, calculateStats, formatStat } from '../data/stats';
-import { DAMAGE_ELEMENT_COLOR } from '../data/constants';
-import { displayName, isMemberComplete, memberIssues, sumValues, type PartyMemberConfig } from '../data/party';
+import { CLASSES, ROLE_ICONS, type Ability, type ClassKey } from '../data/classes';
+import { ATTRIBUTE_KEYS, BASE_ATTRIBUTES, SKILL_KEYS, calculateStats, formatStat } from '../data/stats';
+import { DAMAGE_ELEMENT_COLOR, PARTY_MEMBER_COLOR } from '../data/constants';
+import { displayName, isMemberComplete, memberIssues, type PartyMemberConfig } from '../data/party';
 import { ElementTag, Tooltip } from '../components/Tooltip';
 import { AttributeTooltips, SkillTooltips, AREA_LABEL, EFFECT_TONE_CLASS, describeEffect, passiveBonusText, scalingPassiveText } from '../data/detailStrings';
 
@@ -14,25 +13,6 @@ interface Props {
   onUpdateMember: (idx: number, update: Partial<PartyMemberConfig>) => void;
   onStart: () => void;
   onBack: () => void;
-}
-
-/** − value + control used by both the attribute and skill point-buy rows. */
-function PointStepper({ value, onDec, onInc, decDisabled, incDisabled, size }: {
-  value: number;
-  onDec: () => void;
-  onInc: () => void;
-  decDisabled: boolean;
-  incDisabled: boolean;
-  size: 'lg' | 'sm';
-}) {
-  const btn = `bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:text-gray-600 text-white font-bold rounded transition-colors ${size === 'lg' ? 'w-10 h-10' : 'w-7 h-7 text-sm'}`;
-  return (
-    <div className={`flex items-center ${size === 'lg' ? 'gap-4' : 'gap-2'}`}>
-      <button onClick={onDec} disabled={decDisabled} className={btn}>-</button>
-      <div className={`font-bold text-center text-yellow-500 ${size === 'lg' ? 'text-2xl w-12' : 'text-base w-8'}`}>{value}</div>
-      <button onClick={onInc} disabled={incDisabled} className={btn}>+</button>
-    </div>
-  );
 }
 
 function AbilityPane({ ability }: { ability: Ability }) {
@@ -66,26 +46,10 @@ function AbilityPane({ ability }: { ability: Ability }) {
 
 export default function BuilderScreen({ party, activeIdx, onSelectMember, onUpdateMember, onStart, onBack }: Props) {
   const member = party[activeIdx];
-  const { characterName, selectedClass, pointsSpent, skillPointsSpent } = member;
+  const { characterName, selectedClass } = member;
 
   const canStart = party.every(isMemberComplete);
-  const remainingPoints = STARTING_ATTR_POINTS - sumValues(pointsSpent);
-  const remainingSkillPoints = STARTING_SKILL_POINTS - sumValues(skillPointsSpent);
-  const stats = calculateStats({ mode: 'player', classKey: selectedClass, pointsSpent, skillPointsSpent });
-
-  const adjustPoints = (attr: AttributeKey, delta: number) => {
-    const newValue = pointsSpent[attr] + delta;
-    if (newValue < 0) return;
-    if (delta > 0 && remainingPoints <= 0) return;
-    onUpdateMember(activeIdx, { pointsSpent: { ...pointsSpent, [attr]: newValue } });
-  };
-
-  const adjustSkillPoints = (skill: SkillKey, delta: number) => {
-    const newValue = (skillPointsSpent[skill] ?? 0) + delta;
-    if (newValue < 0) return;
-    if (delta > 0 && remainingSkillPoints <= 0) return;
-    onUpdateMember(activeIdx, { skillPointsSpent: { ...skillPointsSpent, [skill]: newValue } });
-  };
+  const stats = calculateStats({ mode: 'player', classKey: selectedClass });
 
   return (
     <div className="min-h-screen bg-gray-900 text-gray-100 flex">
@@ -112,7 +76,7 @@ export default function BuilderScreen({ party, activeIdx, onSelectMember, onUpda
               >
                 <div className="flex items-center gap-2">
                   {cd ? (
-                    <div className="w-6 h-6 rounded-full shrink-0" style={{ backgroundColor: cd.color }} />
+                    <div className="w-6 h-6 rounded-full shrink-0" style={{ backgroundColor: PARTY_MEMBER_COLOR }} />
                   ) : (
                     <div className="w-6 h-6 rounded-full bg-gray-700 border border-gray-600 shrink-0 flex items-center justify-center">
                       <span className="text-xs text-gray-400">{i + 1}</span>
@@ -156,7 +120,13 @@ export default function BuilderScreen({ party, activeIdx, onSelectMember, onUpda
                   onClick={() => onUpdateMember(activeIdx, { selectedClass: key as ClassKey })}
                   className="w-full text-left px-3 py-3"
                 >
-                  <div className="font-bold text-sm" style={{ color: cd.color }}>{cd.name}</div>
+                  <div className="font-bold text-sm flex items-center gap-1.5" style={{ color: PARTY_MEMBER_COLOR }}>
+                    {cd.name}
+                    {cd.roles.map(r => {
+                      const Icon = ROLE_ICONS[r];
+                      return <span key={r} title={r[0].toUpperCase() + r.slice(1)}><Icon className="w-3.5 h-3.5 text-gray-400" /></span>;
+                    })}
+                  </div>
                   <p className="text-xs text-gray-400 italic mt-0.5 leading-snug">{cd.description}</p>
                 </button>
 
@@ -232,18 +202,9 @@ export default function BuilderScreen({ party, activeIdx, onSelectMember, onUpda
             />
           </div>
 
-          {/* Attribute Point Buy */}
+          {/* Attributes: fixed at level 1 (base + class), no point-buy */}
           <div className="mb-8">
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-2xl font-semibold">Allocate Attributes</h2>
-              <div className="text-xl font-bold">
-                Points Remaining:{' '}
-                <span className={remainingPoints === 0 ? 'text-green-500' : 'text-yellow-500'}>
-                  {remainingPoints}
-                </span>
-              </div>
-            </div>
-
+            <h2 className="text-2xl font-semibold mb-4">Attributes</h2>
             <div className="bg-gray-800 rounded-lg p-6">
               {ATTRIBUTE_KEYS.map((attr) => (
                 <div key={attr} className="flex items-center justify-between py-3 border-b border-gray-700 last:border-b-0">
@@ -253,66 +214,30 @@ export default function BuilderScreen({ party, activeIdx, onSelectMember, onUpda
                   >
                     <div className="font-semibold text-lg capitalize group-hover:text-gray-300 transition-colors">{attr}</div>
                     <div className="text-sm text-gray-400">
-                      {(() => {
-                        const cd = selectedClass ? CLASSES[selectedClass] : null;
-                        const classAttr = cd?.attributes[attr] ?? 0;
-                        const passiveFlat = cd ? ((cd.passives[`${attr}Bonus`]?.flat ?? 0) + (cd.passives[attr]?.flat ?? 0)) : 0;
-                        const classTotal = classAttr + passiveFlat;
-                        return `Base: ${BASE_ATTRIBUTES} + Spent: ${pointsSpent[attr]} + Class: ${classTotal}`;
-                      })()}
+                      Base: {BASE_ATTRIBUTES} + Class: {selectedClass ? (CLASSES[selectedClass].attributes[attr] ?? 0) : 0}
                     </div>
                   </Tooltip>
-                  <PointStepper
-                    size="lg"
-                    value={stats.attributes[attr]}
-                    onDec={() => adjustPoints(attr, -1)}
-                    onInc={() => adjustPoints(attr, 1)}
-                    decDisabled={pointsSpent[attr] === 0}
-                    incDisabled={remainingPoints === 0}
-                  />
+                  <div className="font-bold text-2xl w-12 text-center text-yellow-500">{stats.attributes[attr]}</div>
                 </div>
               ))}
             </div>
           </div>
 
-          {/* Skill Point Buy */}
+          {/* Skills: fixed at level 1 (base 0 + class), no point-buy */}
           <div className="mb-8">
-            <div className="flex justify-between items-center mb-3">
-              <h2 className="text-lg font-semibold text-gray-300">Allocate Skills</h2>
-              <div className="text-sm font-semibold text-gray-400">
-                Points:{' '}
-                <span className={remainingSkillPoints === 0 ? 'text-green-500' : 'text-yellow-500'}>
-                  {remainingSkillPoints}
-                </span>
-              </div>
-            </div>
-
+            <h2 className="text-lg font-semibold text-gray-300 mb-3">Skills</h2>
             <div className="bg-gray-800 rounded-lg px-4 py-2">
-              {SKILL_KEYS.map((skill) => {
-                const classVal = selectedClass ? (CLASSES[selectedClass].skills[skill] ?? 0) : 0;
-                const spent = skillPointsSpent[skill] ?? 0;
-                return (
-                  <div key={skill} className="flex items-center justify-between py-1.5 border-b border-gray-700/50 last:border-b-0">
-                    <Tooltip
-                      className="flex-1 group"
-                      content={<div className="px-3 py-2 max-w-[240px]"><p className="italic text-gray-300 text-sm">{SkillTooltips[skill]}</p></div>}
-                    >
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium capitalize text-gray-300 group-hover:text-gray-100 transition-colors">{skill}</span>
-                        {classVal > 0 && <span className="text-xs text-blue-400">+{classVal}</span>}
-                      </div>
-                    </Tooltip>
-                    <PointStepper
-                      size="sm"
-                      value={stats.skills[skill]}
-                      onDec={() => adjustSkillPoints(skill, -1)}
-                      onInc={() => adjustSkillPoints(skill, 1)}
-                      decDisabled={spent === 0}
-                      incDisabled={remainingSkillPoints === 0}
-                    />
-                  </div>
-                );
-              })}
+              {SKILL_KEYS.map((skill) => (
+                <div key={skill} className="flex items-center justify-between py-1.5 border-b border-gray-700/50 last:border-b-0">
+                  <Tooltip
+                    className="flex-1 group"
+                    content={<div className="px-3 py-2 max-w-[240px]"><p className="italic text-gray-300 text-sm">{SkillTooltips[skill]}</p></div>}
+                  >
+                    <span className="text-sm font-medium capitalize text-gray-300 group-hover:text-gray-100 transition-colors">{skill}</span>
+                  </Tooltip>
+                  <div className="font-bold text-base w-8 text-center text-yellow-500">{stats.skills[skill]}</div>
+                </div>
+              ))}
             </div>
           </div>
 

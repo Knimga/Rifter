@@ -9,18 +9,15 @@ const design: Design = {
   source: { table: 'enemies', key: 'zombie' }, // data/enemies.ts › zombie
   category: 'creature',
   label: 'Zombie',
-  version: 2, // v2: feet anchor, so the stance (not the reaching arms) is centered on the tile
-  fit: { kind: 'standing', height: 1.12, maxRadius: 0.56 }, // v2: ~12% bigger than v1 (uniform: height is the limiting fit)
+  fit: { kind: 'standing', height: 1.12, maxRadius: 0.56 }, // uniform scale: height is the limiting fit
   budget: 900,
   build(c) {
     const m = c.mesh;
     const { rf, ri } = c;
-    // ---- parameters first, fixed order ----
-    const skinHue = c.int('skinHue', 75, 115);
-    const clothes = c.choice('clothes', ['peasant', 'miner', 'noble', 'rags']);
-    const missingArm = c.chance('missingArm', 0.2);
-    const bloated = c.chance('bloated', 0.3);
-    // ---- incidental detail ----
+    const skinHue = ri(75, 115);
+    const clothes = c.pick(['peasant', 'miner', 'noble', 'rags'] as const);
+    const missingArm = c.chance(0.2);
+    const bloated = c.chance(0.3);
     const skin = hslRGB(skinHue, rf(14, 26), rf(44, 52));
     const rot = mixC(skin, [70, 40, 50], 0.45);
     const cloth: RGB =

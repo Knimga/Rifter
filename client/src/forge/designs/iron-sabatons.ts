@@ -1,4 +1,4 @@
 // Model for Iron Sabatons (data/gear/armor.ts › ARMOR_SERIES iron › boots).
 import { sabatonsDesign } from '../designs/_plate';
 
-export default sabatonsDesign('iron', 1);
+export default sabatonsDesign('iron');

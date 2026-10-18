@@ -5,10 +5,10 @@ import { blob, frustum } from '../core/primitives';
 import { rotZ, type Vec3 } from '../core/vec';
 import { WEAPON_ROLL, weaponEntry } from './_weapon';
 
-export function bowDesign(seriesId: string, version: number): Design {
+export function bowDesign(seriesId: string): Design {
   const { id, label, source, palette } = weaponEntry(seriesId, 'Bows'); // the series' metal isn't used
   return {
-    id, label, source, version,
+    id, label, source,
     category: 'weapon',
     fit: { kind: 'item', size: 0.8 },
     budget: 500,

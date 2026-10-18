@@ -7,19 +7,15 @@ export interface ShieldTemplate {
   name: string;
   type: ArmorProficiency;
   requiredLevel: number;
-  icon: string;               // image icon, used until the shield has a model
-  model?: ModelLink;          // link to its forge design, which is then how it is drawn (icon and loot)
+  model: ModelLink;           // its forge design: how it is drawn (icon and loot)
 }
 
 export const SHIELD_ARMOR_MULTIPLIER = 0.80;
 
 export const SHIELDS: ShieldTemplate[] = [
-  { id: 'buckler',     requiredLevel: 1, type: 'Light',  name: 'Buckler',     icon: '/gearIcons/weapons/plain/shield_round.png',
-    model: { design: 'offhand.buckler', version: 1, params: {} } },
-  { id: 'roundel',     requiredLevel: 1, type: 'Medium', name: 'Roundel',     icon: '/gearIcons/weapons/plain/shield_round.png',
-    model: { design: 'offhand.roundel', version: 1, params: {} } },
-  { id: 'kite-shield', requiredLevel: 1, type: 'Heavy',  name: 'Kite Shield', icon: '/gearIcons/weapons/plain/shield.png',
-    model: { design: 'offhand.kite-shield', version: 1, params: {} } },
+  { id: 'buckler',     requiredLevel: 1, type: 'Light',  name: 'Buckler',     model: 'offhand.buckler' },
+  { id: 'roundel',     requiredLevel: 1, type: 'Medium', name: 'Roundel',     model: 'offhand.roundel' },
+  { id: 'kite-shield', requiredLevel: 1, type: 'Heavy',  name: 'Kite Shield', model: 'offhand.kite-shield' },
 ];
 
 export const SHIELD_IMPLICIT: ImplicitDef = {
@@ -27,3 +23,5 @@ export const SHIELD_IMPLICIT: ImplicitDef = {
   baseValue: 5,
   growthPerLevel: 0.2,
 };
+
+//eventually add offhand foci for casters, quivers for archers

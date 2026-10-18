@@ -1,4 +1,3 @@
-import type { IconType } from 'react-icons';
 import type { ArmorProficiency, WeaponProficiency } from '../classes';
 import type { BuffableStat, DamageElement } from '../stats';
 import type { ModelLink } from '../../forge/core/types';
@@ -22,7 +21,7 @@ export interface ImplicitDef {
 }
 
 export interface Item {
-  /** Unique per item; seeds the parts of its model the link leaves free (see instanceSeed). */
+  /** Unique per item. */
   id: string;
   name: string;
   slot: GearSlot;
@@ -30,21 +29,19 @@ export interface Item {
   affixes: Affix[];
   implicit?: Affix;       // fixed bonus from the base type; counts toward stats like an affix
   /** The forge design it is drawn with (inventory icon, loot on the map), from its data entry. */
-  model?: ModelLink;
+  model: ModelLink;
 }
 
 export interface ArmorItem extends Item {
   slot: ArmorSlot;
   armorType: ArmorProficiency;
   armorValue: number;
-  icon?: IconType;
 }
 
 export interface ShieldItem extends Item {
   slot: 'offhand';
   armorType: ArmorProficiency;
   armorValue: number;
-  iconPath?: string;
 }
 
 export type WeaponType = Exclude<WeaponProficiency, 'Shields'> | 'Unarmed';

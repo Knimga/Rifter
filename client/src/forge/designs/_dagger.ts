@@ -5,10 +5,10 @@ import { rotZ } from '../core/vec';
 import { WEAPON_ROLL, weaponEntry } from './_weapon';
 import { swordBlade, swordGrip, swordGuard } from './_sword';
 
-export function daggerDesign(seriesId: string, version: number): Design {
+export function daggerDesign(seriesId: string): Design {
   const { id, label, source, palette } = weaponEntry(seriesId, 'Daggers');
   return {
-    id, label, source, version,
+    id, label, source,
     category: 'weapon',
     // Smaller than swords (0.8): items are scaled to fill their fit size, so a dagger at 0.8 would be
     // stretched to sword length. This keeps it a short blade on the tile and in its icon.
@@ -17,15 +17,13 @@ export function daggerDesign(seriesId: string, version: number): Design {
     build(c) {
       const m = c.mesh;
       const { rf } = c;
-      // ---- parameters first, fixed order ----
-      const guard = c.choice('guard', ['bar', 'hook']);
       const { metal, trim, leather } = palette;
 
       // Short, slim blade on a compact hilt
       const L = rf(1.0, 1.25), w = rf(0.12, 0.16), t = rf(0.045, 0.07);
       swordBlade(m, L, w, t, metal);
-      const gw = w * rf(1.6, 2.1) + 0.05, gy = -0.04;
-      swordGuard(m, guard, gw, gy, trim);
+      const gw = w * rf(1.6, 1.75) + 0.05, gy = -0.04;
+      swordGuard(m, 'bar', gw, gy, trim);
       const gl = rf(0.38, 0.45);
       swordGrip(m, gy, gl, 3, leather, trim);
 

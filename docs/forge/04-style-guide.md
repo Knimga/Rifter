@@ -6,7 +6,7 @@
 - **Color.** Mid-saturation bodies, one saturated accent. Glows that belong to the model (eyes, cores, gems, crystals) use emissive faces (`e` >= .5), so they pop under any light.
 - **No rarity or element glow in designs.** Item rarity glow (Superior and up) is applied by the renderer, so an item's mesh never depends on its rarity.
 - **Sizes.** Creatures about one tile (bosses larger via `fit`). Items are `fit.size` about 0.8: they sit on a tile and fill an icon.
-- **Facing.** Front (eyes, face) toward +z. Make the front obviously the front. Models only turn while moving (they face the direction they last moved).
+- **Facing.** Front (eyes, face) toward +z. Make the front obviously the front. Models only turn when they move (they face the direction they last moved) or use an ability (they face the tile it was aimed at).
 - **Budgets.** Creatures <= 900 tris, items <= 600.
 - **Loot is motionless** on the ground and in the inventory. Build items facing +z (their outline in the x-y plane): they're shown flat on the tile in game and straight-on in icons, so the x-y outline is what players see.
 - **Weapons** lean with the tip up and to the LEFT (`WEAPON_ROLL`), matching the character sheet's left-hand weapon slot. Never pitch a weapon toward or away from the camera. Weapon designs draw `series` and `weaponType` from the game's weapon data (`weaponPalette`): the series sets the material, and the display name comes from `WEAPON_SERIES`.

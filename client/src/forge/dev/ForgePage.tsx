@@ -1,13 +1,15 @@
 // DEV ONLY: the /dev/forge builder page. Lazy-loaded from main.tsx behind import.meta.env.DEV,
 // so it (and drafts/) never reach the production bundle. Spec: docs/forge (builder page).
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { buildModel, describeParams } from '../core/build';
-import { instanceSeed } from '../core/link';
+import { ITEM_SEED, oneLook } from '../core/link';
 import { smoothYaw } from '../core/facing';
-import type { Category, Design, Model, ModelLink, ParamDef, Params } from '../core/types';
+import type { Category, Design, Model } from '../core/types';
 import { designs } from '../registry.vite';
 import { drafts } from './draftRegistry';
-import { allDataEntries, dataEntry } from '../dataRefs';
+import { dataEntry } from '../dataRefs';
+import { buildPreview, classHolds, classOf } from '../equip';
+import { HOLD_LABEL } from '../designs/_character';
+import type { WeaponType } from '../../data/gear/types';
 import { DUNGEON_PRESETS } from '../../data/dungeonPresets';
 import { TILE_SIZE } from '../../data/constants';
 import { TILE_BORDER_CLASS } from '../../components/mapParts';
@@ -20,40 +22,31 @@ const LABEL_H = 0; // no per-cell text strip; a cell's name and seed show on hov
 const COLS = 6;
 // Left-panel sections, in order. Every Category must be listed (Record keeps that checked).
 const CATEGORY_LABEL: Record<Category, string> = {
-  creature: 'Creatures', character: 'Characters', weapon: 'Weapons', armor: 'Armor', offhand: 'Offhands', prop: 'Props',
+  creature: 'Creatures', character: 'Classes', weapon: 'Weapons', armor: 'Armor', offhand: 'Offhands',
 };
 const CATEGORIES = Object.keys(CATEGORY_LABEL) as Category[];
 const WALK_DIRS = [0, 1, 2, 3, 4, 5, 6, 7].map((i) => (i * Math.PI) / 4);
 
 type Entry = { id: string; approved?: Design; draft?: Design };
 /** A row of cells in the grid: one design, one set of seeds. */
-type Block = { label: string; sub: string; design: Design; cells: SeedCell[]; applyPins: boolean };
+type Block = { label: string; sub: string; design: Design; cells: SeedCell[] };
 
-// Every game data entry that can have a model (enemies, weapons, ...). Re-read when game data hot-reloads.
-const DATA_ENTRIES = allDataEntries();
 const stemOf = (id: string) => id.slice(id.indexOf('.') + 1);
 
 // ─── URL state ────────────────────────────────────────────────────────────────
 
 function readUrl() {
   const q = new URLSearchParams(location.search);
-  const pins: Params = {};
-  for (const [k, v] of q) {
-    if (!k.startsWith('p.')) continue;
-    pins[k.slice(2)] = v === 'true' ? true : v === 'false' ? false : Number.isNaN(Number(v)) ? v : Number(v);
-  }
   return {
     design: q.get('design') ?? '',
     seed: Number(q.get('seed') ?? 1),
     count: Number(q.get('count') ?? 12),
     camera: (q.get('cam') as CameraPreset) ?? 'game',
-    pins,
   };
 }
 
-function writeUrl(s: { design: string; seed: number; count: number; camera: CameraPreset; pins: Params }) {
+function writeUrl(s: { design: string; seed: number; count: number; camera: CameraPreset }) {
   const q = new URLSearchParams({ design: s.design, seed: String(s.seed), count: String(s.count), cam: s.camera });
-  for (const [k, v] of Object.entries(s.pins)) q.set(`p.${k}`, String(v));
   history.replaceState(null, '', `${location.pathname}?${q}`);
 }
 
@@ -62,7 +55,7 @@ function writeUrl(s: { design: string; seed: number; count: number; camera: Came
 export default function ForgePage() {
   const initial = useMemo(readUrl, []);
   // Design registries live in state so "Refresh designs" can swap in freshly loaded code without a
-  // page reload (selection, seed page, fixed params and focus all survive).
+  // page reload (selection, seed page and focus all survive).
   const [registry, setRegistry] = useState({ designs, drafts });
   // Hot reload re-runs this module with fresh `designs`/`drafts` objects, but React keeps state across a
   // hot reload, so sync them in; otherwise edited designs would only show after "Refresh designs".
@@ -78,7 +71,6 @@ export default function ForgePage() {
   const [seedStart, setSeedStart] = useState(initial.seed);
   const [count, setCount] = useState(initial.count);
   const [camera, setCamera] = useState<CameraPreset>(initial.camera);
-  const [pins, setPins] = useState<Params>(initial.pins);
   const [focusSeed, setFocusSeed] = useState<number | null>(null);
   const [yawDeg, setYawDeg] = useState(0);
   const [motion, setMotion] = useState<'none' | 'turntable' | 'walk'>('none');
@@ -87,41 +79,38 @@ export default function ForgePage() {
   const [status, setStatus] = useState('');
 
   const entry = entries.find((e) => e.id === selectedId) ?? entries[0];
-  const paramDesign = entry?.draft ?? entry?.approved;
-  const schema: Record<string, ParamDef> = useMemo(() => (paramDesign ? describeParams(paramDesign) : {}), [paramDesign]);
+  const shownDesign = entry ? (entry.approved ?? entry.draft)! : null;
   // The exact game data entry this design is the model for (lint guarantees it exists and the names match)
-  const source = entry ? dataEntry((entry.approved ?? entry.draft)!.source) : undefined;
-  // In-game samples: the data entry linked to this design, built exactly as the game builds it. A link
-  // with a fixed seed is one exact look; without one each instance seeds from its own id, so show a few
-  // sample instances (enemies use the dungeon's id scheme, e.g. 'skeleton-0').
-  const gameCells: SeedCell[] = entry
-    ? DATA_ENTRIES.filter((d) => d.link?.design === entry.id).flatMap((d) => {
-        const link = d.link!;
-        const ids = link.seed !== undefined ? [d.ref.key] : [0, 1, 2].map((n) => `${d.ref.key}-${n}`);
-        return ids.map((id) => ({ seed: instanceSeed(link, id), tag: id, params: link.params }));
-      })
-    : [];
-  const pageCells: SeedCell[] = Array.from({ length: count }, (_, i) => ({ seed: seedStart + i, params: {} }));
+  const source = shownDesign ? dataEntry(shownDesign.source) : undefined;
+  // Items have one look (every item of a name is identical: ITEM_SEED); creatures and characters get a
+  // page of seeds, each one a possible game instance.
+  const single = shownDesign ? oneLook(shownDesign) : false;
+  const pageCells: SeedCell[] = single ? [{ seed: ITEM_SEED }] : Array.from({ length: count }, (_, i) => ({ seed: seedStart + i }));
 
-  // Blocks (rows of cells): "In game" first, on its own row so the seed grid keeps its page size, then
-  // the seed page for the approved design and/or its draft. Forge param settings never apply to the
-  // In game row: it shows what the game data says, nothing else.
+  // Blocks (rows of cells): the approved design and/or its draft.
+  // Class (character) designs: instead of a seed page, one row per hold the class can use, each cell
+  // holding one weapon type it is proficient with (posed for that hold). Holds are reviewed here.
+  const cls = shownDesign ? classOf(shownDesign) : null;
+  const holdBlocks = (design: Design, label: string): Block[] =>
+    cls
+      ? classHolds(cls).map(({ hold, weaponTypes }) => ({
+          label: `${label} · ${HOLD_LABEL[hold]}`,
+          sub: design.id,
+          design,
+          cells: weaponTypes.map((t) => ({ seed: seedStart, tag: t, weaponType: t })),
+        }))
+      : [{ label, sub: design.id, design, cells: pageCells }];
   const blocks: Block[] = !entry
     ? []
     : [
-        ...(entry.approved && gameCells.length
-          ? [{ label: '★ In game', sub: `sample enemies as linked in the game data · v${entry.approved.version}`, design: entry.approved, cells: gameCells, applyPins: false }]
-          : []),
-        ...(entry.approved ? [{ label: 'Current', sub: `${entry.approved.id} v${entry.approved.version}`, design: entry.approved, cells: pageCells, applyPins: true }] : []),
-        ...(entry.draft
-          ? [{ label: entry.approved ? 'Draft' : 'Draft (new)', sub: `${entry.draft.id} v${entry.draft.version}`, design: entry.draft, cells: pageCells, applyPins: true }]
-          : []),
+        ...(entry.approved ? holdBlocks(entry.approved, 'Current') : []),
+        ...(entry.draft ? holdBlocks(entry.draft, entry.approved ? 'Draft' : 'Draft (new)') : []),
       ];
   const shown = focusSeed === null
     ? blocks
     : blocks.map((b) => ({ ...b, cells: b.cells.filter((c) => c.seed === focusSeed).slice(0, 1) })).filter((b) => b.cells.length);
 
-  useEffect(() => writeUrl({ design: entry?.id ?? '', seed: seedStart, count, camera, pins }), [entry, seedStart, count, camera, pins]);
+  useEffect(() => writeUrl({ design: entry?.id ?? '', seed: seedStart, count, camera }), [entry, seedStart, count, camera]);
 
   // Browser tab title (index.html's "Rifter" is the game's)
   useEffect(() => {
@@ -129,10 +118,14 @@ export default function ForgePage() {
   }, []);
 
   // Build every model shown (blocks x cells). Pure and deterministic, so memo on inputs.
+  // Character (class) designs are shown holding the class's starting gear, built from the approved item designs.
   const built = useMemo(
-    () => shown.map((b) => b.cells.map((cell) => ({ ...cell, model: safeBuild(b.design, cell.seed, b.applyPins ? { ...cell.params, ...pins } : cell.params) }))),
+    () => shown.map((b) => b.cells.map((cell) => ({
+      ...cell,
+      model: safeBuild(b.design, cell.seed, registry.designs, cell.weaponType),
+    }))),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [entry, shown.map((b) => `${b.label}:${b.cells.map((c) => c.seed).join(',')}`).join('|'), JSON.stringify(pins)],
+    [entry, registry, shown.map((b) => `${b.label}:${b.cells.map((c) => c.seed).join(',')}`).join('|')],
   );
 
   // Layout: each block is a titled row of cells, COLS per line.
@@ -232,40 +225,14 @@ export default function ForgePage() {
       return (await post('snapshot', { name: `${stemOf(entry!.id)}-${Date.now()}`, pngBase64: png })).path;
     });
   const focusModel = focusSeed !== null ? built[built.length - 1]?.[0]?.model : null;
-  // Data-entry snippets, headed by the exact entry they belong to: paste them to Claude Code as-is.
-  const copyLink = (link: ModelLink, what: string) => {
-    navigator.clipboard.writeText(`// ${source?.path ?? link.design}\nmodel: ${JSON.stringify(link)},`);
-    setStatus(`Copied the link for ${source?.name ?? link.design} (${what}). Paste it to Claude Code.`);
-  };
-  // The normal case: the design plus the FIXED params only. Everything set to Varies differs per enemy.
-  const copyForGame = () => {
-    const approved = entry?.approved;
-    if (!approved) return setStatus('Approve the design before linking it to the game.');
-    const fixed = Object.keys(pins).length;
-    copyLink({ design: approved.id, version: approved.version, params: pins }, fixed ? `${fixed} fixed param${fixed > 1 ? 's' : ''}, the rest vary per enemy` : 'everything varies per enemy');
-  };
-  // Rare case: every enemy identical to the selected model (all params + its seed).
-  const copyExact = () =>
-    focusModel && copyLink({ design: focusModel.designId, version: focusModel.version, seed: focusModel.seed, params: focusModel.params }, 'this exact model for every enemy');
 
-  // Link status of an approved design: does its data entry's `model` point at it, and at this version?
+  // Link status of an approved design: does its data entry's `model` point at it?
   const linkBadge = (e: (typeof entries)[number]): { text: string; color: string; title: string } | null => {
     if (!e.approved) return null;
-    const link = dataEntry(e.approved.source)?.link;
-    if (!link || link.design !== e.approved.id) return { text: 'not linked', color: 'bg-gray-600', title: 'Approved, but its data entry has no model link yet' };
-    if (link.version !== e.approved.version) {
-      return { text: `linked v${link.version}`, color: 'bg-yellow-700', title: `The game uses v${link.version}; the approved design is v${e.approved.version}` };
-    }
-    return { text: 'linked', color: 'bg-green-800', title: `In game: linked v${link.version}` };
+    return dataEntry(e.approved.source)?.link === e.approved.id
+      ? { text: 'linked', color: 'bg-green-800', title: 'In game: its data entry links this design' }
+      : { text: 'not linked', color: 'bg-gray-600', title: 'Approved, but its data entry links a different design' };
   };
-
-  const pin = (key: string, value: string | number | boolean | undefined) =>
-    setPins((p) => {
-      const next = { ...p };
-      if (value === undefined) delete next[key];
-      else next[key] = value;
-      return next;
-    });
 
   return (
     <div className="h-screen flex bg-gray-900 text-gray-100 text-sm">
@@ -284,7 +251,7 @@ export default function ForgePage() {
                 <button
                   key={e.id}
                   title={dataEntry((e.approved ?? e.draft)!.source)?.path}
-                  onClick={() => { setSelectedId(e.id); setPins({}); setFocusSeed(null); }}
+                  onClick={() => { setSelectedId(e.id); setFocusSeed(null); }}
                   className={`w-full text-left px-2 py-1.5 rounded flex items-center justify-between gap-2 ${e.id === entry?.id ? 'bg-gray-700' : 'hover:bg-gray-700/50'}`}
                 >
                   <span className="truncate">{(e.draft ?? e.approved)!.label}</span>
@@ -312,14 +279,22 @@ export default function ForgePage() {
           </div>
         )}
         <div className="flex flex-wrap items-center gap-3 mb-4 bg-gray-800 rounded-lg px-3 py-2">
-          <div className="flex items-center gap-1" title="Each seed is one fixed random variant. Page through them to judge the design's variety.">
-            <button className={BTN} disabled={seedStart <= 1} onClick={() => setSeedStart(Math.max(1, seedStart - count))}>◀</button>
-            <span className="text-gray-400 w-28 text-center">seeds {seedStart}–{seedStart + count - 1}</span>
-            <button className={BTN} onClick={() => setSeedStart(seedStart + count)}>▶</button>
-          </div>
-          <select className={INPUT + ' w-20'} value={count} onChange={(e) => setCount(Number(e.target.value))} title="Seeds per page">
-            {[6, 12, 24].map((n) => <option key={n} value={n}>{n}</option>)}
-          </select>
+          {single ? (
+            <span className="text-gray-400" title="Every item of this name looks exactly like this">one look (seed {ITEM_SEED})</span>
+          ) : (
+            <>
+              <div className="flex items-center gap-1" title="Each seed is one possible game instance. Page through them to judge the design's variety.">
+                <button className={BTN} disabled={seedStart <= 1} onClick={() => setSeedStart(Math.max(1, seedStart - count))}>◀</button>
+                <span className="text-gray-400 w-28 text-center">{cls ? `seed ${seedStart}` : `seeds ${seedStart}–${seedStart + count - 1}`}</span>
+                <button className={BTN} onClick={() => setSeedStart(seedStart + count)}>▶</button>
+              </div>
+              {!cls && (
+                <select className={INPUT + ' w-20'} value={count} onChange={(e) => setCount(Number(e.target.value))} title="Seeds per page">
+                  {[6, 12, 24].map((n) => <option key={n} value={n}>{n}</option>)}
+                </select>
+              )}
+            </>
+          )}
           <select className={INPUT + ' w-24'} value={camera} onChange={(e) => setCamera(e.target.value as CameraPreset)}>
             {(['game', 'icon', 'top', 'side'] as const).map((c) => <option key={c}>{c}</option>)}
           </select>
@@ -339,7 +314,7 @@ export default function ForgePage() {
           {built.map((block, b) => (
             <div key={b}>
               <div className="absolute left-0 font-bold text-gray-300" style={{ top: blockTop(b) + 4 }}>
-                <span className={shown[b].applyPins ? '' : 'text-amber-300'}>{shown[b].label}</span> <span className="text-gray-500 font-normal">{shown[b].sub}</span>
+                <span>{shown[b].label}</span> <span className="text-gray-500 font-normal">{shown[b].sub}</span>
               </div>
               {block.map(({ seed, tag, model }, i) => {
                 const r = rectOf(b, i);
@@ -349,7 +324,7 @@ export default function ForgePage() {
                     onClick={() => setFocusSeed(focusSeed === null ? seed : null)}
                     className={`absolute z-10 flex items-start text-left text-[11px] truncate px-1 text-amber-300 rounded-sm outline-1 ${focusSeed === seed ? 'outline outline-amber-400' : 'hover:outline hover:outline-gray-400'}`}
                     style={{ left: r.x, top: r.y - LABEL_H, width: r.w, height: LABEL_H + r.h }}
-                    title={`${tag ? `How the game renders "${tag}" (its data entry's model link)\n` : ''}#${seed} · ${model ? `${model.name} · ${model.mesh.triCount} tris` : 'build failed'}`}
+                    title={`${tag ? `${tag}\n` : ''}#${seed} · ${model ? `${model.name} · ${model.mesh.triCount} tris` : 'build failed'}`}
                   >
                     {tag}
                     {!model && <span className="text-red-400">build failed</span>}
@@ -361,7 +336,7 @@ export default function ForgePage() {
         </div>
       </main>
 
-      {/* ── Right: params, compare actions, repro ── */}
+      {/* ── Right: approve / discard, selected model ── */}
       <aside className="w-72 shrink-0 bg-gray-800 border-l border-gray-700 p-3 overflow-y-auto space-y-3">
         {entry?.draft && (
           <div className="bg-gray-900/60 rounded-lg p-2 space-y-2">
@@ -373,54 +348,12 @@ export default function ForgePage() {
           </div>
         )}
 
-        {/* Link to game: the design + its Fixed params. No model selection needed: Varies params differ per enemy. */}
-        <div className="bg-gray-900/60 rounded-lg p-2 space-y-1.5">
-          <h2 className="text-xs font-bold uppercase tracking-widest text-gray-500">Link to game</h2>
-          <p className="text-xs">
-            <span className="text-amber-300 font-semibold">Fixed for every enemy: </span>
-            {Object.keys(pins).length ? Object.entries(pins).map(([k, v]) => `${k} = ${typeof v === 'number' ? +v.toFixed(2) : v}`).join(', ') : <span className="text-gray-500">nothing</span>}
-          </p>
-          <p className="text-xs">
-            <span className="text-gray-300 font-semibold">Varies per enemy: </span>
-            {Object.keys(schema).filter((k) => !(k in pins)).join(', ') || <span className="text-gray-500">nothing</span>}
-          </p>
-          <button
-            className={BTN + ' w-full disabled:opacity-40 disabled:cursor-not-allowed'}
-            disabled={!entry?.approved}
-            onClick={copyForGame}
-            title={entry?.approved ? 'Copies a model link (design + fixed params) for a game data entry' : 'Approve the design first'}
-          >
-            Copy for game
-          </button>
-          {!entry?.approved && <p className="text-[11px] text-gray-500">Approve the design before linking it.</p>}
-        </div>
-
-        <div className="bg-gray-900/60 rounded-lg p-2 space-y-2">
-          <div className="flex items-center justify-between">
-            <h2 className="text-xs font-bold uppercase tracking-widest text-gray-500">Parameters</h2>
-            {Object.keys(pins).length > 0 && <button className="text-xs text-gray-400 hover:text-gray-100" onClick={() => setPins({})}>Set all to varies</button>}
-          </div>
-          <p className="text-[11px] text-gray-500">
-            <span className="text-amber-300 font-semibold">Fixed</span>: same on every enemy. <span className="text-gray-300 font-semibold">Varies</span>: each enemy rolls its own (each cell in the grid is one possible enemy). Changing a value fixes it.
-          </p>
-          {Object.entries(schema).map(([key, def]) => (
-            <ParamControl key={key} name={key} def={def} value={pins[key]} fallback={focusModel?.params[key] ?? built[shown.findIndex((b) => b.applyPins)]?.[0]?.model?.params[key]} onChange={(v) => pin(key, v)} />
-          ))}
-          {!Object.keys(schema).length && <p className="text-xs text-gray-500">No parameters.</p>}
-        </div>
-
         {/* Optional: inspect one model up close (click a model in the grid; click again to go back) */}
         {focusModel && (
           <div className="bg-gray-900/60 rounded-lg p-2 space-y-1">
             <h2 className="text-xs font-bold uppercase tracking-widest text-gray-500">Selected model</h2>
             <p className="font-semibold">{focusModel.name}</p>
             <p className="text-xs text-gray-400">seed #{focusModel.seed} · {focusModel.mesh.triCount} tris</p>
-            {Object.entries(focusModel.params).map(([k, v]) => (
-              <p key={k} className="text-xs"><span className="text-gray-500">{k}:</span> {typeof v === 'number' ? +v.toFixed(3) : String(v)}</p>
-            ))}
-            <button className="text-xs text-gray-400 hover:text-gray-100 underline" onClick={copyExact} title="Every enemy will look exactly like this one (all params and its seed fixed)">
-              Copy this exact model instead
-            </button>
           </div>
         )}
         {status && <p className="text-xs text-blue-300 break-all">{status}</p>}
@@ -499,9 +432,10 @@ function composeSnapshot(gl: HTMLCanvasElement, size: { w: number; h: number }, 
   return out.toDataURL('image/png');
 }
 
-function safeBuild(design: Design, seed: number, pins: Params): Model | null {
+/** Build one cell's model: class designs are posed for and hold `weaponType` (default: starting gear). */
+function safeBuild(design: Design, seed: number, designs: Record<string, Design>, weaponType?: WeaponType): Model | null {
   try {
-    return buildModel(design, seed, pins);
+    return buildPreview(design, seed, designs, weaponType);
   } catch (e) {
     console.error(`[forge] ${design.id} seed ${seed}`, e);
     return null;
@@ -512,79 +446,9 @@ function Badge({ color, title, children }: { color: string; title?: string; chil
   return <span title={title} className={`${color} text-[10px] leading-none px-1.5 py-0.5 rounded`}>{children}</span>;
 }
 
-/**
- * One parameter, in one of two clearly marked states:
- *  - Fixed: the value applies to every seed (amber outline, "Fixed" switch on).
- *  - Varies: each seed picks its own value; the control is dimmed and shows the focused/first seed's value.
- * Changing the control fixes it; the switch toggles between the two.
- */
-function ParamControl({ name, def, value, fallback, onChange }: {
-  name: string;
-  def: ParamDef;
-  value: string | number | boolean | undefined;
-  fallback: string | number | boolean | undefined;
-  onChange: (v: string | number | boolean | undefined) => void;
-}) {
-  const fixed = value !== undefined;
-  const shown = fixed ? value : fallback;
-  return (
-    <div className={`rounded-md p-2 space-y-1.5 border ${fixed ? 'border-amber-500 bg-amber-900/25' : 'border-gray-700'}`}>
-      <div className="flex items-center justify-between gap-2">
-        <span className={`text-xs font-semibold ${fixed ? 'text-amber-200' : 'text-gray-300'}`}>{name}</span>
-        <div className="flex rounded overflow-hidden border border-gray-600 text-[10px] font-semibold shrink-0">
-          <button
-            type="button"
-            onClick={() => onChange(undefined)}
-            className={`px-1.5 py-0.5 ${!fixed ? 'bg-gray-500 text-white' : 'bg-gray-900 text-gray-500 hover:text-gray-300'}`}
-            title="Each seed picks its own value"
-          >
-            Varies
-          </button>
-          <button
-            type="button"
-            onClick={() => !fixed && onChange(shown ?? defaultFor(def))}
-            className={`px-1.5 py-0.5 ${fixed ? 'bg-amber-500 text-gray-900' : 'bg-gray-900 text-gray-500 hover:text-gray-300'}`}
-            title="Use this value for every seed"
-          >
-            Fixed
-          </button>
-        </div>
-      </div>
-      <div className={fixed ? '' : 'opacity-60'}>
-        {def.type === 'choice' && (
-          <select className={`${INPUT} w-full`} value={String(shown ?? '')} onChange={(e) => onChange(e.target.value)}>
-            {[...new Set(def.options)].map((o) => <option key={o}>{o}</option>)}
-          </select>
-        )}
-        {def.type === 'number' && (
-          <div className="flex items-center gap-2">
-            <input
-              type="range" className="flex-1"
-              min={def.min} max={def.max} step={def.int ? 1 : (def.max - def.min) / 100}
-              value={Number(shown ?? def.min)} onChange={(e) => onChange(Number(e.target.value))}
-            />
-            <span className="text-xs w-10 text-right">{shown === undefined ? '' : def.int ? shown : (+Number(shown).toFixed(2))}</span>
-          </div>
-        )}
-        {def.type === 'bool' && (
-          <div className="flex gap-1">
-            {[true, false].map((b) => (
-              <Toggle key={String(b)} on={Boolean(shown) === b} pinned={fixed} onClick={() => onChange(b)}>{b ? 'yes' : 'no'}</Toggle>
-            ))}
-          </div>
-        )}
-        {!fixed && <p className="text-[10px] text-gray-500 mt-0.5">varies by seed (showing one seed's value)</p>}
-      </div>
-    </div>
-  );
-}
-
-const defaultFor = (def: ParamDef): string | number | boolean =>
-  def.type === 'choice' ? def.options[0] : def.type === 'number' ? def.min : false;
-
 /** Large-hit-area on/off button (used instead of native checkboxes). */
-function Toggle({ on, pinned = true, onClick, children }: { on: boolean; pinned?: boolean; onClick: () => void; children: string }) {
-  const active = on ? (pinned ? 'bg-blue-700 text-white' : 'bg-gray-600 text-gray-100') : 'bg-gray-900 text-gray-400 hover:bg-gray-700';
+function Toggle({ on, onClick, children }: { on: boolean; onClick: () => void; children: string }) {
+  const active = on ? 'bg-blue-700 text-white' : 'bg-gray-900 text-gray-400 hover:bg-gray-700';
   return (
     <button type="button" onClick={onClick} className={`px-2.5 py-1 rounded border border-gray-700 text-xs ${active}`}>
       {children}
@@ -594,8 +458,8 @@ function Toggle({ on, pinned = true, onClick, children }: { on: boolean; pinned?
 
 interface SeedCell {
   seed: number;
-  /** Game object linked to this design that renders with this cell's seed + params (e.g. 'skeleton'). */
+  /** Short label shown on the cell (class designs: the weapon type held). */
   tag?: string;
-  /** Params from the game object's model link. */
-  params: Params;
+  /** Class designs: the weapon type this cell's character holds (and is posed for). */
+  weaponType?: WeaponType;
 }

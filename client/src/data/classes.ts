@@ -1,21 +1,27 @@
 import {
-  GiEnrage, GiWaveStrike, GiShardSword, GiHospitalCross, GiMantrap, GiPoison,
-  GiFireZone, GiFireSpellCast, GiCursedStar, GiPlantWatering, GiPointySword,
-  GiDrippingBlade, GiPoisonBottle, GiEvilEyes, GiSwordBrandish, GiArrowsShield 
+  GiSwordBrandish, GiHospitalCross, GiSacrificialDagger, GiDrippingBlade, GiWaveStrike, GiSonicShout,
+  GiFireZone, GiPoison, GiPlantWatering, GiLeafSwirl, GiEvilComet, GiCursedStar,
+  GiBroadsword, GiShield, GiHealthNormal, GiCometSpark,
 } from 'react-icons/gi';
+import { FaRegSnowflake } from 'react-icons/fa';
+import { FaBoltLightning } from 'react-icons/fa6';
+import { RiTargetFill } from 'react-icons/ri';
 
 import type { IconType } from 'react-icons';
 import type { ComponentType } from 'react';
 import type { AttackCategory, DamageElement, WeaponType } from './gear';
 import type { AttributeKey, SkillKey, BuffableStat } from './stats';
+import type { ModelLink } from '../forge/core/types';
 
 export type TargetType = 'enemy' | 'ally' | 'self';
 export type AreaType = 'single' | 'blast1' | 'blast2' | 'line';
 export type EffectTarget = 'target' | 'caster';
 
 export type Effect =
-  | { type: 'damage';  appliesTo: EffectTarget; damageElement: DamageElement; minDamage: number; maxDamage: number }
-  | { type: 'dot';     appliesTo: EffectTarget; damageElement: DamageElement; damagePerRound: number; rounds: number }
+  // damagesMP: the damage goes to the target's MP instead of HP (scaled and reduced exactly like HP
+  // damage; generates half the threat)
+  | { type: 'damage';  appliesTo: EffectTarget; damageElement: DamageElement; minDamage: number; maxDamage: number; damagesMP?: boolean }
+  | { type: 'dot';     appliesTo: EffectTarget; damageElement: DamageElement; damagePerRound: number; rounds: number; damagesMP?: boolean }
   | { type: 'heal';    appliesTo: EffectTarget; damageElement: DamageElement; minHeal: number; maxHeal: number }
   | { type: 'hot';     appliesTo: EffectTarget; damageElement: DamageElement; healPerRound: number; rounds: number }
   | { type: 'buff';    appliesTo: EffectTarget; damageElement?: DamageElement; stats: Partial<Record<BuffableStat, number>>; statsPercent?: Partial<Record<BuffableStat, number>>; rounds: number }
@@ -35,8 +41,17 @@ export interface Ability {
   effects: Effect[];
 }
 
-export type ClassKey = 'barbarian' | 'paladin' | 'ranger' | 'pyromancer' | 'shaman'
-| 'poisonmaster' | 'nightblade' | 'juggernaut';
+export type ClassKey = 'knight' | 'rogue' | 'brute' | 'arcanist' | 'archer' | 'primalist' | 'occultist';
+
+/** What a class is for. Each role has an icon (ROLE_ICONS). */
+export type Role = 'damage' | 'tank' | 'healer' | 'caster';
+
+export const ROLE_ICONS: Record<Role, IconType> = {
+  damage: GiBroadsword,
+  tank:   GiShield,
+  healer: GiHealthNormal,
+  caster: GiCometSpark,
+};
 
 export type ArmorProficiency = 'Cloth' | 'Light' | 'Medium' | 'Heavy';
 export type WeaponProficiency =
@@ -61,9 +76,13 @@ export interface ScalingPassive {
   targetKey: string;                // passive stat key to add the result to (e.g. 'magicDamage')
 }
 
+/**
+ * A playable class. At level 1, attributes are BASE_ATTRIBUTES (5) plus `attributes` (14 points per
+ * class) and skills are BASE_SKILLS (0) plus `skills` (12 points per class); there is no point-buy.
+ */
 export interface ClassData {
   name: string;
-  color: string;  // hex color for the class circle token
+  roles: Role[];
   description: string;
   attributes: Partial<Record<AttributeKey, number>>;
   skills: Partial<Record<SkillKey, number>>;
@@ -71,194 +90,45 @@ export interface ClassData {
   scalingPassives?: ScalingPassive[];
   armorProficiencies: ArmorProficiency[];
   weaponProficiencies: WeaponProficiency[];
+  startingGear: StartingGear;
   abilities: Ability[];
+  model: ModelLink;  // the class's character design (forge); it holds the member's equipped weapon/offhand
+}
+
+/** A class's level-1 kit (no affixes), built by startingGear() in party.ts. */
+export interface StartingGear {
+  chest: ArmorProficiency;          // armor type of the starting chest piece
+  weapon: WeaponType;
+  weaponElement?: DamageElement;    // fixed element for magic weapons (otherwise the weapon type's default)
+  shield?: ArmorProficiency;        // starting shield type, if any
 }
 
 export const CLASSES: Record<ClassKey, ClassData> = {
-  barbarian: {
-    name: 'Barbarian',
-    color: '#dc2626',
-    description: 'A wielder of 2h weapons whose lack of armor is compensated by raw fortitude and battle lust.',
-    attributes: { strength: 4, toughness: 4 },
-    skills: { evasion: 4, expertise: 2, redoubt: 2 },
+  knight: {
+    name: 'Knight',
+    roles: ['tank', 'healer'],
+    description: 'A shield-bearing fighter that protects companions',
+    attributes: { strength: 3, toughness: 4, finesse: 1, mind: 2, spirit: 4, speed: 0 },
+    skills: { redoubt: 4, devotion: 4, expertise: 2, spellcraft: 2 },
     passives: {
-      dodge:    { name: 'Evasion',     flat: 5 },
-      meleeDamage: { name: 'Battle Fury', flat: 3 },
-      movement: { name: 'Rush In', flat: 1 }
+      block:   { name: 'Defender',  flat: 3 },
+      healing: { name: 'Protector', flat: 3 },
     },
-    armorProficiencies: ['Light'],
-    weaponProficiencies: ['2h Swords', '2h Maces', '2h Axes'],
-    abilities: [
-      {
-        name: 'Rage',
-        icon: GiEnrage,
-        mpCost: 10,
-        range: 0,
-        target: 'self',
-        effects: [
-          { type: 'buff', appliesTo: 'caster', stats: { hpRegen: 3, strength: 8 }, rounds: 5 },
-        ],
-      },
-      {
-        name: 'Cleave',
-        icon: GiWaveStrike,
-        mpCost: 12,
-        range: 0,
-        target: 'enemy',
-        useWeapon: true,
-        attackCategory: 'melee',
-        area: 'blast1',
-        effects: []
-      }
-    ],
-  },
-  poisonmaster: {
-    name: 'Poisonmaster',
-    color: 'olivedrab',
-    description: "A dagger-wielding alchemist whose toxic concoctions deal damage over time and weaken foes.",
-    attributes: { toughness: 3, finesse: 3, mind: 2 },
-    skills: { stealth: 2, spellcraft: 3, evasion: 3 },
-    passives: {
-      poisonResistance: { name: 'Conditioned', flat: 30 }
-    },
-    scalingPassives: [
-      { name: "Venomous Blood", source: 'toughness', factor: (1/3), targetKey: 'poisonDamage' }
-    ],
-    armorProficiencies: ['Light'],
-    weaponProficiencies: ['Daggers', 'Crossbows'],
-    abilities: [
-      {
-        name: 'Poison Blade',
-        icon: GiDrippingBlade,
-        mpCost: 8,
-        range: 1,
-        target: 'enemy',
-        displayElement: 'poison',
-        attackCategory: 'melee',
-        useWeapon: true,
-        effects: [
-          { type: 'dot', appliesTo: 'target', damageElement: 'poison', damagePerRound: 3, rounds: 3 }
-        ]
-      },
-      {
-        name: 'Acid Vial',
-        icon: GiPoisonBottle,
-        mpCost: 10,
-        range: 3,
-        target: 'enemy',
-        area: 'blast1',
-        displayElement: 'poison',
-        attackCategory: 'ranged',
-        effects: [
-          { type: 'dot', appliesTo: 'target', damageElement: 'poison', damagePerRound: 5, rounds: 3 }
-        ]
-      }
-    ]
-  },
-  nightblade: {
-    name: 'Nightblade',
-    color: 'midnightblue',
-    description: 'A melee acolyte whose dark pacts augment their attacks with shadow magic.',
-    attributes: { finesse: 4, mind: 4 },
-    skills: { expertise: 2, spellcraft: 4, evasion: 2 },
-    armorProficiencies: ['Light', 'Cloth'],
-    weaponProficiencies: ['Daggers'],
-    passives: {
-      shadowDamage: { name: 'Black Mark', flat: 3 },
-      shadowResistance: { name: 'Void Blood', flat: 30 }
-    },
-    abilities: [
-      {
-        name: 'Shadow Blade',
-        icon: GiPointySword,
-        mpCost: 9,
-        range: 1,
-        target: 'enemy',
-        displayElement: 'shadow',
-        attackCategory: 'melee',
-        useWeapon: true,
-        effects: [
-          { type: 'damage', appliesTo: 'target', damageElement: 'shadow', minDamage: 7, maxDamage: 7 }
-        ]
-      },
-      {
-        name: 'Dark Pact',
-        icon: GiEvilEyes,
-        mpCost: 10,
-        range: 0,
-        target: 'self',
-        displayElement: 'shadow',
-        effects: [
-          { type: 'damage', appliesTo: 'caster', damageElement: 'shadow', minDamage: 8, maxDamage: 8 },
-          { type: 'buff', appliesTo: 'caster', damageElement: 'shadow', stats: { shadowDamage: 8 }, rounds: 5 }
-        ]
-      }
-    ]
-  },
-  juggernaut: {
-    name: 'Juggernaut',
-    color: 'saddlebrown',
-    description: 'A heavily-armored tank who creates a bulwark between their allies and enemies.',
-    attributes: { strength: 3, toughness: 5 },
-    skills: { redoubt: 4, evasion: 2, expertise: 2 },
-    armorProficiencies: ['Heavy'],
-    weaponProficiencies: ['1h Swords', '1h Maces', '1h Axes', 'Shields'],
-    passives: {
-      threatMultiplier: { name: 'Front and Center', percent: 0.15 },
-      armor: { name: 'Bulwark', flat: 20 }
-    },
+    armorProficiencies: ['Medium', 'Heavy'],
+    weaponProficiencies: ['1h Swords', '1h Maces', 'Shields'],
+    startingGear: { chest: 'Heavy', weapon: '1h Swords', shield: 'Heavy' },
+    model: 'character.knight',
     abilities: [
       {
         name: 'Taunting Blow',
-        icon: GiSwordBrandish ,
+        icon: GiSwordBrandish,
         mpCost: 8,
-        range: 1, 
-        target: 'enemy',
-        attackCategory: 'melee',
-        useWeapon: true,
-        effects: [
-          { type: 'threat', appliesTo: 'caster',  amount: 10 }
-        ]
-      },
-      {
-        name: 'Shield Wall',
-        icon: GiArrowsShield ,
-        mpCost: 10,
-        range: 0,
-        target: 'self',
-        effects: [
-          { type: 'buff', appliesTo: 'caster', stats: { armor: 50 }, rounds: 3 }
-        ]
-      }
-    ]
-  },
-  paladin: {
-    name: 'Paladin',
-    color: '#eab308',
-    description: 'A shield-bearing knight that heals companions and strikes enemies with holy power.',
-    attributes: { strength: 2, toughness: 2, spirit: 4 },
-    skills: { devotion: 2, redoubt: 2, spellcraft: 2, expertise: 2 },
-    passives: {
-      healing: { name: 'Blessed Touch', flat: 3  },
-      holyDamage: { name: 'Judgement', flat: 5 }
-    },
-    scalingPassives: [
-      { name: 'Conviction', source: 'spirit', factor: 0.2, targetKey: 'meleeDamage' }
-    ],
-    armorProficiencies: ['Medium', 'Heavy'],
-    weaponProficiencies: ['1h Swords', '1h Maces', 'Shields'],
-    abilities: [
-      {
-        name: 'Blessed Strike',
-        icon: GiShardSword,
-        mpCost: 12,
         range: 1,
         target: 'enemy',
-        displayElement: 'holy',
         attackCategory: 'melee',
         useWeapon: true,
         effects: [
-          { type: 'damage', appliesTo: 'target', damageElement: 'holy', minDamage: 6, maxDamage: 9 },
+          { type: 'threat', appliesTo: 'caster', amount: 10 },
         ],
       },
       {
@@ -270,25 +140,181 @@ export const CLASSES: Record<ClassKey, ClassData> = {
         displayElement: 'holy',
         attackCategory: 'magic',
         effects: [
-          { type: 'heal', appliesTo: 'target', damageElement: 'holy', minHeal: 10, maxHeal: 15 }
-        ]
-      }
+          { type: 'heal', appliesTo: 'target', damageElement: 'holy', minHeal: 10, maxHeal: 15 },
+        ],
+      },
     ],
   },
-  ranger: {
-    name: 'Ranger',
-    color: '#16a34a',
-    description: 'A seasoned hunter who uses traps and poisons to hinder foes.',
-    attributes: { toughness: 2, finesse: 4, mind: 2 },
-    skills: { stealth: 3, perception: 3, expertise: 2 },
+
+  rogue: {
+    name: 'Rogue',
+    roles: ['damage'],
+    description: 'A dagger-wielding brigand who fights dirty.',
+    attributes: { strength: 1, toughness: 2, finesse: 6, mind: 1, spirit: 0, speed: 4 },
+    skills: { perception: 2, stealth: 4, expertise: 3, evasion: 3 },
     passives: {
-      rangedHit:    { name: 'Eagle Eye', flat: 3 },
-      rangedDamage: { name: 'Marksman',  flat: 3 },
-      initiative: { name: 'Keen Senses', flat: 5 }
+      dodge:     { name: 'Slippery',    flat: 3 },
+      meleeCrit: { name: 'Opportunist', flat: 3 },
+    },
+    armorProficiencies: ['Light'],
+    weaponProficiencies: ['Daggers'],
+    startingGear: { chest: 'Light', weapon: 'Daggers' },
+    model: 'character.rogue',
+    abilities: [
+      {
+        name: 'Backstab',
+        icon: GiSacrificialDagger,
+        mpCost: 7,
+        range: 1,
+        target: 'enemy',
+        attackCategory: 'melee',
+        useWeapon: true,
+        effects: [
+          { type: 'damage', appliesTo: 'target', damageElement: 'piercing', minDamage: 8, maxDamage: 10 },
+        ],
+      },
+      {
+        name: 'Poison Blade',
+        icon: GiDrippingBlade,
+        mpCost: 8,
+        range: 1,
+        target: 'enemy',
+        displayElement: 'poison',
+        attackCategory: 'melee',
+        useWeapon: true,
+        effects: [
+          { type: 'dot', appliesTo: 'target', damageElement: 'poison', damagePerRound: 5, rounds: 3 },
+        ],
+      },
+    ],
+  },
+
+  brute: {
+    name: 'Brute',
+    roles: ['damage','tank'],
+    description: 'A powerful warrior who runs in swinging.',
+    attributes: { strength: 5, toughness: 5, finesse: 2, mind: 0, spirit: 0, speed: 2 },
+    skills: { redoubt: 4, evasion: 4, expertise: 4 },
+    passives: {
+      meleeDamage: { name: 'Fury',    flat: 2 },
+      movement:    { name: 'Rush In', flat: 1 },
     },
     armorProficiencies: ['Light', 'Medium'],
-    weaponProficiencies: ['Bows', 'Crossbows'],
+    weaponProficiencies: ['2h Swords', '2h Maces', '2h Axes'],
+    startingGear: { chest: 'Medium', weapon: '2h Axes' },
+    model: 'character.brute',
     abilities: [
+      {
+        name: 'Cleave',
+        icon: GiWaveStrike,
+        mpCost: 12,
+        range: 0,
+        target: 'enemy',
+        useWeapon: true,
+        attackCategory: 'melee',
+        area: 'blast1',
+        effects: [],
+      },
+      {
+        name: 'Intimidating Shout',
+        icon: GiSonicShout,
+        mpCost: 12,
+        range: 0,
+        target: 'enemy',
+        attackCategory: 'melee',
+        area: 'blast2',
+        effects: [
+          { type: 'debuff', appliesTo: 'target', stats: { meleeHit: -10, magicHit: -10, rangedHit: -10 }, rounds: 3 },
+        ],
+      },
+    ],
+  },
+
+  arcanist: {
+    name: 'Arcanist',
+    roles: ['caster'],
+    description: 'A scholarly caster who wields elemental magic.',
+    attributes: { strength: 0, toughness: 0, finesse: 2, mind: 7, spirit: 4, speed: 1 },
+    skills: { spellcraft: 5, devotion: 3, perception: 4 },
+    passives: {
+      mp:              { name: 'Trained Mind', flat: 10 },
+      magicResistance: { name: 'Scholar',      flat: 5 },
+    },
+    armorProficiencies: ['Cloth'],
+    weaponProficiencies: ['Staves', 'Daggers', 'Wands'],
+    startingGear: { chest: 'Cloth', weapon: 'Staves', weaponElement: 'fire' },
+    model: 'character.arcanist',
+    abilities: [
+      {
+        name: 'Fireball',
+        icon: GiFireZone,
+        mpCost: 16,
+        range: 5,
+        target: 'enemy',
+        displayElement: 'fire',
+        attackCategory: 'magic',
+        effects: [
+          { type: 'damage', appliesTo: 'target', damageElement: 'fire', minDamage: 6, maxDamage: 10 },
+          { type: 'dot', appliesTo: 'target', damageElement: 'fire', damagePerRound: 4, rounds: 1 },
+        ],
+      },
+      {
+        name: 'Icebolt',
+        icon: FaRegSnowflake,
+        mpCost: 10,
+        range: 4,
+        target: 'enemy',
+        displayElement: 'ice',
+        attackCategory: 'magic',
+        effects: [
+          { type: 'damage', appliesTo: 'target', damageElement: 'ice', minDamage: 6, maxDamage: 8 },
+          { type: 'debuff', appliesTo: 'target', stats: { movement: -3, dodge: -5 }, rounds: 3 },
+        ],
+      },
+      {
+        name: 'Shock',
+        icon: FaBoltLightning,
+        mpCost: 12,
+        range: 3,
+        target: 'enemy',
+        displayElement: 'lightning',
+        attackCategory: 'magic',
+        effects: [
+          { type: 'damage', appliesTo: 'target', damageElement: 'lightning', minDamage: 8, maxDamage: 8 },
+          { type: 'dot', appliesTo: 'target', damageElement: 'lightning', damagesMP: true, damagePerRound: 3, rounds: 3 },
+        ],
+      },
+    ],
+  },
+
+  archer: {
+    name: 'Archer',
+    roles: ['damage'],
+    description: 'A marksman who deals damage from afar.',
+    attributes: { strength: 0, toughness: 2, finesse: 7, mind: 2, spirit: 1, speed: 2 },
+    skills: { perception: 4, stealth: 2, expertise: 4, evasion: 2 },
+    passives: {
+      rangedHit:    { name: 'Eagle Eye', flat: 3 },
+      rangedDamage: { name: 'Marksman',  flat: 2 },
+    },
+    armorProficiencies: ['Light'],
+    weaponProficiencies: ['Bows', 'Crossbows'],
+    startingGear: { chest: 'Light', weapon: 'Bows' },
+    model: 'character.archer',
+    abilities: [
+      {
+        name: 'Aimed Shot',
+        icon: RiTargetFill,
+        mpCost: 8,
+        range: 5,
+        target: 'enemy',
+        displayElement: 'piercing',
+        attackCategory: 'ranged',
+        useWeapon: true,
+        effects: [
+          { type: 'damage', appliesTo: 'target', damageElement: 'piercing', minDamage: 8, maxDamage: 8 },
+        ],
+      },
       {
         name: 'Poison Arrow',
         icon: GiPoison,
@@ -299,88 +325,27 @@ export const CLASSES: Record<ClassKey, ClassData> = {
         attackCategory: 'ranged',
         useWeapon: true,
         effects: [
-          { type: 'dot', appliesTo: 'target', damageElement: 'poison', damagePerRound: 5, rounds: 3 }
-        ]
-      },
-      {
-        name: 'Hindering Trap',
-        icon: GiMantrap,
-        mpCost: 10,
-        range: 4,
-        target: 'enemy',
-        attackCategory: 'ranged',
-        effects: [
-          { type: 'debuff', appliesTo: 'target', stats: { movement: -4 }, rounds: 3 }
-        ]
-      }
-    ],
-  },
-  pyromancer: {
-    name: 'Pyromancer',
-    color: 'firebrick',
-    description: 'An elementalist of fire who trades mana-sustainability for sheer, destructive power.',
-    attributes: { mind: 5, spirit: 3 },
-    skills: { spellcraft: 6, perception: 2 },
-    passives: {
-      fireDamage:      { name: 'Burning Mind', flat: 3  },
-      mp:  { name: 'Boiling Reservoir',   flat: 10 }
-    },
-    armorProficiencies: ['Cloth'],
-    weaponProficiencies: ['Staves', 'Daggers', 'Wands'],
-    abilities: [
-      {
-        name: 'Fireball',
-        icon: GiFireZone,
-        mpCost: 16,
-        range: 4,
-        target: 'enemy',
-        area: 'blast1',
-        displayElement: 'fire',
-        attackCategory: 'magic',
-        effects: [
-          { type: 'damage', appliesTo: 'target', damageElement: 'fire', minDamage: 6, maxDamage: 10 },
+          { type: 'dot', appliesTo: 'target', damageElement: 'poison', damagePerRound: 5, rounds: 3 },
         ],
       },
-      {
-        name: 'Fire Blast',
-        icon: GiFireSpellCast,
-        mpCost: 10,
-        range: 3,
-        target: 'enemy',
-        displayElement: 'fire',
-        attackCategory: 'magic',
-        effects: [
-          { type: 'damage', appliesTo: 'target', damageElement: 'fire', minDamage: 8, maxDamage: 12 }
-        ]
-      }
     ],
   },
-  shaman: {
-    name: 'Shaman',
-    color: '#9333ea',
-    description: 'A wise primalist who can heal allies and weaken enemies.',
-    attributes: { toughness: 2, mind: 3, spirit: 3 },
-    skills: { devotion: 3, spellcraft: 3, perception: 2 },
+
+  primalist: {
+    name: 'Primalist',
+    roles: ['damage', 'healer', 'caster'],
+    description: 'A nature-attuned wanderer who can take on many roles.',
+    attributes: { strength: 2, toughness: 2, finesse: 1, mind: 4, spirit: 4, speed: 1 },
+    skills: { perception: 3, spellcraft: 3, devotion: 3, redoubt: 3 },
     passives: {
-      magicResistance: { name: 'Spirit Shield',  flat: 10 },
-      magicHit:        { name: 'Primal Sight',   flat: 3  },
+      healing:      { name: 'Verdant', flat: 3 },
+      natureDamage: { name: 'Thorns',  flat: 3 },
     },
     armorProficiencies: ['Light', 'Medium'],
     weaponProficiencies: ['Daggers', '1h Maces', 'Wands', 'Staves', 'Shields'],
+    startingGear: { chest: 'Medium', weapon: 'Wands', weaponElement: 'nature', shield: 'Medium' },
+    model: 'character.primalist',
     abilities: [
-      {
-        name: 'Wither',
-        icon: GiCursedStar,
-        mpCost: 8,
-        range: 5,
-        target: 'enemy',
-        area: 'blast1',
-        displayElement: 'shadow',
-        attackCategory: 'magic',
-        effects: [
-          { type: 'debuff', appliesTo: 'target', damageElement: 'shadow', stats: { meleeDamage: -5, magicDamage: -5 }, rounds: 3 },
-        ]
-      },
       {
         name: 'Regrow',
         icon: GiPlantWatering,
@@ -389,43 +354,63 @@ export const CLASSES: Record<ClassKey, ClassData> = {
         displayElement: 'nature',
         target: 'ally',
         effects: [
-          { type: 'hot', appliesTo: 'target', damageElement: 'nature', healPerRound: 5, rounds: 3 }
-        ]
-      }
-    ]
+          { type: 'hot', appliesTo: 'target', damageElement: 'nature', healPerRound: 5, rounds: 3 },
+        ],
+      },
+      {
+        name: 'Earthshock',
+        icon: GiLeafSwirl,
+        mpCost: 7,
+        range: 3,
+        displayElement: 'nature',
+        target: 'enemy',
+        attackCategory: 'magic',
+        effects: [
+          { type: 'damage', appliesTo: 'target', damageElement: 'nature', minDamage: 6, maxDamage: 9 },
+        ],
+      },
+    ],
   },
 
+  occultist: {
+    name: 'Occultist',
+    roles: ['caster'],
+    description: 'A dark caster of questionable origins.',
+    attributes: { strength: 0, toughness: 2, finesse: 1, mind: 8, spirit: 2, speed: 1 },
+    skills: { spellcraft: 6, devotion: 2, perception: 2, stealth: 2 },
+    passives: {
+      shadowDamage: { name: 'Dark Mark', flat: 3 },
+      magicHit:     { name: 'Spite',     flat: 3 },
+    },
+    armorProficiencies: ['Cloth'],
+    weaponProficiencies: ['Staves', 'Daggers', 'Wands'],
+    startingGear: { chest: 'Cloth', weapon: 'Wands', weaponElement: 'shadow' },
+    model: 'character.occultist',
+    abilities: [
+      {
+        name: 'Shadow Bolt',
+        icon: GiEvilComet,
+        mpCost: 10,
+        range: 4,
+        target: 'enemy',
+        displayElement: 'shadow',
+        attackCategory: 'magic',
+        effects: [
+          { type: 'damage', appliesTo: 'target', damageElement: 'shadow', minDamage: 8, maxDamage: 12 },
+        ],
+      },
+      {
+        name: 'Curse',
+        icon: GiCursedStar,
+        mpCost: 8,
+        range: 4,
+        target: 'enemy',
+        displayElement: 'shadow',
+        attackCategory: 'magic',
+        effects: [
+          { type: 'dot', appliesTo: 'target', damageElement: 'shadow', damagePerRound: 6, rounds: 3 },
+        ],
+      },
+    ],
+  },
 };
-
-export const STARTING_CHEST: Record<ClassKey, ArmorProficiency> = {
-  barbarian:    'Light',
-  poisonmaster: 'Light',
-  nightblade:   'Light',
-  juggernaut:   'Heavy',
-  paladin:      'Heavy',
-  ranger:       'Light',
-  pyromancer:   'Cloth',
-  shaman:       'Medium'
-};
-
-export const STARTING_SHIELD: Partial<Record<ClassKey, ArmorProficiency>> = {
-  paladin: 'Heavy',
-  shaman:  'Medium'
-};
-
-export const STARTING_WEAPON: Record<ClassKey, WeaponType> = {
-  barbarian:    '2h Axes',
-  poisonmaster: 'Daggers',
-  nightblade:   'Daggers',
-  juggernaut:   '1h Maces',
-  paladin:      '1h Swords',
-  ranger:       'Crossbows',
-  pyromancer:   'Staves',
-  shaman:       'Wands'
-};
-
-export const STARTING_ELEMENT: Partial<Record<ClassKey, DamageElement>> = {
-  pyromancer: 'fire',
-  shaman:     'nature'
-};
-

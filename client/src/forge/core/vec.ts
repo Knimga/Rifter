@@ -22,6 +22,12 @@ export const rotY = (p: Vec3, a: number): Vec3 => [
   p[1],
   -p[0] * Math.sin(a) + p[2] * Math.cos(a),
 ];
+/** Rotation about X. Positive angle turns +y toward +z (same as three.js rotation.x). */
+export const rotX = (p: Vec3, a: number): Vec3 => [
+  p[0],
+  p[1] * Math.cos(a) - p[2] * Math.sin(a),
+  p[1] * Math.sin(a) + p[2] * Math.cos(a),
+];
 export const rotZ = (p: Vec3, a: number): Vec3 => [
   p[0] * Math.cos(a) - p[1] * Math.sin(a),
   p[0] * Math.sin(a) + p[1] * Math.cos(a),

@@ -13,8 +13,14 @@ export function finalize(m: Mesh, fit: FitSpec): void {
     const feet = m.anchors.feet;
     const cx = feet ? feet[0] : (min[0] + max[0]) / 2;
     const cz = feet ? feet[2] : (min[2] + max[2]) / 2;
-    let rad = 0;
-    for (const f of m.faces) for (const p of f.v) rad = Math.max(rad, Math.hypot(p[0] - cx, p[2] - cz));
+    // Footprint radius: the furthest vertex by squared distance, measured once (Math.hypot per vertex is slow)
+    let far2 = -1, fx = 0, fz = 0;
+    for (const f of m.faces)
+      for (const p of f.v) {
+        const dx = p[0] - cx, dz = p[2] - cz, d2 = dx * dx + dz * dz;
+        if (d2 > far2) { far2 = d2; fx = dx; fz = dz; }
+      }
+    const rad = Math.hypot(fx, fz);
     const h = max[1] - min[1];
     const s = Math.min(fit.height / h, fit.maxRadius / Math.max(rad, 1e-6));
     m.xfAll((p) => [(p[0] - cx) * s, (p[1] - min[1]) * s, (p[2] - cz) * s]);

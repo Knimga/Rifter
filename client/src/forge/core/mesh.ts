@@ -1,4 +1,4 @@
-import { type Vec3, type RGB, sub, cross, dot, len, mul } from './vec';
+import type { Vec3, RGB } from './vec';
 import type { Rng } from './rng';
 import type { MeshData } from './types';
 
@@ -50,17 +50,20 @@ export class Mesh {
    * primitive must be roughly convex, and why callers never think about winding.
    */
   tri(a: Vec3, b: Vec3, c: Vec3, col: RGB | ColorFn, ctr: Vec3, o: FaceOpts = {}): void {
-    let n = cross(sub(b, a), sub(c, a));
-    const l = len(n);
+    // The hot path of every build: plain arithmetic (same operations, same order as cross/sub/dot), no temporaries
+    const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2];
+    const vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
+    let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+    const l = Math.hypot(nx, ny, nz);
     if (l < 1e-7) return; // degenerate (collapsed tip rings etc.)
-    const m: Vec3 = [(a[0] + b[0] + c[0]) / 3, (a[1] + b[1] + c[1]) / 3, (a[2] + b[2] + c[2]) / 3];
-    if (dot(n, sub(m, ctr)) < 0) {
+    const mx = (a[0] + b[0] + c[0]) / 3, my = (a[1] + b[1] + c[1]) / 3, mz = (a[2] + b[2] + c[2]) / 3;
+    if (nx * (mx - ctr[0]) + ny * (my - ctr[1]) + nz * (mz - ctr[2]) < 0) {
       const t = b;
       b = c;
       c = t;
-      n = [-n[0], -n[1], -n[2]];
+      nx = -nx; ny = -ny; nz = -nz;
     }
-    const color = typeof col === 'function' ? col(m, mul(n, 1 / l)) : col;
+    const color = typeof col === 'function' ? col([mx, my, mz], [nx * (1 / l), ny * (1 / l), nz * (1 / l)]) : col;
     this.faces.push({
       v: [[a[0], a[1], a[2]], [b[0], b[1], b[2]], [c[0], c[1], c[2]]],
       c: color,

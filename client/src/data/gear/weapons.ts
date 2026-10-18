@@ -11,25 +11,25 @@ export interface WeaponSeries {
   name: string;             // prefix applied to the weapon name: 'Plain Gladius' (see weaponName)
   requiredLevel: number;
   damageMultiplier: number; // scales base weapon damage relative to tier 1 (Iron = 1.0)
-  // Each named weapon of the series; `model` links it to its forge design, which is also how it is drawn (icon and loot).
-  weapons: Partial<Record<WeaponType, { name: string; model?: ModelLink }>>
+  // Each named weapon of the series; `model` is its forge design: how it is drawn (icon and loot).
+  weapons: Partial<Record<WeaponType, { name: string; model: ModelLink }>>
 }
 
 export const WEAPON_SERIES: WeaponSeries[] = [
   {
     id: 'plain', name: 'Plain', requiredLevel: 1, damageMultiplier: 1.0,
     weapons: {
-      '1h Swords': { name: 'Gladius',       model: { design: 'weapon.plain-gladius', version: 1, params: {} } },
-      '2h Swords': { name: 'Bastard Sword', model: { design: 'weapon.plain-bastard-sword', version: 1, params: {} } },
-      '1h Maces':  { name: 'Mace',          model: { design: 'weapon.plain-mace', version: 1, params: { head: 'knobbed' } } },
-      '2h Maces':  { name: 'Maul',          model: { design: 'weapon.plain-maul', version: 1, params: {} } },
-      '1h Axes':   { name: 'Hatchet',       model: { design: 'weapon.plain-hatchet', version: 1, params: {} } },
-      '2h Axes':   { name: 'Battleaxe',     model: { design: 'weapon.plain-battleaxe', version: 1, params: {} } },
-      'Daggers':   { name: 'Dirk',          model: { design: 'weapon.plain-dirk', version: 1, params: { guard: 'bar' } } },
-      'Bows':      { name: 'Shortbow',      model: { design: 'weapon.plain-shortbow', version: 1, params: {} } },
-      'Crossbows': { name: 'Crossbow',      model: { design: 'weapon.plain-crossbow', version: 1, params: { loaded: false } } },
-      'Staves':    { name: 'Staff',         model: { design: 'weapon.plain-staff', version: 1, params: {} } },
-      'Wands':     { name: 'Wand',          model: { design: 'weapon.plain-wand', version: 1, params: {} } },
+      '1h Swords': { name: 'Gladius',       model: 'weapon.plain-gladius' },
+      '2h Swords': { name: 'Bastard Sword', model: 'weapon.plain-bastard-sword' },
+      '1h Maces':  { name: 'Mace',          model: 'weapon.plain-mace' },
+      '2h Maces':  { name: 'Maul',          model: 'weapon.plain-maul' },
+      '1h Axes':   { name: 'Hatchet',       model: 'weapon.plain-hatchet' },
+      '2h Axes':   { name: 'Battleaxe',     model: 'weapon.plain-battleaxe' },
+      'Daggers':   { name: 'Dirk',          model: 'weapon.plain-dirk' },
+      'Bows':      { name: 'Shortbow',      model: 'weapon.plain-shortbow' },
+      'Crossbows': { name: 'Crossbow',      model: 'weapon.plain-crossbow' },
+      'Staves':    { name: 'Staff',         model: 'weapon.plain-staff' },
+      'Wands':     { name: 'Wand',          model: 'weapon.plain-wand' },
     }
   }
 ];

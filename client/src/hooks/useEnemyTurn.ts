@@ -16,7 +16,8 @@ type Refs = {
   partyThreat: MutableRefObject<number[]>;
   zone: MutableRefObject<ZoneData | null>;
   currentZone: MutableRefObject<number>;
-  applyOutcome: MutableRefObject<(outcome: ActionOutcome, caster: CombatUnit) => void>;
+  /** `aimAt`: the tile the ability was aimed at (the caster's model turns to face it). */
+  applyOutcome: MutableRefObject<(outcome: ActionOutcome, caster: CombatUnit, aimAt?: Pos) => void>;
 };
 
 export type EnemyAoePreview = { tiles: Set<string> };
@@ -116,7 +117,9 @@ export function useEnemyTurn(
             stats: refs.partyStats.current[i],
             pos: refs.partyPos.current[i],
           }));
-          refs.applyOutcome.current(executeAction(caster, ability, targets), caster);
+          // Aimed at the AoE's target tile, else the targeted member
+          const aimAt = action.abilityTargetPos ?? targets[0]?.pos;
+          refs.applyOutcome.current(executeAction(caster, ability, targets), caster, aimAt);
           advanceTurnNow();
         }, 1000));
       }, 1000));

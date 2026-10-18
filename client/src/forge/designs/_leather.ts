@@ -8,10 +8,10 @@ import { armorEntry, band, capDome, ell, footwearPair, glovePair, opening, panel
 
 // ─── Cap (helm) ───────────────────────────────────────────────────────────────
 
-export function capDesign(seriesId: string, version: number): Design {
+export function capDesign(seriesId: string): Design {
   const { id, label, source, palette } = armorEntry(seriesId, 'helm');
   return {
-    id, label, source, version,
+    id, label, source,
     category: 'armor',
     fit: { kind: 'item', size: 0.55 },
     budget: 400,
@@ -45,10 +45,10 @@ export function capDesign(seriesId: string, version: number): Design {
 
 // ─── Jerkin (chest) ───────────────────────────────────────────────────────────
 
-export function jerkinDesign(seriesId: string, version: number): Design {
+export function jerkinDesign(seriesId: string): Design {
   const { id, label, source, palette } = armorEntry(seriesId, 'chest');
   return {
-    id, label, source, version,
+    id, label, source,
     category: 'armor',
     fit: { kind: 'item', size: 0.8 },
     budget: 700,
@@ -101,10 +101,10 @@ export function jerkinDesign(seriesId: string, version: number): Design {
 
 // ─── Gloves (gloves) ──────────────────────────────────────────────────────────
 
-export function glovesDesign(seriesId: string, version: number): Design {
+export function glovesDesign(seriesId: string): Design {
   const { id, label, source, palette } = armorEntry(seriesId, 'gloves');
   return {
-    id, label, source, version,
+    id, label, source,
     category: 'armor',
     fit: { kind: 'item', size: 0.65 },
     budget: 700,
@@ -132,10 +132,10 @@ export function glovesDesign(seriesId: string, version: number): Design {
 
 // ─── Boots (boots) ────────────────────────────────────────────────────────────
 
-export function bootsDesign(seriesId: string, version: number): Design {
+export function bootsDesign(seriesId: string): Design {
   const { id, label, source, palette } = armorEntry(seriesId, 'boots');
   return {
-    id, label, source, version,
+    id, label, source,
     category: 'armor',
     fit: { kind: 'item', size: 0.65 },
     budget: 600,

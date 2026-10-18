@@ -13,6 +13,11 @@ export interface MapUnit {
   pos: Pos;
   /** Items (loot) lie flat on the floor and never turn; creatures stand and face their last move. */
   lying?: boolean;
+  /**
+   * The tile the unit last aimed an ability at. When `seq` changes, the unit turns to face it (until it
+   * next moves or aims).
+   */
+  aim?: { x: number; y: number; seq: number };
 }
 
 interface Entry {
@@ -21,6 +26,7 @@ interface Entry {
   pos: Pos;
   yaw: number;
   targetYaw: number;
+  aimSeq?: number;
 }
 
 /** A unit's scene object, standing upright or (loot) laid flat on the floor. */
@@ -35,8 +41,8 @@ function makeObject(u: MapUnit): THREE.Group {
  * 1 tile = tilePx). Creatures stand with their feet at the tile center; loot lies flat, centered on its tile.
  *
  * Facing is view state kept here, never in the game: when a unit's position changes, it turns toward
- * the direction of that move. Rendering is on demand; the animation loop only runs while a unit is
- * still turning.
+ * the direction of that move, and when it aims an ability (a new `aim`), it turns toward the aimed tile.
+ * Rendering is on demand; the animation loop only runs while a unit is still turning.
  */
 export class MapModelRenderer {
   readonly canvas: HTMLCanvasElement;
@@ -79,12 +85,21 @@ export class MapModelRenderer {
         this.entries.set(u.id, e);
       }
       if (!e) {
-        e = { model: u.model, obj: makeObject(u), pos: u.pos, yaw: 0, targetYaw: 0 };
+        // A new unit adopts any existing aim without turning to it (a remount never replays an old attack)
+        e = { model: u.model, obj: makeObject(u), pos: u.pos, yaw: 0, targetYaw: 0, aimSeq: u.aim?.seq };
         this.scene.add(e.obj);
         this.entries.set(u.id, e);
       } else if (u.pos.x !== e.pos.x || u.pos.y !== e.pos.y) {
         e.targetYaw = yawFromGridMove(u.pos.x - e.pos.x, u.pos.y - e.pos.y);
         e.pos = u.pos;
+      }
+      // A new ability aim: turn toward the aimed tile (from wherever the unit now stands)
+      if (u.aim && u.aim.seq !== e.aimSeq) {
+        e.aimSeq = u.aim.seq;
+        if (u.aim.x !== u.pos.x || u.aim.y !== u.pos.y) {
+          e.targetYaw = yawFromGridMove(u.aim.x - u.pos.x, u.aim.y - u.pos.y);
+          changed = true;
+        }
       }
       e.obj.position.x = u.pos.x + 0.5;
       e.obj.position.z = u.pos.y + 0.5;

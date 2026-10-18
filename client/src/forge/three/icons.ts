@@ -1,6 +1,7 @@
 import * as THREE from 'three';
-import type { Design, Model, ModelLink } from '../core/types';
-import { buildLinkedModel } from '../core/link';
+import type { Design, Model } from '../core/types';
+import { buildModel } from '../core/build';
+import { ITEM_SEED } from '../core/link';
 import { addForgeLights, fitIconCamera } from './stage';
 import { disposeObject, toThree } from './toThree';
 
@@ -39,8 +40,8 @@ export class IconRenderer {
 
 let shared: IconRenderer | null = null;
 
-/** Icon (PNG data URL) of one instance of a linked game object, e.g. a weapon item, seeded by its id. */
-export function renderLinkedIcon(design: Design, link: ModelLink, instanceId: string): string {
+/** Icon (PNG data URL) of an item design. Every item of a design looks the same, so one icon serves them all. */
+export function renderItemIcon(design: Design): string {
   shared ??= new IconRenderer();
-  return shared.render(buildLinkedModel(design, link, instanceId));
+  return shared.render(buildModel(design, ITEM_SEED));
 }

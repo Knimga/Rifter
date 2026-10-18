@@ -3,11 +3,14 @@ import type { DamageElement } from './gear';
 /* ----- UI CONSTANTS ----- */
 
 /** Pixel size of each grid tile in the dungeon and sanctum maps. */
-export const TILE_SIZE = 50;
+export const TILE_SIZE = 60;
 
 /** Floor and wall tile colors for the Sanctum map. */
 export const SANCTUM_FLOOR_COLOR = '#1e2030';
 export const SANCTUM_WALL_COLOR = '#0d0e18';
+
+/** Color of every party member's map token and name. Classes no longer have colors; temporary until a new scheme. */
+export const PARTY_MEMBER_COLOR = '#ffffff';
 
 export const DAMAGE_ELEMENT_COLOR: Record<DamageElement, string> = {
   slashing:    'white',

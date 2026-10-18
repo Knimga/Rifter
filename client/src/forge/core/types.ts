@@ -1,15 +1,7 @@
 import type { Vec3 } from './vec';
 import type { BuildCtx } from './ctx';
 
-export type ParamDef =
-  | { type: 'choice'; options: readonly string[] }
-  | { type: 'number'; min: number; max: number; int?: boolean }
-  | { type: 'bool' };
-
-/** Overrides a caller can pin. Anything not pinned is drawn from the seed. */
-export type Params = Record<string, string | number | boolean>;
-
-export type Category = 'creature' | 'character' | 'weapon' | 'armor' | 'offhand' | 'prop';
+export type Category = 'creature' | 'character' | 'weapon' | 'armor' | 'offhand';
 
 /**
  * How a finished mesh is scaled and positioned. Units are TILES (1 unit = 1 grid cell).
@@ -28,11 +20,12 @@ export type FitSpec =
  *  - weapons: `${seriesId}/${weaponType}` ('plain/1h Swords')
  *  - armor: `${seriesId}/${slot}` ('apprentice/helm')
  *  - offhands: the offhand's id ('buckler')
+ *  - classes: the class key ('knight'); the player character's body (it holds its gear, see equip.ts)
  * Lint checks that the entry exists, that the design's label is exactly the entry's display name, and
  * that the file name is that name slugged (see src/forge/dataRefs.ts).
  */
 export interface DataRef {
-  table: 'enemies' | 'weapons' | 'armor' | 'offhands';
+  table: 'enemies' | 'weapons' | 'armor' | 'offhands' | 'classes';
   key: string;
 }
 
@@ -44,8 +37,6 @@ export interface Design {
   label: string;
   /** The game data entry this design is the model for. */
   source: DataRef;
-  /** Bump when a change alters the look of existing seeds. */
-  version: number;
   fit: FitSpec;
   /** Max triangles after build. Lint enforces it. */
   budget: number;
@@ -75,27 +66,15 @@ export interface MeshData {
 }
 
 /**
- * Link from a game data entry (an enemy class, later item bases) to its approved forge model.
- * Plain data, no three.js.
- * - `params`: the FIXED params; every instance gets these. Params not listed vary per instance.
- * - `seed`: omit it so each instance seeds from its own id (see instanceSeed), which is what makes the
- *   unfixed params vary between enemies. Set it only to make every instance identical.
- * - `version`: the design version the link was made against; the forge flags links whose design has moved on.
+ * A game data entry's model: the id of its design (e.g. 'weapon.plain-gladius'). Every enemy class,
+ * item base and class has one. How each instance is seeded: see instanceSeed in core/link.ts.
  */
-export interface ModelLink {
-  design: string;
-  version: number;
-  params: Params;
-  seed?: number;
-}
+export type ModelLink = string;
 
 export interface Model {
   designId: string;
-  version: number;
   seed: number;
   name: string;
-  /** Final value of every parameter, whether drawn from the seed or pinned. */
-  params: Params;
   mesh: MeshData;
   /** Items only: the pitch (radians, about x) it lies at on the floor as loot. */
   groundPitch?: number;

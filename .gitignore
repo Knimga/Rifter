@@ -12,7 +12,6 @@ handoff/
 # Forge dev outputs
 client/forge-snapshots/
 client/forge-sheet*.png
-client/src/forge/.history/
 
 # Build output
 dist/

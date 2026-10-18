@@ -66,11 +66,12 @@ export function scalingPassiveText(sp: ScalingPassive): string {
 
 // ─── Effect descriptions (shared by ability tooltips and the builder's ability panes) ───
 
-export type EffectTone = 'base' | 'damage' | 'dot' | 'heal' | 'hot' | 'buff' | 'debuff' | 'threat';
+export type EffectTone = 'base' | 'damage' | 'mpDamage' | 'dot' | 'heal' | 'hot' | 'buff' | 'debuff' | 'threat';
 
 export const EFFECT_TONE_CLASS: Record<EffectTone, string> = {
     base:   'text-gray-400',
     damage: 'text-red-400 font-medium',
+    mpDamage: 'text-blue-400 font-medium',
     dot:    'text-orange-400',
     heal:   'text-green-400 font-medium',
     hot:    'text-emerald-400',
@@ -99,12 +100,13 @@ export function describeEffect(eff: Effect, damageBonus = 0): EffectLine[] {
 
     switch (eff.type) {
         case 'damage': {
-            const lines: EffectLine[] = [{ label: `Base Damage${self}`, value: `${eff.minDamage}–${eff.maxDamage}`, element: eff.damageElement, tone: 'base' }];
-            if (damageBonus) lines.push({ label: `Damage${self}`, value: `${eff.minDamage + damageBonus}–${eff.maxDamage + damageBonus}`, element: eff.damageElement, tone: 'damage' });
+            const mp = eff.damagesMP ? 'MP ' : '';
+            const lines: EffectLine[] = [{ label: `Base ${mp}Damage${self}`, value: `${eff.minDamage}–${eff.maxDamage}`, element: eff.damageElement, tone: 'base' }];
+            if (damageBonus) lines.push({ label: `${mp}Damage${self}`, value: `${eff.minDamage + damageBonus}–${eff.maxDamage + damageBonus}`, element: eff.damageElement, tone: eff.damagesMP ? 'mpDamage' : 'damage' });
             return lines;
         }
         case 'dot':
-            return [{ label: `DoT${self}`, value: `${eff.damagePerRound}/rnd × ${eff.rounds}r`, element: eff.damageElement, tone: 'dot' }];
+            return [{ label: `${eff.damagesMP ? 'MP ' : ''}DoT${self}`, value: `${eff.damagePerRound}/rnd × ${eff.rounds}r`, element: eff.damageElement, tone: eff.damagesMP ? 'mpDamage' : 'dot' }];
         case 'heal':
             return [{ label: `Heal${self}`, value: `${eff.minHeal}–${eff.maxHeal}`, tone: 'heal' }];
         case 'hot':

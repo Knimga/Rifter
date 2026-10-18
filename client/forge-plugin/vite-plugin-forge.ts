@@ -60,14 +60,7 @@ export function forgePlugin({ forgeDir, snapshotDir }: { forgeDir: string; snaps
             if (url.startsWith('/approve') || url.startsWith('/discard')) {
               if (!ID.test(stem)) return send(400, { error: 'bad id' });
               if (!existsSync(draft)) return send(404, { error: 'no such draft' });
-              if (url.startsWith('/approve')) {
-                if (existsSync(live)) {
-                  const hist = join(forgeDir, '.history');
-                  mkdirSync(hist, { recursive: true });
-                  copyFileSync(live, join(hist, `${stem}.${new Date().toISOString().replace(/[:.]/g, '-')}.ts`));
-                }
-                copyFileSync(draft, live);
-              }
+              if (url.startsWith('/approve')) copyFileSync(draft, live); // replaces the approved file (git keeps history)
               unlinkSync(draft);
               onDesignFileAddedOrRemoved(draft);
               return send(200, { ok: true });

@@ -8,11 +8,18 @@ import { WEAPON_ROLL, weaponEntry } from './_weapon';
 const EDGE_BAND = 0.13;
 const lerp = (p: Vec3, q: Vec3, f: number): Vec3 => [p[0] + (q[0] - p[0]) * f, p[1] + (q[1] - p[1]) * f, p[2] + (q[2] - p[2]) * f];
 
-export function axeDesign(seriesId: string, weaponType: '1h Axes' | '2h Axes', version: number): Design {
+/**
+ * A two-hander's blades: how far they reach out from the haft (a multiplier on the base reach) and how far
+ * the cutting edge bows out at mid-height (a fraction of the reach). The bow adds to the reach.
+ */
+const BATTLEAXE_REACH = 0.38;
+const BATTLEAXE_EDGE_BOW = 0.45;
+
+export function axeDesign(seriesId: string, weaponType: '1h Axes' | '2h Axes'): Design {
   const { id, label, source, palette } = weaponEntry(seriesId, weaponType);
   const twoHanded = weaponType === '2h Axes';
   return {
-    id, label, source, version,
+    id, label, source,
     category: 'weapon',
     fit: { kind: 'item', size: 0.8 },
     budget: 500,
@@ -36,15 +43,25 @@ export function axeDesign(seriesId: string, weaponType: '1h Axes' | '2h Axes', v
       frustum(m, [0, Hh - 0.02, 0], [0, Hh + 0.38, 0], 0.07, 0.01, 5, metal);
 
       m.part('head');
-      const w = twoHanded ? rf(0.85, 1.1) : rf(0.6, 0.8);
+      const w = twoHanded ? rf(0.85, 1.1) * BATTLEAXE_REACH : rf(0.6, 0.8);
       const h = twoHanded ? rf(0.8, 1.0) : rf(0.6, 0.75);
       const yb = Hh - h - 0.12, t = rf(0.085, 0.13), cf = rf(0.85, 1.2);
       // Head outline around the haft: the cutting edge (z = 0 points) bows OUTWARD in a convex arc
       // between the two blade tips, bulging furthest at mid-height.
       const bulge = rf(0.1, 0.16);
+      // The cutting edge, from the lower blade tip to the upper one (z = 0 marks edge points)
+      const lo = -0.3 * cf, hi = 1 + 0.3 * cf;
+      // A one-hander's edge bows gently through 5 points; a two-hander's narrower blades get a deeper,
+      // smooth arc through 7 points so they still read as a proper axe.
+      const edgePts: [number, number, number][] = twoHanded
+        ? Array.from({ length: 7 }, (_, i): [number, number, number] => {
+            const f = i / 6; // a smooth convex arc: deepest at mid-height, meeting the tips
+            return [-1 - (BATTLEAXE_EDGE_BOW + bulge * 0.5) * Math.sin(f * Math.PI), lo + (hi - lo) * f, 0];
+          })
+        : [[-1, lo, 0], [-1 - bulge * 0.7, 0.12, 0], [-1 - bulge, 0.5, 0], [-1 - bulge * 0.7, 0.88, 0], [-1, hi, 0]];
       const pts: [number, number, number][] = [
         [0, 0, t], [-0.45, -0.1, t * 0.9],
-        [-1, -0.3 * cf, 0], [-1 - bulge * 0.7, 0.12, 0], [-1 - bulge, 0.5, 0], [-1 - bulge * 0.7, 0.88, 0], [-1, 1 + 0.3 * cf, 0],
+        ...edgePts,
         [-0.45, 1.1, t * 0.9], [0, 1, t],
       ];
       const side = (sg: number) => {

@@ -7,6 +7,7 @@ import { ENEMY_CLASSES, BOSS_CLASSES } from '../data/enemies';
 import { WEAPON_SERIES, weaponName } from '../data/gear/weapons';
 import { ARMOR_SERIES, armorName } from '../data/gear/armor';
 import { SHIELDS } from '../data/gear/offhands';
+import { CLASSES, type ClassKey } from '../data/classes';
 import { ARMOR_SLOTS, type WeaponType } from '../data/gear/types';
 
 export interface DataEntry {
@@ -15,8 +16,8 @@ export interface DataEntry {
   name: string;
   /** Where the entry lives, for people: 'data/gear/weapons.ts › WEAPON_SERIES plain › 1h Swords'. */
   path: string;
-  /** The entry's model link, if it has one. */
-  link?: ModelLink;
+  /** The entry's model link (the id of its design). */
+  link: ModelLink;
 }
 
 export const refKey = (r: DataRef) => `${r.table}:${r.key}`;
@@ -30,7 +31,7 @@ export function allDataEntries(): DataEntry[] {
     link: c.model,
   }));
   const weapons: DataEntry[] = WEAPON_SERIES.flatMap((s) =>
-    (Object.entries(s.weapons) as [WeaponType, { model?: ModelLink }][]).map(([type, w]) => ({
+    (Object.entries(s.weapons) as [WeaponType, { model: ModelLink }][]).map(([type, w]) => ({
       ref: { table: 'weapons', key: `${s.id}/${type}` },
       name: weaponName(s, type),
       path: `data/gear/weapons.ts › WEAPON_SERIES ${s.id} › ${type}`,
@@ -42,7 +43,7 @@ export function allDataEntries(): DataEntry[] {
       ref: { table: 'armor', key: `${s.id}/${slot}` },
       name: armorName(s, slot),
       path: `data/gear/armor.ts › ARMOR_SERIES ${s.id} › ${slot}`,
-      link: s.models?.[slot],
+      link: s.models[slot],
     })),
   );
   const offhands: DataEntry[] = SHIELDS.map((s) => ({
@@ -51,11 +52,21 @@ export function allDataEntries(): DataEntry[] {
     path: `data/gear/offhands.ts › SHIELDS ${s.id}`,
     link: s.model,
   }));
-  return [...enemies, ...weapons, ...armor, ...offhands];
+  const classes: DataEntry[] = (Object.entries(CLASSES) as [ClassKey, (typeof CLASSES)[ClassKey]][]).map(([key, c]) => ({
+    ref: { table: 'classes', key },
+    name: c.name,
+    path: `data/classes.ts › ${key}`,
+    link: c.model,
+  }));
+  return [...enemies, ...weapons, ...armor, ...offhands, ...classes];
 }
 
+// Built on first use. Game data is static at runtime (a hot reload re-runs this module).
+let byRef: Map<string, DataEntry> | null = null;
+
 export function dataEntry(ref: DataRef): DataEntry | undefined {
-  return allDataEntries().find((e) => refKey(e.ref) === refKey(ref));
+  byRef ??= new Map(allDataEntries().map((e) => [refKey(e.ref), e]));
+  return byRef.get(refKey(ref));
 }
 
 /**
@@ -80,9 +91,8 @@ export function checkDataRefs(list: { design: Design; stem: string }[]): string[
   }
   const designsById = new Map(list.map(({ design }) => [design.id, design]));
   for (const entry of allDataEntries()) {
-    if (!entry.link) continue;
-    const d = designsById.get(entry.link.design);
-    if (!d) problems.push(`${entry.path}: links ${entry.link.design}, which has no design file`);
+    const d = designsById.get(entry.link);
+    if (!d) problems.push(`${entry.path}: links ${entry.link}, which has no design file (approved or draft)`);
     else if (refKey(d.source) !== refKey(entry.ref)) problems.push(`${entry.path}: links ${d.id}, but that design is for ${refKey(d.source)}`);
   }
   return problems;

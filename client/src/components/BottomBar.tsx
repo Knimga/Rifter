@@ -1,4 +1,5 @@
 import { CLASSES } from '../data/classes';
+import { PARTY_MEMBER_COLOR } from '../data/constants';
 import type { Stats } from '../data/stats';
 import type { CombatState, Combatant } from '../data/combat';
 import type { PartyMemberConfig } from '../data/party';
@@ -49,7 +50,7 @@ export default function BottomBar({
                     ${barViewIdx === i ? 'bg-blue-700 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'}
                     ${isActing ? 'ring-2 ring-yellow-400' : ''}`}
                 >
-                  <span style={{ color: CLASSES[m.selectedClass!].color }}>{m.characterName}</span>
+                  <span style={{ color: PARTY_MEMBER_COLOR }}>{m.characterName}</span>
                   {isActing && <span className="ml-1 text-yellow-300">▶</span>}
                 </button>
               );

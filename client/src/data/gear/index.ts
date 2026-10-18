@@ -1,5 +1,3 @@
-import { GiEdgedShield } from 'react-icons/gi';
-import type { IconType } from 'react-icons';
 import type { ArmorProficiency } from '../classes';
 
 export * from './types';
@@ -26,8 +24,6 @@ export const EMPTY_GEAR: GearSlots = {
   mainhand: null,
   offhand: null,
 };
-
-export const SHIELD_ICON: IconType = GiEdgedShield;
 
 // ─── Type Guards ──────────────────────────────────────────────────────────────
 
@@ -103,7 +99,7 @@ function rollAffixes(invalidAffixes: BuffableStat[], level: number, enabled: boo
 }
 
 let itemCounter = 0;
-/** A unique item id (it also seeds the item's model, so each drop keeps its own look). */
+/** A unique item id. */
 const newItemId = () => `item-${Date.now().toString(36)}-${(itemCounter++).toString(36)}`;
 
 export function generateWeapon(
@@ -126,7 +122,7 @@ export function generateWeapon(
     maxDamage: Math.max(1, Math.round(data.baseDamage.max * m)),
     range: data.range,
     id: newItemId(),
-    model: series.weapons[weaponType]?.model,
+    model: series.weapons[weaponType]!.model,
     implicit: data.implicits ? resolveImplicit(data.implicits, level) : undefined,
   };
 }
@@ -147,8 +143,7 @@ export function generateArmor(
     ...rollAffixes(ARMOR_INVALID_AFFIXES[type], level, affixes),
     armorType: type,
     armorValue: Math.round(ARMOR_TYPE_BASE_VALUE[type] * level * ARMOR_SLOT_MULTIPLIER[slot]),
-    icon: series.icons[slot],
-    model: series.models?.[slot],
+    model: series.models[slot],
     implicit: resolveImplicit({ statKey: implicitDef.statKey, ...implicitDef.slots[slot] }, level),
   };
 }
@@ -166,7 +161,6 @@ export function generateShield(
     ...rollAffixes(ARMOR_INVALID_AFFIXES[template.type], level, affixes),
     armorType: template.type,
     armorValue: Math.round(ARMOR_TYPE_BASE_VALUE[template.type] * level * SHIELD_ARMOR_MULTIPLIER),
-    iconPath: template.icon,
     model: template.model,
     implicit: resolveImplicit(SHIELD_IMPLICIT, level),
   };

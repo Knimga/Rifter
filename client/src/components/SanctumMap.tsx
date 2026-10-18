@@ -1,10 +1,14 @@
-import { useMemo, useState } from 'react';
+import { lazy, Suspense, useMemo, useState } from 'react';
 import { GiMagicPortal } from 'react-icons/gi';
 import type { TargetType } from '../data/classes';
 import { brightenHex, isAdjacent, isValidMoveTarget, posKey, type Pos } from '../data/dungeonHelpers';
 import { TILE_SIZE, SANCTUM_FLOOR_COLOR, SANCTUM_WALL_COLOR } from '../data/constants';
 import { SANCTUM, isSanctumPortal, isSanctumWall, isSanctumWalkable } from '../data/sanctum';
-import { MoveLineOverlay, PartyToken, TILE_BORDER_CLASS, type PartyTokenData } from './mapParts';
+import { ActiveGlow, MoveLineOverlay, TILE_BORDER_CLASS, toMapMember, type PartyTokenData } from './mapParts';
+
+// 3D party models over the tile grid. Lazy: it pulls in three.js (GameScreen preloads it on mount).
+const ModelLayer = lazy(() => import('./ModelLayer'));
+import type { UnitAim } from './ModelLayer';
 
 interface Props {
   playerPos: Pos;
@@ -17,12 +21,16 @@ interface Props {
   onAbilityUse: (pos: Pos) => void;
   onAbilityDeselect: () => void;
   onMemberSelect: (partyIndex: number) => void;
+  /** Where each unit last aimed an ability; its model turns to face it. */
+  aims?: Record<string, UnitAim>;
 }
 
-export default function SanctumMap({ playerPos, activeMoverPos, party, movement, onMove, onLocationChange, activeTarget, onAbilityUse, onAbilityDeselect, onMemberSelect }: Props) {
+export default function SanctumMap({ playerPos, activeMoverPos, party, movement, onMove, onLocationChange, activeTarget, onAbilityUse, onAbilityDeselect, onMemberSelect, aims }: Props) {
   const [hoveredTile, setHoveredTile] = useState<Pos | null>(null);
 
   const memberByKey = useMemo(() => new Map(party.map(m => [posKey(m.pos), m])), [party]);
+  // Party members drawn as their class models (HP/MP bars above their heads)
+  const modelParty = useMemo(() => party.map(m => toMapMember(m)), [party]);
   const isAdjacentToPortal = isAdjacent(playerPos, SANCTUM.portalPos);
   const canMoveTo = (p: Pos) =>
     isValidMoveTarget(p, activeMoverPos, movement, isSanctumWalkable, q => memberByKey.has(posKey(q)), isSanctumPortal);
@@ -75,13 +83,14 @@ export default function SanctumMap({ playerPos, activeMoverPos, party, movement,
                           ? brightenHex(SANCTUM_FLOOR_COLOR, 1.5)
                           : SANCTUM_FLOOR_COLOR,
                   }}
-                  className={`shrink-0 border flex items-center justify-center text-xs ${
+                  className={`relative shrink-0 border flex items-center justify-center text-xs ${
                     !isWall && allyHighlight
                       ? 'bg-green-900/40 border-2 border-green-400 cursor-crosshair'
                       : TILE_BORDER_CLASS
                   }`}
                 >
-                  {member && <PartyToken member={member} />}
+                  {/* Members are drawn by ModelLayer; the active one stands on a floor glow */}
+                  {member?.active && <ActiveGlow />}
                   {!member && isPortal && (
                     <div
                       className={`transition-all ${isAdjacentToPortal ? 'cursor-pointer animate-pulse' : ''}`}
@@ -97,6 +106,10 @@ export default function SanctumMap({ playerPos, activeMoverPos, party, movement,
             })}
           </div>
         ))}
+
+        <Suspense fallback={null}>
+          <ModelLayer cols={SANCTUM.width} rows={SANCTUM.height} party={modelParty} aims={aims} />
+        </Suspense>
 
         {!activeTarget && hoveredTile && canMoveTo(hoveredTile) && (
           <MoveLineOverlay from={activeMoverPos} to={hoveredTile} cols={SANCTUM.width} rows={SANCTUM.height} />

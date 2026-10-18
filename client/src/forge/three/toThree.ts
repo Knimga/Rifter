@@ -9,26 +9,39 @@ export const sharedMaterials = { lit, unlit, glass };
 
 const srgbToLinear = (v: number) => (v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
 
-function sub(model: Model, idx: number[], withAlpha: boolean, boost = 1): THREE.BufferGeometry {
-  const { positions, colors, alpha } = model.mesh;
-  const pos = new Float32Array(idx.length * 9);
-  const col = new Float32Array(idx.length * 9 * (withAlpha ? 4 / 3 : 1));
-  const part = new Float32Array(idx.length * 3);
-  idx.forEach((t, i) => {
-    pos.set(positions.subarray(t * 9, t * 9 + 9), i * 9);
+/**
+ * Geometry for the triangles `idx` (non-indexed, flat shaded). Faces are flat-colored, so each face's
+ * color is converted to linear once and written to its three vertices; normals are each face's own.
+ */
+function sub(model: Model, idx: Uint32Array, withAlpha: boolean, boost = 1): THREE.BufferGeometry {
+  const { positions: P, colors: C, alpha } = model.mesh;
+  const n = idx.length;
+  const stride = withAlpha ? 4 : 3;
+  const pos = new Float32Array(n * 9);
+  const nor = new Float32Array(n * 9);
+  const col = new Float32Array(n * 3 * stride);
+  for (let i = 0; i < n; i++) {
+    const s = idx[i] * 9, o = i * 9;
+    for (let k = 0; k < 9; k++) pos[o + k] = P[s + k];
+    // Face normal: (b - a) x (c - a), normalized
+    const ux = P[s + 3] - P[s], uy = P[s + 4] - P[s + 1], uz = P[s + 5] - P[s + 2];
+    const vx = P[s + 6] - P[s], vy = P[s + 7] - P[s + 1], vz = P[s + 8] - P[s + 2];
+    let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+    const l = Math.hypot(nx, ny, nz) || 1;
+    nx /= l; ny /= l; nz /= l;
+    const r = srgbToLinear(Math.min(1, C[s] * boost)), g = srgbToLinear(Math.min(1, C[s + 1] * boost)), b = srgbToLinear(Math.min(1, C[s + 2] * boost));
     for (let v = 0; v < 3; v++) {
-      const o = withAlpha ? (i * 3 + v) * 4 : (i * 3 + v) * 3;
-      for (let k = 0; k < 3; k++) col[o + k] = srgbToLinear(Math.min(1, colors[t * 9 + v * 3 + k] * boost));
-      if (withAlpha) col[o + 3] = alpha[t];
-      part[i * 3 + v] = model.mesh.part[t];
+      nor[o + v * 3] = nx; nor[o + v * 3 + 1] = ny; nor[o + v * 3 + 2] = nz;
+      const c = (i * 3 + v) * stride;
+      col[c] = r; col[c + 1] = g; col[c + 2] = b;
+      if (withAlpha) col[c + 3] = alpha[idx[i]];
     }
-  });
-  const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-  g.setAttribute('color', new THREE.BufferAttribute(col, withAlpha ? 4 : 3));
-  g.setAttribute('part', new THREE.BufferAttribute(part, 1)); // kept for future per-part animation
-  g.computeVertexNormals(); // non-indexed => flat normals
-  return g;
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
+  geo.setAttribute('color', new THREE.BufferAttribute(col, stride));
+  return geo;
 }
 
 /**
@@ -38,8 +51,15 @@ function sub(model: Model, idx: number[], withAlpha: boolean, boost = 1): THREE.
  */
 export function toThree(model: Model): THREE.Group {
   const { emissive, alpha, triCount } = model.mesh;
-  const solid: number[] = [], glow: number[] = [], clear: number[] = [];
-  for (let t = 0; t < triCount; t++) (emissive[t] >= 0.5 ? glow : alpha[t] < 0.99 ? clear : solid).push(t);
+  // Split triangles into solid / glowing / translucent (counts first, then fill typed arrays)
+  const kind = new Uint8Array(triCount);
+  const count = [0, 0, 0];
+  for (let t = 0; t < triCount; t++) count[(kind[t] = emissive[t] >= 0.5 ? 1 : alpha[t] < 0.99 ? 2 : 0)]++;
+  const lists = count.map((c) => new Uint32Array(c));
+  const at = [0, 0, 0];
+  for (let t = 0; t < triCount; t++) lists[kind[t]][at[kind[t]]++] = t;
+  const [solid, glow, clear] = lists;
+
   const g = new THREE.Group();
   g.name = model.name;
   g.userData.model = { designId: model.designId, seed: model.seed, anchors: model.mesh.anchors, partNames: model.mesh.partNames, pivots: model.mesh.pivots };

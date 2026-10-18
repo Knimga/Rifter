@@ -1,36 +1,28 @@
-// Icon of a linked forge model (e.g. a weapon item), rendered once by a shared offscreen WebGL context.
-// The renderer is lazy-loaded (it pulls in three.js); until it is ready the icon's box stays empty.
+// Icon of an item's forge model, rendered once per design by a shared offscreen WebGL context (every item
+// of a design looks the same). The renderer is lazy-loaded (it pulls in three.js); until it is ready, or
+// while the design isn't approved, the icon's box stays empty.
 import { useEffect, useState } from 'react';
 import type { Design, ModelLink } from '../forge/core/types';
-import { instanceSeed, linkedDesign } from '../forge/core/link';
+import { linkedDesign } from '../forge/core/link';
 import { designs } from '../forge/registry.vite';
 
-// Rendered icons per design object (a design edited in dev is a new object, so its icons re-render)
-const cache = new WeakMap<Design, Map<string, string>>();
+// Rendered icon per design object (a design edited in dev is a new object, so its icon re-renders)
+const cache = new WeakMap<Design, string>();
 
-export default function ModelIcon({ link, instanceId, alt, className }: {
-  link: ModelLink;
-  /** Stable id of this instance (e.g. the item id); seeds the parts the link leaves free. */
-  instanceId: string;
-  alt: string;
-  className: string;
-}) {
+export default function ModelIcon({ link, alt, className }: { link: ModelLink; alt: string; className: string }) {
   const design = linkedDesign(designs, link);
-  const key = `${instanceSeed(link, instanceId)}:${JSON.stringify(link.params)}`;
-  const url = design ? cache.get(design)?.get(key) : undefined;
+  const url = design ? cache.get(design) : undefined;
   const [, setRendered] = useState(0);
 
   useEffect(() => {
     if (!design || url) return;
     let live = true;
-    import('../forge/three/icons').then(({ renderLinkedIcon }) => {
-      let icons = cache.get(design);
-      if (!icons) cache.set(design, (icons = new Map()));
-      if (!icons.has(key)) icons.set(key, renderLinkedIcon(design, link, instanceId));
+    import('../forge/three/icons').then(({ renderItemIcon }) => {
+      if (!cache.has(design)) cache.set(design, renderItemIcon(design));
       if (live) setRendered((n) => n + 1);
     });
     return () => { live = false; };
-  }, [design, key, url]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [design, url]);
 
   return url
     ? <img src={url} alt={alt} draggable={false} className={`${className} object-contain`} />

@@ -3,6 +3,7 @@ import {
   X, Crown, Shirt, Hand, Footprints, Sword, Shield,
 } from 'lucide-react';
 import { CLASSES } from '../data/classes';
+import { PARTY_MEMBER_COLOR } from '../data/constants';
 import { ATTRIBUTE_KEYS, recomputeStats, formatStat, type Stats } from '../data/stats';
 import { GEAR_SLOTS, getGearArmorBonus, getGearBuffs, type GearSlots, type GearSlot, type Item } from '../data/gear';
 import type { PartyMemberConfig } from '../data/party';
@@ -99,14 +100,14 @@ export default function CharacterSheet({ party, partyHp, partyStats, inventory, 
   }, [selectedIdx]);
 
   const member = party[selectedIdx];
-  const { characterName, selectedClass, pointsSpent, skillPointsSpent, gear } = member;
+  const { characterName, selectedClass, gear } = member;
   const stats = partyStats[selectedIdx];
   const classData = CLASSES[selectedClass!];
   const playerHp = partyHp[selectedIdx] ?? stats.hp;
 
   // Base stats (gear affixes, no combat buffs) for delta coloring
   const baseStats = recomputeStats(
-    { mode: 'player', classKey: selectedClass, pointsSpent, skillPointsSpent, gearArmorBonus: getGearArmorBonus(gear) },
+    { mode: 'player', classKey: selectedClass, gearArmorBonus: getGearArmorBonus(gear) },
     getGearBuffs(gear),
   );
 
@@ -138,9 +139,9 @@ export default function CharacterSheet({ party, partyHp, partyStats, inventory, 
                   }`}
                 >
                   <div className="flex items-center gap-2">
-                    <div className="w-6 h-6 rounded-full shrink-0" style={{ backgroundColor: cd.color }} />
+                    <div className="w-6 h-6 rounded-full shrink-0" style={{ backgroundColor: PARTY_MEMBER_COLOR }} />
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold truncate" style={{ color: cd.color }}>
+                      <p className="text-sm font-semibold truncate" style={{ color: PARTY_MEMBER_COLOR }}>
                         {m.characterName.trim() || `Character ${i + 1}`}
                       </p>
                       <p className="text-xs text-gray-400 truncate">{cd.name}</p>
@@ -161,9 +162,9 @@ export default function CharacterSheet({ party, partyHp, partyStats, inventory, 
 
           {/* Header */}
           <div className="flex items-center gap-3 mb-5">
-            <div className="w-10 h-10 rounded-full shrink-0" style={{ backgroundColor: classData.color }} />
+            <div className="w-10 h-10 rounded-full shrink-0" style={{ backgroundColor: PARTY_MEMBER_COLOR }} />
             <div>
-              <h2 className="text-xl font-bold" style={{ color: classData.color }}>{characterName}</h2>
+              <h2 className="text-xl font-bold" style={{ color: PARTY_MEMBER_COLOR }}>{characterName}</h2>
               <p className="text-sm text-gray-400">{classData.name} — Level {stats.level}</p>
             </div>
           </div>

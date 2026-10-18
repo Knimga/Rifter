@@ -3,33 +3,24 @@ import { bipyr, blob, box, frustum, loft } from '../core/primitives';
 import { add, hslRGB, mixC, mulC, rotZ, type RGB, type Vec3 } from '../core/vec';
 
 // Identity: tall hooded caster in a dark robe with a scythe and a glowing, empty hood.
-// Robe hue stays in a dark violet-to-black band. Seeds vary the necrotic glow, trim and adornments.
-const GLOWS = {
-  necrotic: [120, 255, 140],
-  soul: [130, 210, 255],
-  violet: [200, 120, 255],
-  ember: [255, 120, 60],
-} as const satisfies Record<string, RGB>;
+// A dark violet robe, skull pauldrons and a green necrotic glow. Seeds vary the robe's tone and the
+// soul orbs around it.
+const GLOW: RGB = [120, 255, 140];
+const ROBE_HUE = 250;
 
 const design: Design = {
   id: 'creature.necromancer',
   source: { table: 'enemies', key: 'necromancer' }, // data/enemies.ts › necromancer
   category: 'creature',
   label: 'Necromancer',
-  version: 1,
   fit: { kind: 'standing', height: 1.6, maxRadius: 0.75 },
   budget: 900,
   build(c) {
     const m = c.mesh;
     const { R, rf } = c;
-    // ---- parameters first, fixed order ----
-    const glowKey = c.choice('glow', Object.keys(GLOWS) as (keyof typeof GLOWS)[]);
-    const robeHue = c.int('robeHue', 250, 300);
-    const skullPauldrons = c.chance('skullPauldrons', 0.6);
-    const orbs = c.int('orbs', 0, 3);
-    // ---- incidental detail ----
-    const glow: RGB = [...GLOWS[glowKey]];
-    const robe = hslRGB(robeHue, rf(22, 34), rf(18, 24));
+    const orbs = c.ri(0, 3);
+    const glow = GLOW;
+    const robe = hslRGB(ROBE_HUE, rf(22, 34), rf(18, 24));
     const robeHi = mulC(robe, 1.45);
     const trim = mixC(robe, glow, 0.35);
     const bone: RGB = [222, 210, 184];
@@ -53,14 +44,12 @@ const design: Design = {
     for (const sx of [-1, 1]) bipyr(m, [sx * 0.07, 2.02, 0.26], 0.035, 0.03, 4, glow, { e: 1, j: 0.05 });
     frustum(m, [0, 2.3, -0.08], [0, 2.52, -0.22], 0.12, 0.01, 6, robe); // hood point
 
-    // Shoulders: optional skull pauldrons
+    // Shoulders: skull pauldrons
     for (const sx of [-1, 1]) {
       const sh: Vec3 = [sx * 0.42, 1.74, 0];
       blob(m, sh, [0.17, 0.13, 0.17], 0, 0.15, robeHi);
-      if (skullPauldrons) {
-        blob(m, add(sh, [sx * 0.04, 0.12, 0.04]), [0.1, 0.1, 0.1], 0, 0.08, bone);
-        blob(m, add(sh, [sx * 0.04, 0.12, 0.13]), [0.03, 0.03, 0.02], 0, 0.05, glow, { e: 0.9 });
-      }
+      blob(m, add(sh, [sx * 0.04, 0.12, 0.04]), [0.1, 0.1, 0.1], 0, 0.08, bone);
+      blob(m, add(sh, [sx * 0.04, 0.12, 0.13]), [0.03, 0.03, 0.02], 0, 0.05, glow, { e: 0.9 });
     }
 
     // Left arm (+x) raised with a glowing hand; right arm (-x) holds the scythe
@@ -101,8 +90,7 @@ const design: Design = {
       bipyr(m, [Math.sin(a) * 0.8, rf(1.2, 1.9), Math.cos(a) * 0.55], 0.07, 0.09, 4, glow, { e: 1, j: 0.1 });
     }
 
-    const glowName = glowKey[0].toUpperCase() + glowKey.slice(1);
-    return `${glowName} Necromancer`;
+    return 'Necromancer';
   },
 };
 export default design;

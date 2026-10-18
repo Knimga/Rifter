@@ -1,9 +1,6 @@
 import type { Ability, Passive, ScalingPassive } from './classes';
 
-import { 
-  GiChewedSkull, GiShamblingZombie, GiCrownedSkull
- } from 'react-icons/gi';
-
+import { GiChewedSkull, GiShamblingZombie, GiCrownedSkull } from 'react-icons/gi';
 import type { IconType } from 'react-icons';
 import type { AttributeKey, SkillKey, ActiveBuff, ActiveHot, ActiveDot } from './stats';
 import { generateEnemyAttributePoints, calculateStats, recomputeStats } from './stats';
@@ -21,7 +18,7 @@ import type { Pos } from './dungeonHelpers';
 export interface EnemyClassData {
   id: string;
   name: string;
-  token: IconType;
+  token: IconType;  // small icon beside the name in the turn order bar
 
   // Innate attribute bonuses (same role as ClassData.attributes for players)
   attributes: Partial<Record<AttributeKey, number>>;
@@ -46,8 +43,8 @@ export interface EnemyClassData {
 
   dropChance?: number;  // probability of dropping an item on death (default: LOOT_DROP_CHANCE)
 
-  // Forge model this enemy renders as (paste from the forge's "Copy for game"). Absent = not linked yet.
-  model?: ModelLink;
+  // Forge design this enemy renders as; each enemy instance gets its own look (seeded from its id)
+  model: ModelLink;
 }
 
 // ─── Enemy Instance ───────────────────────────────────────────────────────────
@@ -136,7 +133,7 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
       },
     ],
     dropChance: 0.50,
-    model: { design: 'creature.skeleton', version: 1, params: { helmet: false, shield: true } },
+    model: 'creature.skeleton',
   },
   {
     id: 'zombie',
@@ -159,7 +156,7 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
       },
     ],
     dropChance: 0.50,
-    model: { design: 'creature.zombie', version: 2, params: {} },
+    model: 'creature.zombie',
   },
 ];
 
@@ -210,7 +207,7 @@ export const BOSS_CLASSES: EnemyClassData[] = [
       }
     ],
     dropChance: 1,
-    model: { design: 'creature.necromancer', version: 1, params: { skullPauldrons: true, robeHue: 250, glow: 'necrotic' } },
+    model: 'creature.necromancer',
   }
 ];
 
