@@ -1,7 +1,5 @@
 import type { Ability, Passive, ScalingPassive } from './classes';
 
-import { GiChewedSkull, GiShamblingZombie, GiCrownedSkull } from 'react-icons/gi';
-import type { IconType } from 'react-icons';
 import type { AttributeKey, SkillKey, ActiveBuff, ActiveHot, ActiveDot } from './stats';
 import { generateEnemyAttributePoints, calculateStats, recomputeStats } from './stats';
 import type { Stats } from './stats';
@@ -10,15 +8,14 @@ import type { Pos } from './dungeonHelpers';
 
 // ─── Enemy Class Definition ───────────────────────────────────────────────────
 //
-// Enemy classes work like player classes but are not selectable in the builder.
-// They define a name/token/color, innate attribute bonuses, armor scaling,
+// Enemy classes work like player classes but are not selectable at character select.
+// They define a name, a model, innate attribute bonuses, armor scaling,
 // high/low attribute preferences for auto point-buy, and abilities.
 // All attacks are mpCost:0 abilities — no separate weapon field.
 
 export interface EnemyClassData {
   id: string;
   name: string;
-  token: IconType;  // small icon beside the name in the turn order bar
 
   // Innate attribute bonuses (same role as ClassData.attributes for players)
   attributes: Partial<Record<AttributeKey, number>>;
@@ -51,7 +48,7 @@ export interface EnemyClassData {
 
 export interface EnemyInstance {
   id: string;
-  classData: EnemyClassData;        // template — name, token, color, abilities
+  classData: EnemyClassData;        // template — name, model, abilities
   level: number;                    // the level this enemy was generated at
   pointsSpent: Record<AttributeKey, number>;  // auto-generated, stored for buff recompute
   buffs: ActiveBuff[];
@@ -115,7 +112,6 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
   {
     id: 'skeleton',
     name: 'Skeleton',
-    token: GiChewedSkull,
     attributes: { strength: 2 },
     highAttributes: ['strength', 'finesse'],
     lowAttributes: ['mind', 'spirit'],
@@ -138,7 +134,6 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
   {
     id: 'zombie',
     name: 'Zombie',
-    token: GiShamblingZombie,
     attributes: { strength: 2, toughness: 4 },
     highAttributes: ['toughness', 'strength'],
     lowAttributes: ['finesse', 'mind'],
@@ -164,7 +159,6 @@ export const BOSS_CLASSES: EnemyClassData[] = [
   {
     id: 'necromancer',
     name: 'Necromancer',
-    token: GiCrownedSkull,
     attributes: { toughness: 10, mind: 8 },
     highAttributes: ['mind', 'toughness'],
     lowAttributes: ['spirit'],

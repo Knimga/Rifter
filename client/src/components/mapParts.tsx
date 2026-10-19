@@ -1,14 +1,12 @@
-import { useMemo, type ReactNode } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { TILE_SIZE, boardLayout, type BoardLayout } from '../viewEngine/board';
 import { yawFromGridMove } from '../forge/core/facing';
-import type { ActiveBuff, ActiveDot, ActiveHot } from '../data/stats';
 import type { ClassKey } from '../data/classes';
 import type { ModelLink } from '../forge/core/types';
 import type { HeldWeapon } from '../forge/equip';
 import type { MapPartyMember } from './ModelLayer';
-import type { Pos } from '../data/dungeonHelpers';
-import { DAMAGE_ELEMENT_COLOR } from '../data/constants';
-import { Tooltip } from './Tooltip';
+import { brightenHex, samePos, type Pos } from '../data/dungeonHelpers';
+import UnitStatus, { type StatusMarker } from './hud/UnitStatus';
 import MoveLine from './MoveLine';
 
 // ─── Shared pieces of the Sanctum and Dungeon maps ────────────────────────────
@@ -29,8 +27,8 @@ export interface PartyTokenData {
   shield?: ModelLink;
 }
 
-/** The 3D model layer's view of a party member, with its over-head HP/MP bars and effect dots. */
-export function toMapMember(m: PartyTokenData, dots: EffectDot[] = []): MapPartyMember {
+/** The 3D model layer's view of a party member, with its over-head status (effect markers, HP/MP bars). */
+export function toMapMember(m: PartyTokenData, markers: StatusMarker[] = []): MapPartyMember {
   return {
     id: `party-${m.partyIndex}`,
     classKey: m.classKey,
@@ -38,7 +36,7 @@ export function toMapMember(m: PartyTokenData, dots: EffectDot[] = []): MapParty
     weapon: m.weapon,
     shield: m.shield,
     active: m.active,
-    overlay: <PartyOverlay member={m} dots={dots} />,
+    overlay: <UnitStatus markers={markers} hp={m.hp} maxHp={m.maxHp} mp={m.mp} maxMp={m.maxMp} />,
   };
 }
 
@@ -96,14 +94,14 @@ export function facingOpenSide(pos: Pos, isOpen: (p: Pos) => boolean): number {
 }
 
 /**
- * A soft pulsing glow filling a floor tile: something there (a door, a portal) can be used now. `color`
- * is "r, g b" (0-255); it brightens on hover. Goes inside the tile, on the floor layer.
+ * A soft pulsing glow filling a floor tile: something there (a door, a portal) can be used now. `color` is
+ * any CSS color (a palette variable); it brightens on hover. Goes inside the tile, on the floor layer.
  */
 export function UsableGlow({ color, hovered }: { color: string; hovered: boolean }) {
   return (
     <div
       className="absolute inset-0 pointer-events-none animate-pulse"
-      style={{ boxShadow: `inset 0 0 ${hovered ? 16 : 10}px ${hovered ? 4 : 2}px rgba(${color}, ${hovered ? 0.8 : 0.5})` }}
+      style={{ boxShadow: `inset 0 0 ${hovered ? 16 : 10}px ${hovered ? 4 : 2}px color-mix(in srgb, ${color} ${hovered ? 80 : 50}%, transparent)` }}
     />
   );
 }
@@ -119,89 +117,95 @@ export function ActiveGlow() {
       style={{
         inset: '2%',
         // closest-side: the gradient reaches 0 exactly at the oval's edge, so it fades out with no rim
-        background: 'radial-gradient(ellipse closest-side, rgba(240, 232, 196, 0.32) 0%, rgba(240, 232, 196, 0.14) 50%, rgba(240, 232, 196, 0) 100%)',
+        background: 'radial-gradient(ellipse closest-side, color-mix(in srgb, var(--rift-active) 32%, transparent) 0%, color-mix(in srgb, var(--rift-active) 14%, transparent) 50%, transparent 100%)',
       }}
     />
   );
 }
 
-/** Above a party model's head: effect dots over HP and MP bars. */
-function PartyOverlay({ member, dots }: { member: PartyTokenData; dots: EffectDot[] }) {
+// ─── Floor tiles ──────────────────────────────────────────────────────────────
+
+/** Border color of every floor/wall tile. A real color (not a CSS variable): the forge's snapshots draw it on a canvas. */
+export const TILE_BORDER_COLOR = 'rgba(55, 65, 81, 0.3)';
+
+/** The tile under the pointer, tracked by FloorTile's hover handlers. */
+export function useHoveredTile() {
+  const [hovered, setHovered] = useState<Pos | null>(null);
+  return {
+    hovered,
+    isHovered: (p: Pos) => !!hovered && samePos(hovered, p),
+    enter: (p: Pos) => setHovered(p),
+    leave: (p: Pos) => setHovered((prev) => (prev && samePos(prev, p) ? null : prev)),
+  };
+}
+export type HoveredTile = ReturnType<typeof useHoveredTile>;
+
+/** A map's floor grid: `tile(p)` draws each tile (a FloorTile), row by row. */
+export function FloorGrid({ cols, rows, tile }: { cols: number; rows: number; tile: (p: Pos) => ReactNode }) {
   return (
     <>
-      {dots.length > 0 && <div className="relative h-2 w-8 pointer-events-auto"><EffectDotRow dots={dots} /></div>}
-      <div className="w-8 flex flex-col gap-px">
-        <div className="h-1 bg-gray-700 rounded-full overflow-hidden">
-          <div className="h-full bg-red-500 transition-all" style={{ width: `${(member.hp / member.maxHp) * 100}%` }} />
+      {Array.from({ length: rows }, (_, y) => (
+        <div key={y} className="flex">
+          {Array.from({ length: cols }, (_, x) => tile({ x, y }))}
         </div>
-        <div className="h-1 bg-gray-700 rounded-full overflow-hidden">
-          <div className="h-full bg-blue-500 transition-all" style={{ width: `${(member.mp / member.maxMp) * 100}%` }} />
-        </div>
-      </div>
+      ))}
     </>
   );
 }
 
-/** Border color of a plain floor/wall tile (tiles also use Tailwind's `border`). Shared by both maps and the forge's game view. */
-export const TILE_BORDER_CLASS = 'border-gray-700/30';
-
-// ─── Effect dots ──────────────────────────────────────────────────────────────
-
-interface EffectDot {
-  name: string;
+/**
+ * One floor or wall tile: its color (a move target brightens under the pointer), hover tracking and clicks.
+ * Overlays (highlights, glows) go inside as children.
+ */
+export function FloorTile({ p, color, brighten = false, hover, onClick, children }: {
+  p: Pos;
+  /** Floor or wall color (hex). */
   color: string;
-  sign: '+' | '-';
-}
-
-/** One dot per buff source, HoT and DoT on a unit (party member or enemy), shown above its model's head. */
-export function computeEffectDots(buffs: ActiveBuff[], hots: ActiveHot[], dots: ActiveDot[]): EffectDot[] {
-  const result: EffectDot[] = [];
-  const seen = new Set<string>();
-  for (const buff of buffs) {
-    const key = buff.source ?? buff.id;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    const isNeg = buff.amount < 0 || (buff.percent !== undefined && buff.percent < 0);
-    result.push({ name: key, color: buff.damageElement ? DAMAGE_ELEMENT_COLOR[buff.damageElement] : '#888', sign: isNeg ? '-' : '+' });
-  }
-  for (const hot of hots) {
-    result.push({ name: hot.name ?? 'HoT', color: hot.damageElement ? DAMAGE_ELEMENT_COLOR[hot.damageElement] : '#888', sign: '+' });
-  }
-  for (const dot of dots) {
-    result.push({ name: dot.name ?? `${dot.damageElement} DoT`, color: DAMAGE_ELEMENT_COLOR[dot.damageElement], sign: '-' });
-  }
-  return result;
-}
-
-export function EffectDotRow({ dots }: { dots: EffectDot[] }) {
-  if (dots.length === 0) return null;
+  /** Lit as the hovered move target. */
+  brighten?: boolean;
+  hover: HoveredTile;
+  onClick: () => void;
+  children?: ReactNode;
+}) {
   return (
-    <div className="absolute top-0 left-0 flex flex-wrap gap-px p-px z-10">
-      {dots.map((dot, i) => (
-        <Tooltip key={i} content={<span className="px-1.5 py-0.5 text-xs text-gray-100 whitespace-nowrap">{dot.name}</span>}>
-          <div
-            style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: dot.color, flexShrink: 0, cursor: 'default' }}
-            className="flex items-center justify-center"
-          >
-            <span className="text-white font-bold leading-none select-none" style={{ fontSize: 6 }}>
-              {dot.sign}
-            </span>
-          </div>
-        </Tooltip>
-      ))}
+    <div
+      onClick={onClick}
+      onMouseEnter={() => hover.enter(p)}
+      onMouseLeave={() => hover.leave(p)}
+      className="relative shrink-0 border"
+      style={{ width: TILE_SIZE, height: TILE_SIZE, borderColor: TILE_BORDER_COLOR, backgroundColor: brighten ? brightenHex(color, 1.5) : color }}
+    >
+      {children}
     </div>
   );
 }
 
-// ─── Enemy HP bar ─────────────────────────────────────────────────────────────
+/**
+ * Overlays drawn over a floor tile (on the floor layer, taking no clicks): targeting in the theme's muted
+ * green (allies, helpful areas) and red (enemies, harmful areas), whose turn it is, and the hovered unit.
+ * Shared by both maps.
+ */
+export const TILE_HIGHLIGHT = {
+  /** A valid ally (or self) target. */
+  ally: 'bg-[color-mix(in_srgb,var(--rift-ally)_16%,transparent)] border-2 border-rift-ally',
+  /** A valid enemy target, or a party member an enemy is about to hit. */
+  enemy: 'bg-[color-mix(in_srgb,var(--rift-foe)_14%,transparent)] border-2 border-rift-foe',
+  /** Tiles an area ability would cover: helpful / harmful. */
+  areaHelp: 'bg-[color-mix(in_srgb,var(--rift-ally)_28%,transparent)] border border-[color-mix(in_srgb,var(--rift-ally)_60%,black)]',
+  areaHarm: 'bg-[color-mix(in_srgb,var(--rift-foe)_28%,transparent)] border border-[color-mix(in_srgb,var(--rift-foe)_60%,black)]',
+  /** An enemy's area attack about to land. */
+  enemyArea: 'bg-[color-mix(in_srgb,var(--rift-hp)_30%,transparent)] border border-rift-hp',
+  /** The enemy whose turn it is. */
+  acting: 'border-2 border-rift-acting',
+  /** The party member whose turn it is (their own tile). */
+  mover: 'border border-rift-rim-hi',
+  /** The unit under a hovered turn-order pill. */
+  hovered: 'border-2 border-rift-bright bg-[color-mix(in_srgb,var(--glow)_22%,transparent)]',
+} as const;
 
-/** Enemy health bar, above its model's head. */
-export function EnemyHpBar({ hp, maxHp }: { hp: number; maxHp: number }) {
-  return (
-    <div className="w-8 h-1 bg-gray-700 rounded-full overflow-hidden">
-      <div className="h-full bg-red-500 transition-all" style={{ width: `${(hp / maxHp) * 100}%` }} />
-    </div>
-  );
+/** One highlight overlay on a floor tile (see TILE_HIGHLIGHT). */
+export function TileHighlight({ kind, className = '' }: { kind: keyof typeof TILE_HIGHLIGHT; className?: string }) {
+  return <div className={`absolute inset-0 pointer-events-none ${TILE_HIGHLIGHT[kind]} ${className}`} />;
 }
 
 // ─── Move line ────────────────────────────────────────────────────────────────

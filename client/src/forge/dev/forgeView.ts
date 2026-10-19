@@ -5,8 +5,8 @@ import type { Model } from '../core/types';
 import { lootYaw } from '../core/stage-config';
 import { GAME_CAMERA } from '../../viewEngine/camera';
 import { TILE_SIZE } from '../../viewEngine/board';
-import { addForgeLights, aimKeyLight, fitIconCamera, fitViewCamera, layItemOnGround, makeGameCamera } from '../three/stage';
-import { animateParts, disposeObject, sharedMaterials, toThree } from '../three/toThree';
+import { addForgeLights, aimKeyLight, fitIconCamera, fitViewCamera, layItemOnGround, makeGameCamera } from '../../viewEngine/three/stage';
+import { animateParts, disposeObject, sharedMaterials, toThree } from '../../viewEngine/three/toThree';
 
 export type CameraPreset = 'game' | 'icon' | 'top' | 'side';
 

@@ -1,11 +1,10 @@
-import { lazy, Suspense, useMemo, useState } from 'react';
+import { lazy, Suspense, useMemo } from 'react';
 import type { TargetType } from '../data/classes';
 import { gameObjectModel } from '../data/gameObjects';
-import { brightenHex, isAdjacent, posKey, type Pos } from '../data/dungeonHelpers';
+import { isAdjacent, posKey, type Pos } from '../data/dungeonHelpers';
 import { SANCTUM_FLOOR_COLOR, SANCTUM_WALL_COLOR } from '../data/constants';
-import { TILE_SIZE } from '../viewEngine/board';
 import { SANCTUM, isSanctumPortal, isSanctumWall, isSanctumWalkable } from '../data/sanctum';
-import { Board, MoveLineOverlay, TILE_BORDER_CLASS, UsableGlow, facingOpenSide, toMapMember, useBoard, type PartyTokenData } from './mapParts';
+import { Board, FloorGrid, FloorTile, MoveLineOverlay, TileHighlight, UsableGlow, facingOpenSide, toMapMember, useBoard, useHoveredTile, type PartyTokenData } from './mapParts';
 
 // 3D party models over the tile grid. Lazy: it pulls in three.js (GameScreen preloads it on mount).
 const ModelLayer = lazy(() => import('./ModelLayer'));
@@ -33,7 +32,7 @@ interface Props {
 }
 
 export default function SanctumMap({ playerPos, activeMoverPos, party, moveTargets, onMove, onLocationChange, activeTarget, onAbilityUse, onAbilityDeselect, onMemberSelect, aims }: Props) {
-  const [hoveredTile, setHoveredTile] = useState<Pos | null>(null);
+  const hover = useHoveredTile();
   const board = useBoard(SANCTUM.width, SANCTUM.height);
 
   const memberByKey = useMemo(() => new Map(party.map(m => [posKey(m.pos), m])), [party]);
@@ -51,7 +50,7 @@ export default function SanctumMap({ playerPos, activeMoverPos, party, moveTarge
       else onAbilityDeselect();
       return;
     }
-    // Select party member's action bar by clicking their token
+    // Clicking a party member selects their action bar
     if (member) { onMemberSelect(member.partyIndex); return; }
     if (isSanctumPortal(p)) {
       if (isAdjacentToPortal) onLocationChange('dungeon');
@@ -60,51 +59,26 @@ export default function SanctumMap({ playerPos, activeMoverPos, party, moveTarge
     if (canMoveTo(p)) onMove(p);
   };
 
+  const tile = (p: Pos) => {
+    const isWall = isSanctumWall(p);
+    const allyTarget = !isWall && activeTarget === 'ally' && memberByKey.has(posKey(p));
+    return (
+      <FloorTile key={posKey(p)} p={p} hover={hover} onClick={() => handleClick(p)}
+        color={isWall ? SANCTUM_WALL_COLOR : SANCTUM_FLOOR_COLOR}
+        brighten={!isWall && !activeTarget && canMoveTo(p) && hover.isHovered(p)}>
+        {allyTarget && <TileHighlight kind="ally" />}
+        {/* The portal (a model, see SANCTUM_OBJECTS) glows on its tile while the leader can use it */}
+        {isSanctumPortal(p) && isAdjacentToPortal && <UsableGlow color="var(--rift-portal)" hovered={hover.isHovered(p)} />}
+      </FloorTile>
+    );
+  };
+
   const floor = (
     <>
-        {Array.from({ length: SANCTUM.height }).map((_, y) => (
-          <div key={y} className="flex">
-            {Array.from({ length: SANCTUM.width }).map((_, x) => {
-              const p = { x, y };
-              const isPortal = isSanctumPortal(p);
-              const isWall = isSanctumWall(p);
-              const member = memberByKey.get(posKey(p));
-              const allyHighlight = activeTarget === 'ally' && !!member;
-              const isHovered = hoveredTile?.x === x && hoveredTile?.y === y;
-
-              return (
-                <div
-                  key={`${x}-${y}`}
-                  onClick={() => handleClick(p)}
-                  onMouseEnter={() => setHoveredTile(p)}
-                  onMouseLeave={() => setHoveredTile(prev => prev?.x === x && prev?.y === y ? null : prev)}
-                  style={{
-                    width: TILE_SIZE, height: TILE_SIZE,
-                    backgroundColor: allyHighlight
-                      ? undefined
-                      : isWall
-                        ? SANCTUM_WALL_COLOR
-                        : !activeTarget && isHovered && canMoveTo(p)
-                          ? brightenHex(SANCTUM_FLOOR_COLOR, 1.5)
-                          : SANCTUM_FLOOR_COLOR,
-                  }}
-                  className={`relative shrink-0 border flex items-center justify-center text-xs ${
-                    !isWall && allyHighlight
-                      ? 'bg-green-900/40 border-2 border-green-400 cursor-crosshair'
-                      : TILE_BORDER_CLASS
-                  } ${isPortal && isAdjacentToPortal ? 'cursor-pointer' : ''}`}
-                >
-                  {/* The portal (a model, see SANCTUM_OBJECTS) glows on its tile while the leader can use it */}
-                  {isPortal && isAdjacentToPortal && <UsableGlow color="178, 236, 192" hovered={isHovered} />}
-                </div>
-              );
-            })}
-          </div>
-        ))}
-
-        {!activeTarget && hoveredTile && canMoveTo(hoveredTile) && (
-          <MoveLineOverlay from={activeMoverPos} to={hoveredTile} cols={SANCTUM.width} rows={SANCTUM.height} />
-        )}
+      <FloorGrid cols={SANCTUM.width} rows={SANCTUM.height} tile={tile} />
+      {!activeTarget && hover.hovered && canMoveTo(hover.hovered) && (
+        <MoveLineOverlay from={activeMoverPos} to={hover.hovered} cols={SANCTUM.width} rows={SANCTUM.height} />
+      )}
     </>
   );
 

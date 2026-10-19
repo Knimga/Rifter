@@ -79,11 +79,10 @@ export function canStep(from: Pos, dx: number, dy: number, isWalkable: (p: Pos) 
   return dx === 0 || dy === 0 || (isWalkable({ x: from.x + dx, y: from.y }) && isWalkable({ x: from.x, y: from.y + dy }));
 }
 
-/** A tile reached by walking: how many steps it takes, and the tile it is reached from (null at the start). */
+/** A tile reached by walking, and how many steps it takes. */
 export interface Reach {
   pos: Pos;
   steps: number;
-  prev: Pos | null;
 }
 
 /**
@@ -92,7 +91,7 @@ export interface Reach {
  * through (e.g. enemies, for the party). Where a mover may END is the caller's choice (partyMoveTargets).
  */
 export function reachableTiles(from: Pos, maxSteps: number, isWalkable: (p: Pos) => boolean, isBlocked: (p: Pos) => boolean = () => false): Map<string, Reach> {
-  const reach = new Map<string, Reach>([[posKey(from), { pos: from, steps: 0, prev: null }]]);
+  const reach = new Map<string, Reach>([[posKey(from), { pos: from, steps: 0 }]]);
   const queue: Reach[] = [reach.get(posKey(from))!];
   for (let head = 0; head < queue.length; head++) {
     const cur = queue[head];
@@ -101,19 +100,12 @@ export function reachableTiles(from: Pos, maxSteps: number, isWalkable: (p: Pos)
       const next = { x: cur.pos.x + dx, y: cur.pos.y + dy };
       const key = posKey(next);
       if (reach.has(key) || isBlocked(next) || !canStep(cur.pos, dx, dy, isWalkable)) continue;
-      const r = { pos: next, steps: cur.steps + 1, prev: cur.pos };
+      const r = { pos: next, steps: cur.steps + 1 };
       reach.set(key, r);
       queue.push(r);
     }
   }
   return reach;
-}
-
-/** The path walked to a reached tile, start excluded, destination included. */
-export function pathTo(reach: Map<string, Reach>, to: Pos): Pos[] {
-  const path: Pos[] = [];
-  for (let r = reach.get(posKey(to)); r && r.prev; r = reach.get(posKey(r.prev))) path.push(r.pos);
-  return path.reverse();
 }
 
 /**

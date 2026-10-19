@@ -12,14 +12,16 @@ src/forge/
   designs/        APPROVED designs, one file per design (creature.skeleton -> skeleton.ts)
     _weapon.ts    shared helpers (files starting "_" are not designs)
   drafts/         new designs and requested changes go HERE, never into designs/
-  three/          three.js adapters: toThree (<= 3 meshes per model), stage (lights, game camera), icons, mapRenderer
   dev/            builder page (ForgePage, forgeView) + draft registry; dev-only, lazy-loaded
   registry.vite.ts   import.meta.glob of designs/
   dataRefs.ts     designs <-> game data entries (used by lint and the builder page)
   equip.ts        characters holding their gear
 forge-plugin/     Vite dev-server plugin: /__forge/approve, /__forge/discard, /__forge/snapshot
 scripts/          forge-lint, forge-sheet (Node, run with tsx)
+src/viewEngine/three/   drawing forge models with three.js, in the game and the forge alike: toThree (<= 3 meshes
+                        per model), stage (lights, game camera), mapRenderer, icons (item icons, portraits), showcase
 ```
+The forge folder holds the forge UI and the link between its models and game data; drawing models (outside the forge's own page logic) is `viewEngine`'s.
 
 ## Data flow
 `Design.build(ctx)` draws triangles into `ctx.mesh` -> `finalize()` scales to game units and writes standard anchors -> `bake()` produces `MeshData` (flat typed arrays) -> `toThree()` makes up to 3 meshes (lit, emissive unlit, translucent). The same `MeshData` feeds the software contact-sheet renderer.
@@ -31,9 +33,9 @@ scripts/          forge-lint, forge-sheet (Node, run with tsx)
   - Items (loot) lie **flat on the tile, face up** (`ITEM_GROUND_PITCH` / `layItem` in `stage-config.ts`), resting on the floor. A design can lie less tipped with `fit.groundPitchDeg` (the Iron Helm uses -55 so its open underside is not on show). Loot is turned against the view's yaw (`lootYaw`), so on the floor it keeps its icon's screen orientation (tip up and to the left), only foreshortened by the view's elevation.
   - Inventory icons use a straight-on camera (`ICON_CAMERA`: no elevation, no yaw) for the same reason.
 - Models face +z at yaw 0. A model's left side is +x (`_l` = +x, `_r` = -x).
-- Facing and motion are view state (`three/mapRenderer.ts`); the game's positions change instantly. On a move, the model turns toward it (`yaw = atan2(dx, dy)`, smoothed with `smoothYaw`), then glides there in a straight line (about 0.2 s a tile, at most 1 s with the turn); DOM overlays (HP bars, the active glow) follow the drawn position. On an ability, the caster turns toward the aimed tile (`MapUnit.aim`) and the ability lands `AIM_TURN_LEAD_MS` later.
+- Facing and motion are view state (`viewEngine/three/mapRenderer.ts`); the game's positions change instantly. On a move, the model turns toward it (`yaw = atan2(dx, dy)`, smoothed with `smoothYaw`), then glides there in a straight line (about 0.2 s a tile, at most 1 s with the turn); DOM overlays (HP bars, the active glow) follow the drawn position. On an ability, the caster turns toward the aimed tile (`MapUnit.aim`) and the ability lands `AIM_TURN_LEAD_MS` later.
 - **Game camera: isometric orthographic view, one setting**, outside the forge because it is the whole display's: `GAME_CAMERA` in `src/viewEngine/camera.ts` (`elevationDeg`, `yawDeg`). North is up-left: the grid's top-left corner is the diamond's left point. Everything follows it: change a number, save, and the game and forge update.
-  - `viewProject` (`viewEngine/camera.ts`) is the projection (world -> screen tiles); the three.js camera (`fitViewCamera` / `frameBoard` in `forge/three/stage.ts`) produces exactly the same mapping.
+  - `viewProject` (`viewEngine/camera.ts`) is the projection (world -> screen tiles); the three.js camera (`fitViewCamera` / `frameBoard` in `viewEngine/three/stage.ts`) produces exactly the same mapping.
   - Each map is a `Board` (`components/mapParts.tsx`; `boardLayout` and `TILE_SIZE` in `viewEngine/board.ts`): the DOM tile grid stays flat and is laid on the floor by one CSS transform (`floorMatrix`), so clicks, hovers, borders, AoE highlights and the move line work unchanged. Models draw on a transparent canvas covering the board's box; upright DOM (floating text, bars over heads, door/portal markers, loot counts) is placed with `board.toScreen(x, y, height)`.
   - The key light is turned with the view (`keyLightDir`), so it always comes from the screen's upper left. Icons use their own unturned camera.
   - The forge's game view and `forge:sheet` (`--elev` to try another elevation) use the same view.

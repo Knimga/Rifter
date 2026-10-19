@@ -4,7 +4,7 @@ import { randInt } from './random';
 
 // ─── Tuning Constants ────────────────────────────────────────────────────────
 
-const BASE_HIT_CHANCE = 75;           // base % chance any attack lands
+const BASE_HIT_CHANCE = 80;           // base % chance any attack lands
 const DR_DIVISOR = 50;                // higher value = slower scaling of DR
 const DR_CAP = 0.75;                  // lower value = more threatening endgame damage
 const CRIT_MULTIPLIER = 2;
@@ -81,14 +81,14 @@ export function applyDR(
 // ─── Resolve ─────────────────────────────────────────────────────────────────
 
 /**
- * Roll whether an attack connects. Miss, dodge, parry and block each prevent the hit entirely;
- * glancing blow and crit are only rolled once the attack has landed.
+ * Roll whether an attack connects. Miss, dodge, parry and block each prevent the hit entirely; only
+ * melee attacks can be parried. Glancing blow and crit are only rolled once the attack has landed.
  */
-export function rollHit(offense: Offense, target: Stats): HitRoll {
+export function rollHit(offense: Offense, category: AttackCategory, target: Stats): HitRoll {
   const stopped = (outcome: HitOutcome): HitRoll => ({ outcome, crit: false, glancing: false });
   if (roll100() > BASE_HIT_CHANCE + offense.hit) return stopped('miss');
   if (roll100() <= target.dodge) return stopped('dodge');
-  if (roll100() <= target.parry) return stopped('parry');
+  if (category === 'melee' && roll100() <= target.parry) return stopped('parry');
   if (roll100() <= target.block) return stopped('block');
   return {
     outcome: 'hit',

@@ -2,9 +2,9 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 
 import { CLASSES } from '../data/classes';
 import { recomputeStats, type ActiveBuff, type ActiveHot, type ActiveDot } from '../data/stats';
-import { getGearArmorBonus, getGearBuffs, isShieldItem, isWeaponItem, generateLootDrop, type GearSlot, type GearSlots, type Item } from '../data/gear';
+import { getGearArmorBonus, getGearBuffs, isWeaponItem, generateLootDrop, type GearSlot, type GearSlots, type Item } from '../data/gear';
 import { isFull, addItem, canEquip, canUnequip, equipFromInventory, unequipToInventory, type Inventory } from '../data/inventory';
-import { AIM_TURN_LEAD_MS, OUT_OF_COMBAT_REGEN_INTERVAL_MS } from '../data/constants';
+import { AIM_TURN_LEAD_MS, COMBAT_TEXT_COLOR, OUT_OF_COMBAT_REGEN_INTERVAL_MS } from '../data/constants';
 import type { PartyMemberConfig } from '../data/party';
 import type { EnemyInstance } from '../data/enemies';
 import { withEnemyBuffs } from '../data/enemies';
@@ -13,7 +13,7 @@ import { SANCTUM, isSanctumWalkable } from '../data/sanctum';
 import { generateDungeon, objectTilesOf, spawnDungeonEnemies, zoneWalkable, type DungeonData, type ZoneData } from '../data/dungeonGen';
 import { DUNGEON_PRESETS } from '../data/dungeonPresets';
 import { startCombat, joinCombat, advanceTurn, applyTopOfRound, tickRound, getCurrentCombatant, deadPartyIndices, type CombatState, type RoundTick } from '../data/combat';
-import { MP_DAMAGE_COLOR, executeAction, toAction, tickDurations, unitKey, type ActionOutcome, type CombatUnit, type UnitChange } from '../data/abilityExecution';
+import { executeAction, toAction, tickDurations, unitKey, type ActionOutcome, type CombatUnit, type UnitChange } from '../data/abilityExecution';
 import type { UnitAim } from '../components/ModelLayer';
 import { findFollowerSpawns, computeFollowerPositions } from '../data/movementHelpers';
 import { useEnemyTurn, type EnemyAoePreview } from '../hooks/useEnemyTurn';
@@ -22,11 +22,14 @@ import { useFloatingText } from '../hooks/useFloatingText';
 import CharacterSheet from '../components/CharacterSheet';
 import SanctumMap from '../components/SanctumMap';
 import DungeonMap from '../components/DungeonMap';
-import TopBar from '../components/TopBar';
-import PanView from '../components/PanView';
-import BottomBar from '../components/BottomBar';
-import { type SlotContent } from '../components/ActionBar';
+import PanView, { type Insets } from '../components/PanView';
 import type { PartyTokenData } from '../components/mapParts';
+import Backdrop from '../components/ui/Backdrop';
+import RiftButton from '../components/ui/RiftButton';
+import ActionDock, { type SlotContent } from '../components/hud/ActionDock';
+import PartyRows from '../components/hud/PartyRows';
+import { heldGear } from '../components/characterModel';
+import TurnOrderStrip from '../components/hud/TurnOrderStrip';
 
 interface Props {
   party: PartyMemberConfig[];
@@ -67,6 +70,9 @@ const listId = (list: object) => {
   return id;
 };
 
+/** Screen space the HUD covers on each side (px): the map pans only within the area inside it. */
+const HUD_INSETS: Insets = { top: 84, right: 24, bottom: 164, left: 300 };
+
 const INITIAL_COMBAT: CombatState = {
   active: false,
   turnOrder: [],
@@ -78,8 +84,6 @@ const INITIAL_COMBAT: CombatState = {
 };
 
 export default function GameScreen({ party, setParty }: Props) {
-  // Phase 1: drive gameplay from the leader (party[0])
-  const { gear } = party[0];
   const [location, setLocation] = useState<'sanctum' | 'dungeon'>('sanctum');
   const [playerPos, setPlayerPos] = useState<Pos>(SANCTUM.playerStart);
   const [enemies, setEnemies] = useState<EnemyInstance[]>([]);
@@ -103,13 +107,12 @@ export default function GameScreen({ party, setParty }: Props) {
   const updateMembers = useCallback((fn: (m: MemberState, i: number) => MemberState, only?: (i: number) => boolean) =>
     setMembers(prev => prev.map((m, i) => (!only || only(i) ? fn(m, i) : m))), []);
   const partyHp = useMemo(() => members.map(m => m.hp), [members]);
-  const partyMp = useMemo(() => members.map(m => m.mp), [members]);
   const partyBuffs = useMemo(() => members.map(m => m.buffs), [members]);
   const partyHots = useMemo(() => members.map(m => m.hots), [members]);
   const partyDots = useMemo(() => members.map(m => m.dots), [members]);
   const [partySlots, setPartySlots] = useState<SlotContent[][]>(() =>
     party.map(m => {
-      const abilities = m.selectedClass ? CLASSES[m.selectedClass].abilities : [];
+      const abilities = CLASSES[m.selectedClass].abilities;
       const slots: SlotContent[] = ['weapon-attack', null, null, null, null];
       abilities.slice(0, 4).forEach((ability, i) => { slots[i + 1] = ability; });
       return slots;
@@ -117,10 +120,11 @@ export default function GameScreen({ party, setParty }: Props) {
   );
   const [partyActiveSlot, setPartyActiveSlot] = useState<(number | null)[]>(() => party.map(() => null));
   const [barViewIdx, setBarViewIdx] = useState(0);
+  // The unit under a hovered turn-order pill (enemy id or player-N), outlined on the map
+  const [hoveredCombatant, setHoveredCombatant] = useState<string | null>(null);
   // Where each unit last aimed an ability (unit id → tile + sequence): its model turns to face it
   const [unitAims, setUnitAims] = useState<Record<string, UnitAim>>({});
   const aimSeqRef = useRef(0);
-
 
   // ─── Per-member stats ────────────────────────────────────────────────────
 
@@ -131,16 +135,12 @@ export default function GameScreen({ party, setParty }: Props) {
     [party, buffsKey], // eslint-disable-line react-hooks/exhaustive-deps
   );
 
-  // Alias for the leader — keeps most existing code unchanged
-  const stats = partyAllStats[0];
-
-  // Active party member (current turn in combat; always leader out of combat)
+  // Active party member: whose turn it is in combat, the selected one (their action bar) out of it
   const currentCombatant = getCurrentCombatant(combat);
   const isPlayerTurn = combat.active && currentCombatant?.isPlayer === true;
   const activePartyIdx = combat.active ? (currentCombatant?.partyIndex ?? 0) : barViewIdx;
   const activePartyPos = activePartyIdx === 0 ? playerPos : (followerPositions[activePartyIdx - 1] ?? playerPos);
-  const activeStats = partyAllStats[activePartyIdx] ?? stats;
-  const activeGear = party[activePartyIdx]?.gear ?? gear;
+  const activeGear = party[activePartyIdx].gear;
   const activeWeapon = activeGear.mainhand && isWeaponItem(activeGear.mainhand) ? activeGear.mainhand : null;
   const activeMp = members[activePartyIdx]?.mp ?? 0;
 
@@ -156,29 +156,26 @@ export default function GameScreen({ party, setParty }: Props) {
 
   // Party members as drawn on the maps: the leader always, followers only while alive
   const partyPositions = [playerPos, ...followerPositions].slice(0, party.length);
-  const partyTokens: PartyTokenData[] = party.map((m, i) => {
+  const memberTokens: PartyTokenData[] = party.map((m, i) => ({
+    pos: partyPositions[i],
+    classKey: m.selectedClass,
+    hp: members[i].hp,
+    maxHp: partyAllStats[i].hp,
+    mp: members[i].mp,
+    maxMp: partyAllStats[i].mp,
+    partyIndex: i,
+    active: i === activePartyIdx,
     // Equipped items, as the member's 3D model holds them
-    const main = m.gear.mainhand && isWeaponItem(m.gear.mainhand) ? m.gear.mainhand : null;
-    const off = m.gear.offhand && isShieldItem(m.gear.offhand) ? m.gear.offhand : null;
-    return {
-      pos: partyPositions[i],
-      classKey: m.selectedClass!,
-      hp: members[i].hp,
-      maxHp: partyAllStats[i].hp,
-      mp: members[i].mp,
-      maxMp: partyAllStats[i].mp,
-      partyIndex: i,
-      active: i === activePartyIdx,
-      weapon: main ? { link: main.model, weaponType: main.weaponType } : undefined,
-      shield: off?.model,
-    };
-  }).filter(t => t.partyIndex === 0 || t.hp > 0);
+    ...heldGear(m.gear),
+  }));
+  // On the map: the leader always, followers only while alive (the HUD's party rows show everyone)
+  const partyTokens = memberTokens.filter(t => t.partyIndex === 0 || t.hp > 0);
 
   // Where the active mover can go this turn (tile key -> steps it costs), by the shared movement rules
   // (partyMoveTargets): walls, game objects (the portal) and enemies block the way, and nobody stops on an
   // occupied tile. The maps highlight exactly these; handleMove accepts only these.
   const moverPos = combat.active ? activePartyPos : playerPos;
-  const moverMovement = location === 'sanctum' ? stats.movement : combat.active ? combat.movementRemaining : activeStats.movement;
+  const moverMovement = combat.active ? combat.movementRemaining : partyAllStats[0].movement;
   const unitTilesKey = [...partyTokens.map(t => posKey(t.pos)), '|', ...zoneEnemies.filter(e => e.currentHp > 0).map(e => posKey(e.pos))].join(';');
   const moveTargets = useMemo(() => {
     const isWalkable = zone && dungeon ? zoneWalkable(dungeon, zone) : isSanctumWalkable;
@@ -271,9 +268,9 @@ export default function GameScreen({ party, setParty }: Props) {
       if (raw > 0) threatGain.set(i, (threatGain.get(i) ?? 0) + raw * (partyStatsRef.current[i]?.threatMultiplier ?? 1));
     };
     const showTick = (pos: Pos, tick: RoundTick) => {
-      if (tick.heal > 0) spawnFloat(pos.x, pos.y, `+${tick.heal}`, 'green');
-      if (tick.dotDamage > 0) spawnFloat(pos.x, pos.y, `-${tick.dotDamage}`, 'purple');
-      if (tick.mpDotDamage > 0) spawnFloat(pos.x, pos.y, `-${tick.mpDotDamage} MP`, MP_DAMAGE_COLOR);
+      if (tick.heal > 0) spawnFloat(pos.x, pos.y, `+${tick.heal}`, COMBAT_TEXT_COLOR.heal);
+      if (tick.dotDamage > 0) spawnFloat(pos.x, pos.y, `-${tick.dotDamage}`, COMBAT_TEXT_COLOR.dot);
+      if (tick.mpDotDamage > 0) spawnFloat(pos.x, pos.y, `-${tick.mpDotDamage} MP`, COMBAT_TEXT_COLOR.mpDamage);
       for (const [i, threat] of tick.dotSources) addThreat(i, threat);
     };
 
@@ -443,7 +440,7 @@ export default function GameScreen({ party, setParty }: Props) {
     }
 
     if (pickedCount === 0) {
-      spawnFloat(pos.x, pos.y, 'Inventory Full', '#ef4444');
+      spawnFloat(pos.x, pos.y, 'Inventory Full', COMBAT_TEXT_COLOR.warn);
       return;
     }
 
@@ -455,7 +452,7 @@ export default function GameScreen({ party, setParty }: Props) {
         ? { ...z.droppedItems, [key]: remaining }
         : Object.fromEntries(Object.entries(z.droppedItems).filter(([k]) => k !== key)),
     }));
-    spawnFloat(pos.x, pos.y, '+', '#facc15');
+    spawnFloat(pos.x, pos.y, '+', COMBAT_TEXT_COLOR.loot);
   }, [zone, inventory, spawnFloat, updateCurrentZone]);
 
   const lootPickupRef = useRef(handleLootPickup);
@@ -469,7 +466,7 @@ export default function GameScreen({ party, setParty }: Props) {
 
   const handleEquipItem = useCallback((inventoryIdx: number, charIdx: number) => {
     const member = party[charIdx];
-    if (!member?.selectedClass || !canEquip(CLASSES[member.selectedClass], inventory[inventoryIdx])) return;
+    if (!member || !canEquip(CLASSES[member.selectedClass], inventory[inventoryIdx])) return;
     applyGearChange(charIdx, equipFromInventory(inventory, member.gear, inventoryIdx));
   }, [inventory, party, applyGearChange]);
 
@@ -635,7 +632,7 @@ export default function GameScreen({ party, setParty }: Props) {
     const partyUnit = (i: number): CombatUnit => ({
       ref: { side: 'party', idx: i },
       name: party[i]?.characterName ?? `Party[${i}]`,
-      stats: partyAllStats[i] ?? activeStats,
+      stats: partyAllStats[i],
       pos: partyPosRef.current[i],
     });
     const caster = partyUnit(activePartyIdx);
@@ -672,7 +669,7 @@ export default function GameScreen({ party, setParty }: Props) {
     applyActionOutcome(executeAction(caster, action, targets), caster, targetPos);
     clearActiveSlot();
     if (combat.active) setCombat(prev => ({ ...prev, playerActedThisTurn: true }));
-  }, [combat.active, isPlayerTurn, combat.playerActedThisTurn, activePartyIdx, activeAction, zoneEnemies, activePartyPos, activeMp, activeStats, partyAllStats, partyPositions, party, zone, applyActionOutcome]);
+  }, [combat.active, isPlayerTurn, combat.playerActedThisTurn, activePartyIdx, activeAction, zoneEnemies, activePartyPos, activeMp, partyAllStats, partyPositions, party, zone, applyActionOutcome]);
 
   // ─── Enemy AI turn ───────────────────────────────────────────────────────
 
@@ -710,25 +707,20 @@ export default function GameScreen({ party, setParty }: Props) {
   const activeTarget = activeAction?.target ?? null;
   const isSupportAction = !!activeAction?.effects.some(e => e.type === 'heal' || e.type === 'buff' || e.type === 'hot');
 
-  return (
-    <div className="h-screen bg-gray-800 text-gray-100 flex flex-col overflow-hidden">
-      <TopBar
-        stats={stats}
-        location={location}
-        zone={zone}
-        party={party}
-        partyAllStats={partyAllStats}
-        partyHp={partyHp}
-        partyMp={partyMp}
-        combat={combat}
-        activePartyIdx={activePartyIdx}
-        zoneEnemies={zoneEnemies}
-        onShowCharSheet={() => setShowCharSheet(true)}
-      />
+  // ─── HUD state ───────────────────────────────────────────────────────────
+  const enemyActing = combat.active && !!currentCombatant && !currentCombatant.isPlayer;
+  // The action bar's member: the acting one in combat (none on an enemy's turn), the selected one out of it
+  const dockIdx = combat.active ? (isPlayerTurn ? activePartyIdx : null) : barViewIdx;
+  const dockSlotContent = dockIdx !== null ? partySlots[dockIdx]?.[partyActiveSlot[dockIdx] ?? -1] ?? null : null;
+  const armedName = dockSlotContent === 'weapon-attack' ? (activeWeapon?.name ?? 'Attack') : dockSlotContent?.name;
+  const locationName = location === 'sanctum' ? 'The Sanctum' : zone ? `Dungeon · Zone ${zone.id + 1}` : '';
 
-      {/* The map: drag with the right mouse button to pan (PanView keeps it in view) */}
-      <div className="flex-1 min-h-0">
-        <PanView resetKey={`${location}:${zone?.id ?? ''}`}>
+  return (
+    <Backdrop variant="game" className="h-screen">
+
+      {/* The map, full screen: drag with the right mouse button to pan (kept within the area the HUD leaves free) */}
+      <div className="absolute inset-0">
+        <PanView resetKey={`${location}:${zone?.id ?? ''}`} insets={HUD_INSETS}>
           {location === 'sanctum' && (
             <SanctumMap
               playerPos={playerPos}
@@ -756,7 +748,7 @@ export default function GameScreen({ party, setParty }: Props) {
               onDoorClick={handleDoorClick}
               activeTarget={activeTarget}
               activeAbilityArea={activeAction?.area}
-              aoeHighlightColor={isSupportAction ? 'green' : 'red'}
+              areaTone={isSupportAction ? 'help' : 'harm'}
               actionRange={activeAction?.range ?? 0}
               onAbilityUse={handlePlayerAttack}
               onAbilityDeselect={clearActiveSlot}
@@ -780,32 +772,83 @@ export default function GameScreen({ party, setParty }: Props) {
               enemyTargetPartyIdx={enemyTargetPartyIdx}
               droppedItems={zone?.droppedItems}
               onLootClick={handleLootPickup}
+              highlightUnitId={hoveredCombatant}
             />
           )}
         </PanView>
       </div>
 
-      <BottomBar
-        party={party}
-        partySlots={partySlots}
-        partyActiveSlot={partyActiveSlot}
-        partyAllStats={partyAllStats}
-        barViewIdx={barViewIdx}
-        setBarViewIdx={setBarViewIdx}
-        onSlotsChange={(i, slots) => setPartySlots(prev => prev.map((s, idx) => idx === i ? slots : s))}
-        onActiveSlotChange={(i, slot) => setPartyActiveSlot(prev => prev.map((s, idx) => idx === i ? slot : s))}
-        combat={combat}
-        activePartyIdx={activePartyIdx}
-        currentCombatant={currentCombatant}
-        activeStats={activeStats}
-        isPlayerTurn={isPlayerTurn}
-        onEndTurn={handleEndTurn}
-      />
+      {/* ─── HUD ─── */}
+
+      {/* Where the party is */}
+      <div className="absolute top-5 left-6 z-30 rf-label pointer-events-none">{locationName}</div>
+
+      {/* Turn order */}
+      {combat.active && (
+        <div className="absolute top-5 left-1/2 -translate-x-1/2 z-30" style={{ maxWidth: 'calc(100% - 520px)' }}>
+          <TurnOrderStrip
+            round={combat.round}
+            turnOrder={combat.turnOrder}
+            currentTurnIndex={combat.currentTurnIndex}
+            enemies={zoneEnemies}
+            partyNames={party.map(m => m.characterName)}
+            onHover={setHoveredCombatant}
+          />
+        </div>
+      )}
+
+      {/* Menus */}
+      <div className="absolute top-5 right-6 z-30 flex gap-2">
+        <RiftButton size="sm" aria-label="Party (I)" onClick={() => setShowCharSheet(true)}>Party</RiftButton>
+      </div>
+
+      {/* The party */}
+      <div className="absolute left-6 bottom-6 z-30">
+        <PartyRows
+          rows={memberTokens.map((t, i) => ({ token: t, name: party[i].characterName }))}
+          selectedIdx={activePartyIdx}
+          canSelect={!combat.active}
+          onSelect={setBarViewIdx}
+        />
+      </div>
+
+      {/* An ability is armed: how to use or cancel it */}
+      {armedName && (
+        <div role="status" className="rf-hud absolute left-1/2 -translate-x-1/2 bottom-[144px] z-30 px-4 py-2 whitespace-nowrap text-xs tracking-[0.04em] text-rift-soft">
+          {armedName} — choose a target. Click it again or press Esc to cancel.
+        </div>
+      )}
+
+      {/* The action bar, or on an enemy's turn, who is acting */}
+      {dockIdx !== null && party[dockIdx] && (
+        <div className="absolute left-1/2 -translate-x-1/2 bottom-6 z-30">
+          <ActionDock
+            member={party[dockIdx]}
+            stats={partyAllStats[dockIdx]}
+            mp={members[dockIdx]?.mp ?? 0}
+            slots={partySlots[dockIdx] ?? []}
+            onSlotsChange={slots => setPartySlots(prev => prev.map((s, idx) => idx === dockIdx ? slots : s))}
+            armedSlot={partyActiveSlot[dockIdx] ?? null}
+            onArmedSlotChange={slot => setPartyActiveSlot(prev => prev.map((s, idx) => idx === dockIdx ? slot : s))}
+            inCombat={combat.active}
+            canAct={!combat.active || (isPlayerTurn && !combat.playerActedThisTurn)}
+            movementLeft={combat.movementRemaining}
+            onEndTurn={combat.active ? handleEndTurn : undefined}
+          />
+        </div>
+      )}
+      {enemyActing && currentCombatant && (
+        <div role="status" className="rf-hud absolute left-1/2 -translate-x-1/2 bottom-6 z-30 flex items-baseline gap-3.5 px-8 py-5">
+          <span className="font-display text-lg tracking-[0.06em] text-rift-ink">{currentCombatant.name}</span>
+          <span className="text-xs text-rift-muted">is acting</span>
+        </div>
+      )}
 
       {showCharSheet && (
         <CharacterSheet
           party={party}
           partyHp={partyHp}
+          partyMp={members.map(m => m.mp)}
           partyStats={partyAllStats}
           inventory={inventory}
           onClose={() => setShowCharSheet(false)}
@@ -813,6 +856,6 @@ export default function GameScreen({ party, setParty }: Props) {
           onUnequipItem={handleUnequipItem}
         />
       )}
-    </div>
+    </Backdrop>
   );
 }

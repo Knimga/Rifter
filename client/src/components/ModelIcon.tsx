@@ -17,7 +17,7 @@ export default function ModelIcon({ link, alt, className }: { link: ModelLink; a
   useEffect(() => {
     if (!design || url) return;
     let live = true;
-    import('../forge/three/icons').then(({ renderItemIcon }) => {
+    import('../viewEngine/three/icons').then(({ renderItemIcon }) => {
       if (!cache.has(design)) cache.set(design, renderItemIcon(design));
       if (live) setRendered((n) => n + 1);
     });

@@ -1,4 +1,5 @@
 import { CLASSES } from './classes';
+import { capitalize } from './detailStrings';
 import type { ClassKey, ClassData, Passive, ScalingPassive } from './classes';
 
 //
@@ -161,7 +162,6 @@ interface StatAccessor {
   min?: number;       // lower clamp when buffs modify the stat (default 0)
 }
 
-const capitalize = (k: string) => k[0].toUpperCase() + k.slice(1);
 const EMPTY_ELEMENT_STATS: ElementStats = { hit: 0, crit: 0, damage: 0, resistance: 0, penetration: 0 };
 
 const scalar = (key: ScalarStatKey, opts: Partial<StatAccessor> = {}): StatAccessor =>
@@ -283,7 +283,7 @@ export interface EnemyClassStats {
 
 export type PlayerStatInput = {
   mode: 'player';
-  classKey: ClassKey | null;
+  classKey: ClassKey;
   gearArmorBonus?: number;
   attrBuffs?: Partial<Record<AttributeKey, number>>;
 };
@@ -386,19 +386,19 @@ function applyScalingAndPctPassives(
 }
 
 export function calculateStats(input: PlayerStatInput | EnemyStatInput): Stats {
-  // Players: their class (none yet in the builder), level 1, armor from gear. Enemies: their class, level
+  // Players: their class, level 1, armor from gear. Enemies: their class, level
   // and level-scaled armor, plus their auto-allocated attribute points. Players have no point-buy.
-  const classData: EnemyClassStats | ClassData | null = input.mode === 'player' ? (input.classKey ? CLASSES[input.classKey] : null) : input.classData;
+  const classData: EnemyClassStats | ClassData = input.mode === 'player' ? CLASSES[input.classKey] : input.classData;
   const level = input.mode === 'player' ? 1 : input.level;
   const armorBonus = input.mode === 'player' ? (input.gearArmorBonus ?? 0) : input.classData.baseArmor + input.classData.armorPerLevel * level;
   const movement = 3;
 
   const attrs = Object.fromEntries(ATTRIBUTE_KEYS.map(key => [key, Math.max(0,
-    BASE_ATTRIBUTES + (classData?.attributes[key] ?? 0) + (input.mode === 'enemy' ? input.pointsSpent[key] : 0) + (input.attrBuffs?.[key] ?? 0),
+    BASE_ATTRIBUTES + (classData.attributes[key] ?? 0) + (input.mode === 'enemy' ? input.pointsSpent[key] : 0) + (input.attrBuffs?.[key] ?? 0),
   )])) as Record<AttributeKey, number>;
-  const skills = Object.fromEntries(SKILL_KEYS.map(key => [key, BASE_SKILLS + (classData?.skills?.[key] ?? 0)])) as Record<SkillKey, number>;
-  const passives = classData?.passives ?? {};
-  const scalingPassives = classData?.scalingPassives ?? [];
+  const skills = Object.fromEntries(SKILL_KEYS.map(key => [key, BASE_SKILLS + (classData.skills?.[key] ?? 0)])) as Record<SkillKey, number>;
+  const passives = classData.passives ?? {};
+  const scalingPassives = classData.scalingPassives ?? [];
 
   let stats = buildRawStats(attrs, skills, level, armorBonus, movement);
   stats = applyFlatPassives(stats, passives);

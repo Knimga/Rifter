@@ -32,7 +32,7 @@ export const rad = (deg: number) => (deg * Math.PI) / 180;
  * World point -> screen space of an orthographic view, in TILES: [right, down, depth toward the camera].
  * World x = grid x, world z = grid y, world y = height. With yaw θ and elevation e, screen right is the
  * ground direction (cosθ, sinθ) and up the screen is (sinθ, -cosθ) foreshortened by sin e; height rises
- * by cos e. The three.js game camera produces exactly this mapping (fitViewCamera in forge/three/stage.ts).
+ * by cos e. The three.js game camera produces exactly this mapping (fitViewCamera in viewEngine/three/stage.ts).
  */
 export function viewProject(p: Vec3, view: ViewAngles = GAME_CAMERA): Vec3 {
   const e = rad(view.elevationDeg), t = rad(view.yawDeg);

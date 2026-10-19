@@ -1,9 +1,9 @@
 import * as THREE from 'three';
-import type { Model } from '../core/types';
-import { shortestAngle, smoothYaw, yawFromGridMove } from '../core/facing';
-import { lootYaw } from '../core/stage-config';
-import { GAME_CAMERA } from '../../viewEngine/camera';
-import type { BoardLayout } from '../../viewEngine/board';
+import type { Model } from '../../forge/core/types';
+import { shortestAngle, smoothYaw, yawFromGridMove } from '../../forge/core/facing';
+import { lootYaw } from '../../forge/core/stage-config';
+import { GAME_CAMERA } from '../camera';
+import type { BoardLayout } from '../board';
 import { addForgeLights, frameBoard, makeGameCamera, layItemOnGround } from './stage';
 import { animateParts, disposeObject, isAnimated, toThree } from './toThree';
 

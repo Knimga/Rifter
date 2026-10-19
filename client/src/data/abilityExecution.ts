@@ -1,7 +1,7 @@
 import type { Ability, Effect } from './classes';
 import type { ActiveBuff, ActiveDot, ActiveHot, BuffableStat, Stats } from './stats';
 import type { DamageElement, WeaponItem } from './gear';
-import { DAMAGE_ELEMENT_COLOR } from './constants';
+import { COMBAT_TEXT_COLOR, DAMAGE_ELEMENT_COLOR } from './constants';
 import { applyDR, getOffense, rollDamage, rollHit, type HitOutcome, type Offense } from './attackResolution';
 import { randInt } from './random';
 import type { Pos } from './dungeonHelpers';
@@ -75,7 +75,6 @@ export function buffMagnitude(eff: BuffEffect): number {
 export const damageThreat = (amount: number, toMp?: boolean) => (toMp ? amount / 2 : amount);
 
 /** Floating-text color for MP damage. */
-export const MP_DAMAGE_COLOR = '#60a5fa';
 
 /**
  * Sum one round of DoT damage against the target (after DR), split into HP and MP damage, with
@@ -157,17 +156,17 @@ export function executeAction(caster: CombatUnit, action: Ability, targets: Comb
         const amount = randInt(eff.minDamage, eff.maxDamage);
         if (eff.damagesMP) {
           c.mpSpent += amount;
-          float(recipient, `-${amount} MP`, MP_DAMAGE_COLOR);
+          float(recipient, `-${amount} MP`, COMBAT_TEXT_COLOR.mpDamage);
         } else {
           c.damage += amount;
-          float(recipient, `-${amount}`, 'red');
+          float(recipient, `-${amount}`, COMBAT_TEXT_COLOR.damage);
         }
         break;
       }
       case 'heal': {
         const amount = Math.max(0, randInt(eff.minHeal, eff.maxHeal) + caster.stats.healing) * healMultiplier;
         c.heal += amount;
-        if (amount > 0) float(recipient, `+${amount}`, 'green');
+        if (amount > 0) float(recipient, `+${amount}`, COMBAT_TEXT_COLOR.heal);
         threat += amount * 1.5;
         break;
       }
@@ -176,12 +175,12 @@ export function executeAction(caster: CombatUnit, action: Ability, targets: Comb
           name: action.name, damageElement: eff.damageElement,
           healPerRound: Math.floor(eff.healPerRound + caster.stats.healing / 2), roundsRemaining: eff.rounds,
         });
-        float(recipient, '+HoT', 'green');
+        float(recipient, '+HoT', COMBAT_TEXT_COLOR.heal);
         break;
       case 'buff':
       case 'debuff':
         c.buffs.push(...effectToBuffs(eff, `${action.name}-${unitKey(recipient.ref)}`, action.name));
-        float(recipient, `${action.name}!`, 'green');
+        float(recipient, `${action.name}!`, COMBAT_TEXT_COLOR.heal);
         threat += buffMagnitude(eff);
         break;
       case 'threat':
@@ -203,10 +202,10 @@ export function executeAction(caster: CombatUnit, action: Ability, targets: Comb
     const offenseFor = (el: DamageElement): Offense => el === primaryElement ? offense : getOffense(caster.stats, category, el);
 
     for (const target of targets) {
-      const hit = rollHit(offense, target.stats);
+      const hit = rollHit(offense, category, target.stats);
       if (hit.outcome !== 'hit') {
         log(target, `${hit.outcome.toUpperCase()} (${primaryElement})`);
-        float(target, STOPPED_TEXT[hit.outcome], 'white');
+        float(target, STOPPED_TEXT[hit.outcome], COMBAT_TEXT_COLOR.stopped);
         continue;
       }
 
@@ -220,7 +219,7 @@ export function executeAction(caster: CombatUnit, action: Ability, targets: Comb
         if (eff.damagesMP) dealtMp += dmg.final;
         else dealt += dmg.final;
         log(target, `${hit.crit ? 'CRIT' : 'HIT'}${hit.glancing ? ' (glancing)' : ''} ${dmg.final}${eff.damagesMP ? ' MP' : ''} (${eff.damageElement}) | roll=${dmg.roll} +dmg=${off.damage} raw=${dmg.raw} -DR=${dmg.raw - dmg.final}`);
-        float(target, `-${dmg.final}${eff.damagesMP ? ' MP' : ''}${suffix}`, eff.damagesMP ? MP_DAMAGE_COLOR : DAMAGE_ELEMENT_COLOR[eff.damageElement]);
+        float(target, `-${dmg.final}${eff.damagesMP ? ' MP' : ''}${suffix}`, eff.damagesMP ? COMBAT_TEXT_COLOR.mpDamage : DAMAGE_ELEMENT_COLOR[eff.damageElement]);
       }
       if (dealt > 0 || dealtMp > 0) {
         c.damage += dealt;
@@ -243,7 +242,7 @@ export function executeAction(caster: CombatUnit, action: Ability, targets: Comb
         // One tick's worth of threat on application; later ticks add threat via sourcePartyIdx
         threat += damageThreat(dotEffect.damagePerRound, dotEffect.damagesMP);
       }
-      if (dotEffects.length > 0 && damageEffects.length === 0) float(target, 'Hit!', 'purple');
+      if (dotEffects.length > 0 && damageEffects.length === 0) float(target, 'Hit!', COMBAT_TEXT_COLOR.dot);
       if (debuffEffect) {
         c.buffs.push(...effectToBuffs(debuffEffect, `${action.name}-${unitKey(target.ref)}`, action.name));
         threat += buffMagnitude(debuffEffect);

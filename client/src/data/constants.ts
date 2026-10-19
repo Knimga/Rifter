@@ -1,4 +1,4 @@
-import type { DamageElement } from './gear';
+import type { AttackCategory, DamageElement, Rarity } from './gear';
 
 /* ----- UI CONSTANTS ----- */
 
@@ -6,34 +6,48 @@ import type { DamageElement } from './gear';
 export const SANCTUM_FLOOR_COLOR = '#1e2030';
 export const SANCTUM_WALL_COLOR = '#0d0e18';
 
-/** Color of every party member's map token and name. Classes no longer have colors; temporary until a new scheme. */
-export const PARTY_MEMBER_COLOR = '#ffffff';
+// UI colors are CSS variables of the palette in index.css (its one source); these name them for TS.
 
+/** Each damage element's color (text, floating damage, ability washes). */
 export const DAMAGE_ELEMENT_COLOR: Record<DamageElement, string> = {
-  slashing:    'white',
-  piercing:    'white',
-  bludgeoning: 'white',
-  fire:        'firebrick',
-  ice:         'lightblue',
-  lightning:   'darkturquoise',
-  nature:      'forestgreen',
-  shadow:      'blueviolet',
-  holy:        'gold',
-  poison:      'olivedrab'
+  slashing:    'var(--el-physical)',
+  piercing:    'var(--el-physical)',
+  bludgeoning: 'var(--el-physical)',
+  fire:        'var(--el-fire)',
+  ice:         'var(--el-ice)',
+  lightning:   'var(--el-lightning)',
+  nature:      'var(--el-nature)',
+  shadow:      'var(--el-shadow)',
+  holy:        'var(--el-holy)',
+  poison:      'var(--el-poison)',
 };
 
-export const DAMAGE_ELEMENT_DARK_COLOR: Record<DamageElement, string> = {
-  slashing:    'dimgray',
-  piercing:    'dimgray',
-  bludgeoning: 'dimgray',
-  fire:        '#300300',
-  ice:         '#165e80',
-  lightning:   '#007173',
-  nature:      '#0f400f',
-  shadow:      '#21072b',
-  holy:        '#474701',
-  poison:      '#021f00'
+/** Item name color by rarity. */
+export const RARITY_COLOR: Record<Rarity, string> = {
+  Common: 'var(--rarity-common)',
+  Quality: 'var(--rarity-quality)',
+  Superior: 'var(--rarity-superior)',
+  Rare: 'var(--rarity-rare)',
+  Exquisite: 'var(--rarity-exquisite)',
 };
+
+/** Attack category colors (the party window's offense table). */
+export const ATTACK_CATEGORY_COLOR: Record<AttackCategory, string> = {
+  melee: 'var(--cat-melee)',
+  ranged: 'var(--cat-ranged)',
+  magic: 'var(--cat-magic)',
+};
+
+/** Floating combat text colors (damage takes its element's color). */
+export const COMBAT_TEXT_COLOR = {
+  damage: 'var(--tone-damage)',
+  mpDamage: 'var(--tone-mp-damage)',
+  heal: 'var(--tone-heal)',
+  dot: 'var(--tone-debuff)',
+  stopped: 'var(--rift-bright)',  // missed, dodged, parried, blocked
+  loot: 'var(--rift-loot)',
+  warn: 'var(--rift-warn)',
+} as const;
 
 /* ----- GAMEPLAY CONSTANTS ----- */
 

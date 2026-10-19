@@ -98,6 +98,7 @@ export interface ClassData {
 /** A class's level-1 kit (no affixes), built by startingGear() in party.ts. */
 export interface StartingGear {
   chest: ArmorProficiency;          // armor type of the starting chest piece
+  boots: ArmorProficiency;          // armor type of starting boots
   weapon: WeaponType;
   weaponElement?: DamageElement;    // fixed element for magic weapons (otherwise the weapon type's default)
   shield?: ArmorProficiency;        // starting shield type, if any
@@ -111,12 +112,12 @@ export const CLASSES: Record<ClassKey, ClassData> = {
     attributes: { strength: 3, toughness: 4, finesse: 1, mind: 2, spirit: 4, speed: 0 },
     skills: { redoubt: 4, devotion: 4, expertise: 2, spellcraft: 2 },
     passives: {
-      block:   { name: 'Defender',  flat: 3 },
+      block:   { name: 'Defender',  flat: 5 },
       healing: { name: 'Protector', flat: 3 },
     },
     armorProficiencies: ['Medium', 'Heavy'],
     weaponProficiencies: ['1h Swords', '1h Maces', 'Shields'],
-    startingGear: { chest: 'Heavy', weapon: '1h Swords', shield: 'Heavy' },
+    startingGear: { chest: 'Heavy', boots: 'Heavy', weapon: '1h Swords', shield: 'Heavy' },
     model: 'character.knight',
     abilities: [
       {
@@ -153,12 +154,12 @@ export const CLASSES: Record<ClassKey, ClassData> = {
     attributes: { strength: 1, toughness: 2, finesse: 6, mind: 1, spirit: 0, speed: 4 },
     skills: { perception: 2, stealth: 4, expertise: 3, evasion: 3 },
     passives: {
-      dodge:     { name: 'Slippery',    flat: 3 },
-      meleeCrit: { name: 'Opportunist', flat: 3 },
+      dodge:     { name: 'Slippery',    flat: 5 },
+      meleeCrit: { name: 'Opportunist', flat: 5 },
     },
     armorProficiencies: ['Light'],
     weaponProficiencies: ['Daggers'],
-    startingGear: { chest: 'Light', weapon: 'Daggers' },
+    startingGear: { chest: 'Light', boots: 'Light', weapon: 'Daggers' },
     model: 'character.rogue',
     abilities: [
       {
@@ -196,12 +197,12 @@ export const CLASSES: Record<ClassKey, ClassData> = {
     attributes: { strength: 5, toughness: 5, finesse: 2, mind: 0, spirit: 0, speed: 2 },
     skills: { redoubt: 4, evasion: 4, expertise: 4 },
     passives: {
-      meleeDamage: { name: 'Fury',    flat: 2 },
+      glancingBlow: { name: 'Shrug It Off', flat: 10 },
       movement:    { name: 'Rush In', flat: 1 },
     },
     armorProficiencies: ['Light', 'Medium'],
     weaponProficiencies: ['2h Swords', '2h Maces', '2h Axes'],
-    startingGear: { chest: 'Medium', weapon: '2h Axes' },
+    startingGear: { chest: 'Medium', boots: 'Medium', weapon: '2h Axes' },
     model: 'character.brute',
     abilities: [
       {
@@ -242,7 +243,7 @@ export const CLASSES: Record<ClassKey, ClassData> = {
     },
     armorProficiencies: ['Cloth'],
     weaponProficiencies: ['Staves', 'Daggers', 'Wands'],
-    startingGear: { chest: 'Cloth', weapon: 'Staves', weaponElement: 'fire' },
+    startingGear: { chest: 'Cloth', boots: 'Cloth', weapon: 'Staves', weaponElement: 'fire' },
     model: 'character.arcanist',
     abilities: [
       {
@@ -294,12 +295,12 @@ export const CLASSES: Record<ClassKey, ClassData> = {
     attributes: { strength: 0, toughness: 2, finesse: 7, mind: 2, spirit: 1, speed: 2 },
     skills: { perception: 4, stealth: 2, expertise: 4, evasion: 2 },
     passives: {
-      rangedHit:    { name: 'Eagle Eye', flat: 3 },
-      rangedDamage: { name: 'Marksman',  flat: 2 },
+      rangedHit:    { name: 'Eagle Eye', flat: 5 },
+      rangedDamage: { name: 'Marksman',  flat: 3 },
     },
     armorProficiencies: ['Light'],
     weaponProficiencies: ['Bows', 'Crossbows'],
-    startingGear: { chest: 'Light', weapon: 'Bows' },
+    startingGear: { chest: 'Light', boots: 'Light', weapon: 'Bows' },
     model: 'character.archer',
     abilities: [
       {
@@ -312,7 +313,7 @@ export const CLASSES: Record<ClassKey, ClassData> = {
         attackCategory: 'ranged',
         useWeapon: true,
         effects: [
-          { type: 'damage', appliesTo: 'target', damageElement: 'piercing', minDamage: 8, maxDamage: 8 },
+          { type: 'damage', appliesTo: 'target', damageElement: 'piercing', minDamage: 5, maxDamage: 5 },
         ],
       },
       {
@@ -343,7 +344,7 @@ export const CLASSES: Record<ClassKey, ClassData> = {
     },
     armorProficiencies: ['Light', 'Medium'],
     weaponProficiencies: ['Daggers', '1h Maces', 'Wands', 'Staves', 'Shields'],
-    startingGear: { chest: 'Medium', weapon: 'Wands', weaponElement: 'nature', shield: 'Medium' },
+    startingGear: { chest: 'Medium', boots: 'Medium', weapon: 'Wands', weaponElement: 'nature', shield: 'Medium' },
     model: 'character.primalist',
     abilities: [
       {
@@ -366,7 +367,7 @@ export const CLASSES: Record<ClassKey, ClassData> = {
         target: 'enemy',
         attackCategory: 'magic',
         effects: [
-          { type: 'damage', appliesTo: 'target', damageElement: 'nature', minDamage: 6, maxDamage: 9 },
+          { type: 'damage', appliesTo: 'target', damageElement: 'nature', minDamage: 7, maxDamage: 10 },
         ],
       },
     ],
@@ -380,11 +381,11 @@ export const CLASSES: Record<ClassKey, ClassData> = {
     skills: { spellcraft: 6, devotion: 2, perception: 2, stealth: 2 },
     passives: {
       shadowDamage: { name: 'Dark Mark', flat: 3 },
-      magicHit:     { name: 'Spite',     flat: 3 },
+      magicHit:     { name: 'Spite',     flat: 5 },
     },
     armorProficiencies: ['Cloth'],
     weaponProficiencies: ['Staves', 'Daggers', 'Wands'],
-    startingGear: { chest: 'Cloth', weapon: 'Wands', weaponElement: 'shadow' },
+    startingGear: { chest: 'Cloth', boots: 'Cloth', weapon: 'Wands', weaponElement: 'shadow' },
     model: 'character.occultist',
     abilities: [
       {

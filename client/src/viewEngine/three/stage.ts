@@ -1,8 +1,8 @@
 import * as THREE from 'three';
-import type { Model } from '../core/types';
-import { ICON_CAMERA, ITEM_GROUND_PITCH, LIGHT, itemRestLift, keyLightDir } from '../core/stage-config';
-import { GAME_CAMERA, type ViewAngles } from '../../viewEngine/camera';
-import type { BoardLayout } from '../../viewEngine/board';
+import type { Model } from '../../forge/core/types';
+import { ICON_CAMERA, ITEM_GROUND_PITCH, LIGHT, itemRestLift, keyLightDir } from '../../forge/core/stage-config';
+import { GAME_CAMERA, type ViewAngles } from '../camera';
+import type { BoardLayout } from '../board';
 
 /**
  * Lights matching stage-config. Add to any scene (game, builder page, icon renderer). `view`: the view

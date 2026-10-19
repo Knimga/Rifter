@@ -50,18 +50,18 @@ export interface WeaponTypeData {
 
 export const WEAPON_TYPE_DATA: Partial<Record<WeaponType, WeaponTypeData>> = {
   'Daggers': {
-    baseDamage: { min: 3, max: 6 },
+    baseDamage: { min: 4, max: 7 },
     range: 1,
     defaultAttackCategory: 'melee',
     defaultDamageElement: 'piercing',
-    implicits: { statKey: 'meleeCrit', baseValue: 4, growthPerLevel: 0.5 },
+    implicits: { statKey: 'meleeCrit', baseValue: 5, growthPerLevel: 0.5 },
     invalidAffixes: [
       'threatMultiplier', 'healing', 'glancingBlow', 'devotion', 'redoubt',
       ...rangedStats, ...nonWeaponAffixes
     ],
   },
   '1h Swords': {
-    baseDamage: { min: 4, max: 8 },
+    baseDamage: { min: 5, max: 9 },
     range: 1,
     defaultAttackCategory: 'melee',
     defaultDamageElement: 'slashing',
@@ -82,7 +82,7 @@ export const WEAPON_TYPE_DATA: Partial<Record<WeaponType, WeaponTypeData>> = {
     ],
   },
   '1h Maces': {
-    baseDamage: { min: 5, max: 8 },
+    baseDamage: { min: 6, max: 9 },
     range: 1,
     defaultAttackCategory: 'melee',
     defaultDamageElement: 'bludgeoning',
@@ -104,7 +104,7 @@ export const WEAPON_TYPE_DATA: Partial<Record<WeaponType, WeaponTypeData>> = {
     ],
   },
   '1h Axes': {
-    baseDamage: { min: 3, max: 9 },
+    baseDamage: { min: 4, max: 10 },
     range: 1,
     defaultAttackCategory: 'melee',
     defaultDamageElement: 'slashing',

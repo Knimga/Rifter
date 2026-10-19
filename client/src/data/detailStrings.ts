@@ -1,5 +1,5 @@
 import { statSuffix, type AttributeKey, type BuffableStat, type DamageElement, type SkillKey } from "./stats";
-import type { Effect, Passive, ScalingPassive } from "./classes";
+import type { Effect } from "./classes";
 import type { GearSlot } from "./gear";
 
 export const AttributeTooltips: Record<AttributeKey, string> = {
@@ -35,6 +35,16 @@ export const SLOT_LABEL: Record<GearSlot, string> = {
     mainhand: 'Main Hand', offhand: 'Off Hand',
 };
 
+/** First letter upper-case: 'perception' → 'Perception'. A function declaration (hoisted), so stats.ts can use it at load despite the import cycle. */
+export function capitalize(s: string): string {
+    return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+/** Every word's first letter upper-case, the rest as typed: "mary-kate o'neil" → "Mary-Kate O'Neil". */
+export function capitalizeWords(s: string): string {
+    return s.replace(/(^|[\s'’-])(\p{L})/gu, (_, a: string, b: string) => a + b.toUpperCase());
+}
+
 /** 'meleeCrit' → 'Melee Crit', 'hpRegen' → 'HP Regen'. */
 export function formatStatLabel(key: string): string {
     return key.replace('Bonus', '').replace(/([A-Z])/g, ' $1').trim()
@@ -48,36 +58,22 @@ export function formatModifier(stat: string, value: number, percent = false): st
     return `${sign}${Math.abs(value)}${percent ? '%' : statSuffix(stat)} ${formatStatLabel(stat)}`;
 }
 
-export function passiveBonusText(p: Passive, key: string): string {
-    const statKey = key.replace('Bonus', '');
-    const label = formatStatLabel(key);
-    const suffix = statSuffix(statKey);
-    const parts: string[] = [];
-    if (p.flat)    parts.push(`+${p.flat}${suffix}`);
-    if (p.percent) parts.push(`+${p.percent}%`);
-    return `${parts.join(' / ')} ${label}`;
-}
-
-export function scalingPassiveText(sp: ScalingPassive): string {
-    const pct = Math.round(sp.factor * 100);
-    const src = sp.source === 'level' ? 'Level' : sp.source.charAt(0).toUpperCase() + sp.source.slice(1);
-    return `${pct}% of ${src} → ${formatStatLabel(sp.targetKey)}`;
-}
-
-// ─── Effect descriptions (shared by ability tooltips and the builder's ability panes) ───
+// ─── Effect descriptions (ability cards and item tooltips) ───
 
 export type EffectTone = 'base' | 'damage' | 'mpDamage' | 'dot' | 'heal' | 'hot' | 'buff' | 'debuff' | 'threat';
 
-export const EFFECT_TONE_CLASS: Record<EffectTone, string> = {
-    base:   'text-gray-400',
-    damage: 'text-red-400 font-medium',
-    mpDamage: 'text-blue-400 font-medium',
-    dot:    'text-orange-400',
-    heal:   'text-green-400 font-medium',
-    hot:    'text-emerald-400',
-    buff:   'text-yellow-300',
-    debuff: 'text-purple-400',
-    threat: 'text-amber-500',
+/** Effect line colors, in the UI theme's muted palette. */
+/** Effect line colors (the palette's --tone-* variables, index.css). */
+export const EFFECT_TONE_COLOR: Record<EffectTone, string> = {
+    base: 'var(--tone-base)',
+    damage: 'var(--tone-damage)',
+    mpDamage: 'var(--tone-mp-damage)',
+    dot: 'var(--tone-dot)',
+    heal: 'var(--tone-heal)',
+    hot: 'var(--tone-hot)',
+    buff: 'var(--tone-buff)',
+    debuff: 'var(--tone-debuff)',
+    threat: 'var(--tone-threat)',
 };
 
 export interface EffectLine {

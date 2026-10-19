@@ -105,10 +105,3 @@ export const RARITY_WEIGHT: Record<Rarity, number> = {
  */
 export const RARITY_TILT_PER_LEVEL = 0.04;
 
-export const RarityTextColors: Record<Rarity, string> = { //hex codes
-  Common: 'white',
-  Quality: 'lightblue',
-  Superior: 'royalblue',
-  Rare: 'slateblue',
-  Exquisite: 'mediumturquoise'
-}

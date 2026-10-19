@@ -11,7 +11,7 @@ import { buildPreview, classHolds, classOf } from '../equip';
 import { HOLD_LABEL } from '../designs/_character';
 import type { WeaponType } from '../../data/gear/types';
 import { DUNGEON_PRESETS } from '../../data/dungeonPresets';
-import { TILE_BORDER_CLASS } from '../../components/mapParts';
+import { TILE_BORDER_COLOR } from '../../components/mapParts';
 import { ForgeView, GAME_VIEW_ANCHOR, type CameraPreset, type Cell } from './forgeView';
 import { floorMatrix } from '../../viewEngine/camera';
 import { TILE_SIZE } from '../../viewEngine/board';
@@ -377,7 +377,6 @@ const BTN = 'px-2.5 py-1 rounded bg-gray-700 hover:bg-gray-600 text-gray-100';
 
 const FLOOR = DUNGEON_PRESETS.crypt.floorColor;
 const PAGE_BG = '#111827'; // Tailwind gray-900, the page background
-const TILE_BORDER_RGBA = 'rgba(55, 65, 81, 0.3)'; // TILE_BORDER_CLASS as a color, for snapshots
 
 type Rect = { x: number; y: number; w: number; h: number };
 
@@ -403,8 +402,8 @@ function FloorCell({ rect }: { rect: Rect }) {
         {floorTiles(rect).map((t) => (
           <div
             key={`${t.left},${t.top}`}
-            className={`absolute border ${TILE_BORDER_CLASS}`}
-            style={{ left: t.left, top: t.top, width: TILE_SIZE, height: TILE_SIZE, backgroundColor: FLOOR }}
+            className="absolute border"
+            style={{ left: t.left, top: t.top, width: TILE_SIZE, height: TILE_SIZE, backgroundColor: FLOOR, borderColor: TILE_BORDER_COLOR }}
           />
         ))}
       </div>
@@ -431,7 +430,7 @@ function composeSnapshot(gl: HTMLCanvasElement, size: { w: number; h: number }, 
     for (const t of floorTiles(r)) {
       ctx.fillStyle = FLOOR;
       ctx.fillRect(t.left, t.top, TILE_SIZE, TILE_SIZE);
-      ctx.strokeStyle = TILE_BORDER_RGBA;
+      ctx.strokeStyle = TILE_BORDER_COLOR;
       ctx.strokeRect(t.left + 0.5, t.top + 0.5, TILE_SIZE - 1, TILE_SIZE - 1);
     }
     ctx.restore();

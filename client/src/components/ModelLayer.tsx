@@ -6,9 +6,9 @@ import { CLASSES, type ClassKey } from '../data/classes';
 import type { Design, Model, ModelLink } from '../forge/core/types';
 import { buildInstance, instanceSeed, linkedDesign } from '../forge/core/link';
 import { TILE_SIZE, type BoardLayout } from '../viewEngine/board';
-import { buildCharacter, type HeldWeapon } from '../forge/equip';
+import { buildCharacter, classInstanceId, type HeldWeapon } from '../forge/equip';
 import { designs } from '../forge/registry.vite';
-import { MapModelRenderer, type MapUnit } from '../forge/three/mapRenderer';
+import { MapModelRenderer, type MapUnit } from '../viewEngine/three/mapRenderer';
 import { ActiveGlow } from './mapParts';
 
 type Pos = { x: number; y: number };
@@ -30,7 +30,7 @@ export interface MapObject {
 
 /** A party member drawn as their class model, holding their equipped weapon and shield. */
 export interface MapPartyMember {
-  /** Stable per member (e.g. 'party-0'); also seeds the body's look. */
+  /** Stable per member (e.g. 'party-0'). The body's look is seeded by its class (classInstanceId). */
   id: string;
   classKey: ClassKey;
   pos: Pos;
@@ -89,7 +89,8 @@ export default function ModelLayer({ board, party = [], enemies = [], loot = [],
       if (!body) continue;
       const used = [body, m.weapon ? linkedDesign(designs, m.weapon.link) : null, m.shield ? linkedDesign(designs, m.shield) : null];
       const look = `${m.classKey}:${m.weapon?.link ?? '-'}:${m.shield ?? '-'}`;
-      const model = cached(m.id, look, used, () => buildCharacter(designs, body, instanceSeed(body, m.id), m.weapon, m.shield));
+      // Seeded by class (classInstanceId), so the member looks as it did on character select
+      const model = cached(m.id, look, used, () => buildCharacter(designs, body, instanceSeed(body, classInstanceId(m.classKey)), m.weapon, m.shield));
       out.push({ id: m.id, model, pos: m.pos });
     }
     return out;

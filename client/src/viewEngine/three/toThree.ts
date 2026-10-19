@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { Model, PartSpin } from '../core/types';
+import type { Model, PartSpin } from '../../forge/core/types';
 
 // Shared materials: every model reuses these three, so draw calls stay at <= 3 per model.
 const lit = new THREE.MeshLambertMaterial({ vertexColors: true });

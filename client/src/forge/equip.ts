@@ -186,6 +186,12 @@ function sampleWeaponLink(weaponType: WeaponType): ModelLink | undefined {
   return WEAPON_SERIES.find((s) => s.requiredLevel <= 1 && s.weapons[weaponType])?.weapons[weaponType]?.model;
 }
 
+/**
+ * The stable id a class's character model is seeded from (instanceSeed). A party has each class at most
+ * once, so it identifies a member's look everywhere: character select and the maps show the same body.
+ */
+export const classInstanceId = (classKey: ClassKey) => `class-${classKey}`;
+
 /** The class a character design is the body of, if any. */
 export const classOf = (design: Design): ClassKey | null =>
   design.source.table === 'classes' && design.source.key in CLASSES ? (design.source.key as ClassKey) : null;

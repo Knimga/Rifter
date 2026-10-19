@@ -2,6 +2,289 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ─── UI theme ("slab", from the UI handoff) ──────────────────────────────────
+   Fonts (OFL, bundled): Metamorphous for display text, IBM Plex Mono for everything else.
+   The palette lives here, once: Tailwind's `rift-*` colors (tailwind.config.js), the .rf-* classes below
+   and the TS color constants (constants.ts, detailStrings.ts) all read these variables. */
+
+@font-face { font-family: 'Metamorphous'; font-weight: 400; font-style: normal; font-display: swap; src: url('./assets/fonts/metamorphous-400.woff2') format('woff2'); }
+@font-face { font-family: 'IBM Plex Mono'; font-weight: 400; font-style: normal; font-display: swap; src: url('./assets/fonts/ibm-plex-mono-400.woff2') format('woff2'); }
+@font-face { font-family: 'IBM Plex Mono'; font-weight: 500; font-style: normal; font-display: swap; src: url('./assets/fonts/ibm-plex-mono-500.woff2') format('woff2'); }
+
+:root {
+  /* The accent: hover glows, focus rings, the backdrop's tint. One value to change. */
+  --glow: #8fa6ae;
+
+  /* Surfaces, darkest first */
+  --rift-void: #08090b;      /* deepest background, inputs, stat strips */
+  --rift-sunk: #0a0b0d;      /* windows, empty inventory cells */
+  --rift-panel: #0c0d10;     /* panels, HUD panes, tooltips */
+  --rift-raised: #121316;    /* buttons, slots */
+  --rift-raised-hi: #15171b; /* a raised surface that is selected or hovered */
+
+  /* Lines and borders, faintest first */
+  --rift-divider: #14161a;   /* list row separators */
+  --rift-seam: #1c1e23;      /* borders of sunk things */
+  --rift-line: #1f2126;      /* panel borders, dividers */
+  --rift-edge: #2b2d33;      /* button / slot borders */
+  --rift-edge-hi: #2f3138;   /* hovered borders, chips */
+  --rift-rim: #3a3d45;       /* filled cells, empty-slot icons */
+  --rift-rim-hi: #4b4e57;    /* filled equipment slots, dotted underlines */
+
+  /* Text, brightest first */
+  --rift-bright: #f1ece1;    /* headings, hover text */
+  --rift-ink: #e8e3d8;       /* body text */
+  --rift-soft: #cfc9bc;      /* button text, secondary text */
+  --rift-muted: #a39f95;     /* descriptions */
+  --rift-label: #8d9096;     /* small caps labels */
+  --rift-off: #7a7d85;       /* disabled text, placeholders */
+  --rift-faint: #5d6068;     /* empty and unusable things */
+
+  /* Meaning */
+  --rift-hp: #a4504a;
+  --rift-mp: #6f93ad;
+  --rift-up: #9bbf9b;        /* raised by a buff */
+  --rift-down: #d9958f;      /* lowered by a debuff */
+  --rift-warn: #d9a39d;      /* not enough mana, inventory full */
+  --rift-affix: #86b5c2;     /* rolled item affixes */
+  --rift-unusable: #e08fb0;  /* not proficient */
+  --rift-active: #f0e8c4;    /* the active party member (floor glow, selected party row) */
+  --rift-ally: #7fa07f;      /* targeting: allies and helpful areas */
+  --rift-foe: #b0625b;       /* targeting: enemies and harmful areas */
+  --rift-acting: #c9b37a;    /* the enemy whose turn it is */
+  --rift-foe-bg: #141011;    /* enemy turn-order pill */
+  --rift-foe-edge: #3a2a28;
+  --rift-debuff-edge: #6d4a46;
+  --rift-loot: #d1a766;
+  --rift-portal: #b2ecc0;
+
+  /* Effect lines (ability cards, item tooltips) */
+  --tone-base: var(--rift-muted);
+  --tone-damage: #d9958f;
+  --tone-mp-damage: #8fb3cf;
+  --tone-dot: #d1a766;
+  --tone-heal: #9bbf9b;
+  --tone-hot: #8fae8a;
+  --tone-buff: #d9c58a;
+  --tone-debuff: #b9a0d6;
+  --tone-threat: #d1a766;
+
+  /* Attack categories */
+  --cat-melee: #c9847d;
+  --cat-ranged: #8fae8a;
+  --cat-magic: #a592c4;
+
+  /* Damage elements (text, ability washes); physical has its own light grey wash */
+  --el-physical: #e8e3d8;
+  --el-physical-wash: #8a8d94;
+  --el-fire: #d0705a;
+  --el-ice: #9cc7d9;
+  --el-lightning: #6cc4c2;
+  --el-nature: #7cab6e;
+  --el-shadow: #a088d4;
+  --el-holy: #d9c27a;
+  --el-poison: #a3ad62;
+
+  /* Item rarity (name color) */
+  --rarity-common: #ffffff;
+  --rarity-quality: #add8e6;
+  --rarity-superior: #4169e1;
+  --rarity-rare: #6a5acd;
+  --rarity-exquisite: #48d1cc;
+
+  /* Screen backgrounds (Backdrop): the menu screens' (under their --glow tint) and the game's (a little lighter at the centre, under the map) */
+  --bg-menu: radial-gradient(ellipse 120% 100% at 50% 50%, #101215 0%, var(--rift-void) 62%, #040506 100%);
+  --bg-game: radial-gradient(ellipse 80% 70% at 50% 45%, #14171b 0%, #0b0c0f 70%, #060708 100%);
+
+  /* A floating box (tooltips, menus) */
+  --shadow-float: 0 14px 32px rgba(0, 0, 0, 0.65), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+@layer components {
+  /* Raised button: square, bevelled, glows in --glow on hover / focus */
+  .rf-btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    font-family: 'Metamorphous', Georgia, serif; font-weight: 400; text-transform: uppercase;
+    color: var(--rift-soft); background: var(--rift-raised); border: 1px solid var(--rift-edge); border-radius: 2px;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), inset 0 -2px 8px rgba(0, 0, 0, 0.6), 0 10px 28px rgba(0, 0, 0, 0.55);
+    transition: color 220ms ease, border-color 220ms ease, box-shadow 220ms ease;
+  }
+  .rf-btn:hover:not(:disabled), .rf-btn:focus-visible {
+    color: var(--rift-bright);
+    border-color: color-mix(in srgb, var(--glow) 55%, var(--rift-edge));
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.06),
+      inset 0 -2px 8px rgba(0, 0, 0, 0.6),
+      0 0 22px color-mix(in srgb, var(--glow) 24%, transparent),
+      0 0 64px color-mix(in srgb, var(--glow) 10%, transparent),
+      0 10px 28px rgba(0, 0, 0, 0.55);
+  }
+  .rf-btn:focus-visible { outline: 1px solid color-mix(in srgb, var(--glow) 60%, transparent); outline-offset: 5px; }
+  .rf-btn:active:not(:disabled) { border-color: color-mix(in srgb, var(--glow) 70%, var(--rift-edge)); }
+  .rf-btn:disabled {
+    color: var(--rift-off); background: var(--rift-panel); border-color: var(--rift-line);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02), inset 0 -2px 8px rgba(0, 0, 0, 0.5);
+  }
+
+  /* Panel: a dark slab holding related information */
+  .rf-panel {
+    background: var(--rift-panel); border: 1px solid var(--rift-line); border-radius: 2px;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03), 0 12px 30px rgba(0, 0, 0, 0.4);
+  }
+
+  /* A floating box: tooltips and menus */
+  .rf-tip { background: var(--rift-panel); border: 1px solid var(--rift-edge); border-radius: 2px; box-shadow: var(--shadow-float); }
+
+  /* Section titles: `rf-label` small grey caps (menu screens), `rf-h` display-font caps (the party window) */
+  .rf-label { margin: 0; font-size: 11px; font-weight: 400; letter-spacing: 0.14em; text-transform: uppercase; color: var(--rift-label); }
+  .rf-h { margin: 0; font-family: 'Metamorphous', Georgia, serif; font-weight: 400; font-size: 13px; line-height: 16px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--rift-soft); }
+
+  /* Text link (e.g. Back) that brightens and glows on hover */
+  .rf-link { transition: color 220ms ease, text-shadow 220ms ease; }
+  .rf-link:hover, .rf-link:focus-visible {
+    color: var(--rift-bright); outline: none;
+    text-shadow: 0 0 14px color-mix(in srgb, var(--glow) 45%, transparent);
+  }
+}
+
+@layer components {
+  /* Selectable card (character select class columns): border + glow when hovered or focused */
+  .rf-col {
+    position: relative; display: flex; flex-direction: column; align-items: center; box-sizing: border-box;
+    padding: 14px 12px 18px; background: transparent; border: 1px solid transparent; border-radius: 2px;
+    color: inherit; text-align: center;
+    transition: border-color 220ms ease, box-shadow 220ms ease, background-color 220ms ease;
+  }
+  .rf-col:hover { border-color: var(--rift-line); background-color: var(--rift-panel); }
+  .rf-col.is-focused { border-color: color-mix(in srgb, var(--glow) 45%, var(--rift-edge)); background-color: var(--rift-panel); box-shadow: 0 0 32px color-mix(in srgb, var(--glow) 12%, transparent); }
+  .rf-col:focus-visible { outline: 1px solid color-mix(in srgb, var(--glow) 60%, transparent); outline-offset: 3px; }
+  .rf-col .rf-col-name { color: var(--rift-ink); transition: color 220ms ease; }
+  .rf-col:hover .rf-col-name, .rf-col.is-focused .rf-col-name { color: var(--rift-bright); }
+  .rf-col.is-dim:not(:hover) .rf-col-name { color: var(--rift-off); }
+  .rf-col.is-dim:not(:hover) .rf-col-text { color: var(--rift-faint); }
+
+  /* Small corner badge (e.g. a class's place in the party) */
+  .rf-badge {
+    position: absolute; top: 10px; right: 10px; padding: 2px 6px; background: var(--rift-panel);
+    border: 1px solid var(--rift-edge-hi); font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--rift-soft);
+  }
+  .rf-badge.is-lead { border-color: color-mix(in srgb, var(--glow) 55%, var(--rift-edge)); color: var(--rift-bright); }
+
+  /* Chips: a dashed "not available" state, a lit "yes" state with a diamond, and a plain one */
+  .rf-chip {
+    display: inline-flex; align-items: center; min-height: 26px; box-sizing: border-box; padding: 0 10px;
+    border: 1px dashed var(--rift-edge-hi); border-radius: 2px; font-size: 12px; color: var(--rift-off);
+  }
+  .rf-chip.is-lit { border: 1px solid color-mix(in srgb, var(--glow) 40%, var(--rift-edge)); color: var(--rift-ink); }
+  .rf-chip.is-lit::before { content: ""; width: 5px; height: 5px; margin-right: 8px; background: var(--glow); transform: rotate(45deg); }
+  .rf-chip.is-plain { border: 1px solid var(--rift-edge); color: var(--rift-soft); }
+
+  /* A slot that holds something (filled) or waits for it (empty, dashed) */
+  .rf-slot { position: relative; box-sizing: border-box; border-radius: 2px; display: flex; flex-direction: column; }
+  .rf-slot.is-filled { background: var(--rift-raised); border: 1px solid var(--rift-edge); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), inset 0 -2px 8px rgba(0, 0, 0, 0.5); }
+  .rf-slot.is-empty { background: transparent; border: 1px dashed var(--rift-edge); }
+
+  /* Text input, sunk into the panel; glows when focused */
+  .rf-input {
+    box-sizing: border-box; min-height: 40px; padding: 0 12px; background: var(--rift-void); border: 1px solid var(--rift-edge);
+    border-radius: 2px; box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.6); outline: none; color: var(--rift-ink);
+    transition: border-color 220ms ease, box-shadow 220ms ease;
+  }
+  .rf-input::placeholder { color: var(--rift-off); }
+  .rf-input:focus { border-color: color-mix(in srgb, var(--glow) 55%, var(--rift-edge)); box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.6), 0 0 16px color-mix(in srgb, var(--glow) 18%, transparent); }
+
+  /* Bare icon button (move, remove) and the boxed one (dice) */
+  .rf-icon-btn { display: inline-flex; align-items: center; justify-content: center; background: transparent; border: 0; color: var(--rift-label); transition: color 220ms ease; }
+  .rf-icon-btn:hover, .rf-icon-btn:focus-visible { color: var(--rift-bright); outline: none; }
+  .rf-icon-btn:focus-visible { outline: 1px solid color-mix(in srgb, var(--glow) 60%, transparent); }
+  .rf-box-btn {
+    display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; background: var(--rift-void);
+    border: 1px solid var(--rift-edge); border-radius: 2px; color: var(--rift-muted); transition: color 220ms ease, border-color 220ms ease, box-shadow 220ms ease;
+  }
+  .rf-box-btn:hover, .rf-box-btn:focus-visible { color: var(--rift-bright); border-color: color-mix(in srgb, var(--glow) 55%, var(--rift-edge)); box-shadow: 0 0 14px color-mix(in srgb, var(--glow) 18%, transparent); outline: none; }
+}
+
+@layer components {
+  /* ─── Game HUD ─── */
+
+  /* Floating HUD pane (turn order, party rows, action bar, notices) */
+  .rf-hud {
+    background: var(--rift-panel); border: 1px solid var(--rift-line); border-radius: 2px;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03), 0 8px 22px rgba(0, 0, 0, 0.45);
+  }
+
+  /* Turn order pill: party grey, enemies dark red; the current one glows, done ones fade */
+  .rf-pill {
+    display: flex; align-items: center; justify-content: center; gap: 7px; width: 100%; min-height: 32px; box-sizing: border-box;
+    padding: 0 10px; font-size: 12px; color: var(--rift-soft); background: var(--rift-raised); border: 1px solid var(--rift-edge); border-radius: 2px;
+    transition: color 220ms ease, border-color 220ms ease, box-shadow 220ms ease;
+  }
+  .rf-pill.is-enemy { background: var(--rift-foe-bg); border-color: var(--rift-foe-edge); }
+  .rf-pill.is-done { color: var(--rift-label); }
+  .rf-pill.is-current { color: var(--rift-bright); border-color: color-mix(in srgb, var(--glow) 70%, var(--rift-edge)); box-shadow: 0 0 18px color-mix(in srgb, var(--glow) 30%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.06); }
+  .rf-pill:hover, .rf-pill:focus-visible { color: var(--rift-bright); border-color: color-mix(in srgb, var(--glow) 55%, var(--rift-edge)); box-shadow: 0 0 14px color-mix(in srgb, var(--glow) 20%, transparent); outline: none; }
+
+  /* Party row (bottom left): the selected member glows the pale yellow of the active member's floor glow */
+  .rf-row {
+    background: var(--rift-panel); border: 1px solid var(--rift-line); border-radius: 2px;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03), 0 8px 22px rgba(0, 0, 0, 0.45);
+    transition: border-color 220ms ease, box-shadow 220ms ease;
+  }
+  .rf-row:hover { border-color: var(--rift-edge-hi); }
+  .rf-row.is-sel { border-color: color-mix(in srgb, var(--rift-active) 45%, transparent); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03), 0 0 22px color-mix(in srgb, var(--rift-active) 14%, transparent), 0 8px 22px rgba(0, 0, 0, 0.45); }
+  /* The member whose sheet the party window shows (steel-blue, unlike the map's selected member) */
+  .rf-row.is-view { background-color: var(--rift-raised-hi); border-color: color-mix(in srgb, var(--glow) 50%, var(--rift-edge)); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 0 22px color-mix(in srgb, var(--glow) 14%, transparent); }
+  .rf-row:focus-visible { outline: 1px solid color-mix(in srgb, var(--glow) 60%, transparent); outline-offset: 3px; }
+
+  /* Action bar slot */
+  .rf-aslot {
+    position: relative; width: 64px; height: 64px; box-sizing: border-box; padding: 0; display: flex; align-items: center; justify-content: center;
+    /* --tint (inline): the ability's element wash, as on its card */
+    background: color-mix(in srgb, var(--tint, var(--rift-raised)) 7%, var(--rift-raised)); border: 1px solid color-mix(in srgb, var(--tint, var(--rift-edge)) 22%, var(--rift-edge)); border-radius: 2px; color: var(--rift-soft);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), inset 0 -2px 8px rgba(0, 0, 0, 0.6);
+    transition: color 220ms ease, border-color 220ms ease, box-shadow 220ms ease, transform 180ms ease;
+  }
+  .rf-aslot:hover, .rf-aslot:focus-visible { color: var(--rift-bright); border-color: color-mix(in srgb, var(--glow) 55%, var(--rift-edge)); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), inset 0 -2px 8px rgba(0, 0, 0, 0.6), 0 0 18px color-mix(in srgb, var(--glow) 22%, transparent); outline: none; }
+  .rf-aslot.is-empty { background: transparent; border-style: dashed; border-color: var(--rift-edge); color: var(--rift-faint); box-shadow: none; }
+  .rf-aslot.is-empty:hover, .rf-aslot.is-empty:focus-visible { border-color: var(--rift-rim); color: var(--rift-muted); box-shadow: none; }
+  .rf-aslot.is-dim, .rf-aslot.is-dim:hover, .rf-aslot.is-dim:focus-visible { background: var(--rift-panel); border-color: var(--rift-seam); color: var(--rift-faint); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02); }
+  .rf-aslot.is-dim img { opacity: 0.35; filter: grayscale(1); }
+  .rf-aslot.is-armed, .rf-aslot.is-armed:hover { color: var(--rift-bright); background: var(--rift-raised-hi); border-color: color-mix(in srgb, var(--glow) 80%, var(--rift-edge)); transform: translateY(-4px); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 0 26px color-mix(in srgb, var(--glow) 34%, transparent), 0 10px 20px rgba(0, 0, 0, 0.5); }
+
+  /* Party window: equipment slot, inventory cell, hoverable stat label */
+  .rf-eqs {
+    position: relative; width: 84px; height: 60px; box-sizing: border-box; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+    background: var(--rift-raised); border: 1px solid var(--rift-edge); border-radius: 2px; color: var(--rift-label);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), inset 0 -2px 8px rgba(0, 0, 0, 0.6);
+    transition: border-color 220ms ease, box-shadow 220ms ease;
+  }
+  .rf-eqs.is-filled { border-color: var(--rift-rim-hi); }
+  .rf-eqs.is-filled:hover { border-color: color-mix(in srgb, var(--glow) 55%, var(--rift-edge)); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), inset 0 -2px 8px rgba(0, 0, 0, 0.6), 0 0 18px color-mix(in srgb, var(--glow) 22%, transparent); }
+  .rf-cell {
+    position: relative; width: 46px; height: 46px; box-sizing: border-box; display: flex; align-items: center; justify-content: center;
+    background: var(--rift-sunk); border: 1px solid var(--rift-seam); border-radius: 2px; box-shadow: inset 0 1px 6px rgba(0, 0, 0, 0.7);
+    transition: border-color 220ms ease, box-shadow 220ms ease;
+  }
+  .rf-cell.is-filled { background: var(--rift-raised); border-color: var(--rift-rim); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), inset 0 -2px 8px rgba(0, 0, 0, 0.6); }
+  .rf-cell.is-filled:hover { border-color: color-mix(in srgb, var(--glow) 55%, var(--rift-edge)); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 0 16px color-mix(in srgb, var(--glow) 22%, transparent); }
+  .rf-tiplabel { color: var(--rift-muted); border-bottom: 1px dotted var(--rift-rim-hi); outline: none; }
+  .rf-tiplabel:hover { color: var(--rift-soft); }
+  .rf-tiplabel:focus-visible { outline: 1px solid color-mix(in srgb, var(--glow) 60%, transparent); outline-offset: 2px; }
+
+  /* Menu item (slot assignment menu) */
+  .rf-mi {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; min-height: 36px; box-sizing: border-box;
+    padding: 0 8px; background: transparent; border: 0; border-radius: 2px; color: var(--rift-soft); font-size: 13px; text-align: left;
+  }
+  .rf-mi:hover:not(:disabled), .rf-mi:focus-visible { background: var(--rift-raised-hi); color: var(--rift-bright); outline: none; }
+  .rf-mi:disabled { color: var(--rift-off); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rf-btn, .rf-link, .rf-col, .rf-input, .rf-icon-btn, .rf-box-btn, .rf-pill, .rf-row, .rf-aslot, .rf-eqs, .rf-cell { transition: none; }
+}
+
+/* The custom cursor everywhere (no per-element cursors for now) */
 * {
   cursor: url('/cursors/blue-cursor.png'), auto !important;
   scrollbar-width: none;
@@ -11,23 +294,8 @@
   display: none;
 }
 
-.thin-scrollbar {
-  scrollbar-width: thin;
-  scrollbar-color: #4b5563 transparent;
-  scrollbar-gutter: stable;
-}
-.thin-scrollbar::-webkit-scrollbar {
-  width: 3px;
-}
-.thin-scrollbar::-webkit-scrollbar-track {
-  background: transparent;
-}
-.thin-scrollbar::-webkit-scrollbar-thumb {
-  background: #4b5563;
-  border-radius: 2px;
-}
-
+/* Floating combat text: rises and fades from where it is placed */
 @keyframes floatUp {
-  0%   { opacity: 1; transform: translate(-50%, -50%); }
-  100% { opacity: 0; transform: translate(-50%, calc(-50% - 30px)); }
+  0%   { opacity: 1; transform: translateY(0); }
+  100% { opacity: 0; transform: translateY(-30px); }
 }
