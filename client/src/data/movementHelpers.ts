@@ -1,8 +1,8 @@
-import { chebyshev, findOpenTilesNear, posKey, samePos, type Pos } from './dungeonHelpers';
+import { canStep, chebyshev, findOpenTilesNear, posKey, samePos, type Pos } from './dungeonHelpers';
 
-/** Up to `count` walkable tiles near `center` (closest first); pads with `center` if too few. */
-export function findFollowerSpawns(center: Pos, floors: Set<string>, count: number): Pos[] {
-  const found = findOpenTilesNear(center, p => floors.has(posKey(p)), count, 5);
+/** Up to `count` open tiles near `center` (closest first); pads with `center` if too few. */
+export function findFollowerSpawns(center: Pos, isOpen: (p: Pos) => boolean, count: number): Pos[] {
+  const found = findOpenTilesNear(center, isOpen, count, 5);
   while (found.length < count) found.push({ ...center });
   return found;
 }
@@ -23,22 +23,22 @@ export function computeFollowerPositions(
 
   const isOpen = (p: Pos, blocked: ReadonlySet<string>) => isWalkable(p) && !blocked.has(posKey(p));
 
+  // Step toward `to` one tile at a time (diagonal first, then straight), by the shared step rule (canStep:
+  // never onto a blocked tile, never cutting a corner)
   const stepN = (from: Pos, to: Pos, n: number, blocked: ReadonlySet<string>): Pos => {
+    const open = (p: Pos) => isOpen(p, blocked);
     let cur = from;
     for (let i = 0; i < n; i++) {
       const dx = Math.sign(to.x - cur.x);
       const dy = Math.sign(to.y - cur.y);
       if (dx === 0 && dy === 0) break;
-      const diag  = { x: cur.x + dx, y: cur.y + dy };
-      const horiz = { x: cur.x + dx, y: cur.y };
-      const vert  = { x: cur.x, y: cur.y + dy };
-      const next =
-        isOpen(diag, blocked)               ? diag  :
-        (dx !== 0 && isOpen(horiz, blocked)) ? horiz :
-        (dy !== 0 && isOpen(vert, blocked))  ? vert  :
+      const step =
+        canStep(cur, dx, dy, open)               ? [dx, dy] :
+        (dx !== 0 && canStep(cur, dx, 0, open))  ? [dx, 0]  :
+        (dy !== 0 && canStep(cur, 0, dy, open))  ? [0, dy]  :
         null;
-      if (!next) break;
-      cur = next;
+      if (!step) break;
+      cur = { x: cur.x + step[0], y: cur.y + step[1] };
     }
     return cur;
   };

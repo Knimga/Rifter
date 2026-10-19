@@ -14,6 +14,8 @@ export const DUNGEON_PRESETS = {
     baseEnemyLevel: 1,    
     floorColor: '#303030',
     wallColor: '#202020',
+    doorObject: 'heavy-door',
+    portalObject: 'necrotic-portal',
     zones: [
       {
         minRoomSize: 4,

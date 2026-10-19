@@ -40,6 +40,19 @@ export interface DungeonData {
   baseEnemyLevel: number;
 }
 
+/**
+ * Tiles of a zone that a game object stands on (the exit portal): nobody walks onto or through them,
+ * party or enemy. They stay floor (drawn as floor; they don't block sight or AoE). The Sanctum's portal
+ * is handled the same way by isSanctumWalkable.
+ */
+export const objectTilesOf = (d: DungeonData, zone: ZoneData): Set<string> => new Set(zone.id === d.endZoneId ? [posKey(d.portalPos)] : []);
+
+/** Walkable tiles of a zone: floor without a game object on it. */
+export function zoneWalkable(d: DungeonData, zone: ZoneData): (p: Pos) => boolean {
+  const objects = objectTilesOf(d, zone);
+  return (p) => zone.floors.has(posKey(p)) && !objects.has(posKey(p));
+}
+
 // ─── Config Types ─────────────────────────────────────────────────────────────
 
 export interface ZoneConfig {
@@ -65,6 +78,8 @@ export interface DungeonConfig {
   bossZone: BossZoneConfig;
   floorColor: string;     // hex color for walkable floor tiles
   wallColor: string;      // hex color for wall/non-floor tiles
+  doorObject: string;     // GAME_OBJECTS id of the doors between zones
+  portalObject: string;   // GAME_OBJECTS id of the exit portal in the boss zone
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────

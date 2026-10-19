@@ -40,6 +40,12 @@ One design per class (`source: { table: 'classes', key }`), built on `designs/_c
 
 **Holds:** the arm pose follows the equipped weapon type, not the class (`Hold` / `HOLD_FOR` in `_character.ts`): one-hand (Knight/Rogue), staff (Arcanist), shoulder carry (Brute), bow (Archer), crossbow. A class design reads the hold with `classHold(c, key)` (the build input `c.hold`, else its starting weapon's hold) and passes it to `buildBody`; the game and `buildPreview` (equip.ts) build with the equipped weapon's hold. Holds are shared code, not designs: the forge shows each class as one row per hold its proficiencies allow (a cell per weapon type), and a hold is approved in chat. `forge:sheet --weapon "<type>"` renders a class holding any weapon type.
 
+## Moving parts
+Models are static, except parts a design lists in `motion` (`PartSpin`): each spins about an axis through its part's pivot, forever, while it is on screen (view state, like facing; the game and the forge both animate it). `frame` lets an oval part be built round and squashed, so its pattern turns while the outline stays put (the Portal's swirl). Use it sparingly: something on the map that is magic or alive, never loot.
+
+## Game objects (category `object`, forge section "Game Objects")
+Interactable things on the map that aren't units or loot: doors, portals, later chests and craftbenches. Their data entries are `GAME_OBJECTS` in `data/gameObjects.ts` (`source: { table: 'gameObjects', key }`; identity from `objectEntry` in `designs/_object.ts`). They stand on a tile (`fit.kind: 'standing'`), built facing +z; on the map they face their open side (`facingOpenSide`: a door in a wall faces the floor it opens onto). Maps choose which objects they place by id (`DungeonConfig.doorObject` / `portalObject`, `SANCTUM.portalObject`); where a portal leads belongs to the map, not the object. Variants share a family helper, one entry and design each (portals: `designs/_portal.ts`, e.g. Necrotic Portal; another color is a new entry plus a one-line design).
+
 ## Names
 `build` returns a display name (the forge shows it on hover): normally the label, or a variant name for a creature ("Frost-Eyed Skeleton").
 

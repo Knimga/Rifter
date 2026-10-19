@@ -2,9 +2,6 @@ import type { DamageElement } from './gear';
 
 /* ----- UI CONSTANTS ----- */
 
-/** Pixel size of each grid tile in the dungeon and sanctum maps. */
-export const TILE_SIZE = 60;
-
 /** Floor and wall tile colors for the Sanctum map. */
 export const SANCTUM_FLOOR_COLOR = '#1e2030';
 export const SANCTUM_WALL_COLOR = '#0d0e18';
@@ -42,3 +39,9 @@ export const DAMAGE_ELEMENT_DARK_COLOR: Record<DamageElement, string> = {
 
 /** Interval in ms between out-of-combat passive regen ticks. */
 export const OUT_OF_COMBAT_REGEN_INTERVAL_MS = 10000;
+
+/**
+ * How long a unit (party member or enemy) turns toward an ability's target before the ability lands. Just
+ * over the model's half-turn time (smoothYaw in forge/core/facing.ts, 170 ms), so it faces the target first.
+ */
+export const AIM_TURN_LEAD_MS = 180;

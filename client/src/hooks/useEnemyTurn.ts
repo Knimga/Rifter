@@ -16,8 +16,13 @@ type Refs = {
   partyThreat: MutableRefObject<number[]>;
   zone: MutableRefObject<ZoneData | null>;
   currentZone: MutableRefObject<number>;
-  /** `aimAt`: the tile the ability was aimed at (the caster's model turns to face it). */
-  applyOutcome: MutableRefObject<(outcome: ActionOutcome, caster: CombatUnit, aimAt?: Pos) => void>;
+  /** Tiles of the zone a game object stands on (objectTilesOf): not walkable. */
+  zoneObjects: MutableRefObject<Set<string>>;
+  /**
+   * `aimAt`: the tile the ability was aimed at (the caster's model turns to face it first). Returns the
+   * delay (ms) before the outcome lands.
+   */
+  applyOutcome: MutableRefObject<(outcome: ActionOutcome, caster: CombatUnit, aimAt?: Pos) => number>;
 };
 
 export type EnemyAoePreview = { tiles: Set<string> };
@@ -50,7 +55,7 @@ export function useEnemyTurn(
       hp: refs.partyHp.current[i] ?? 0,
     }));
 
-    const action = computeEnemyTurn(enemy, partyMembers, currentZoneEnemies, z.floors, refs.partyThreat.current);
+    const action = computeEnemyTurn(enemy, partyMembers, currentZoneEnemies, z.floors, refs.partyThreat.current, refs.zoneObjects.current);
     const ability = action.abilityUsed;
     let cancelled = false;
     const timers: ReturnType<typeof setTimeout>[] = [];
@@ -119,8 +124,10 @@ export function useEnemyTurn(
           }));
           // Aimed at the AoE's target tile, else the targeted member
           const aimAt = action.abilityTargetPos ?? targets[0]?.pos;
-          refs.applyOutcome.current(executeAction(caster, ability, targets), caster, aimAt);
-          advanceTurnNow();
+          // The enemy turns to face its target, the attack lands, then the next combatant's turn starts
+          const landsIn = refs.applyOutcome.current(executeAction(caster, ability, targets), caster, aimAt);
+          if (landsIn > 0) timers.push(setTimeout(() => { if (!cancelled) advanceTurnNow(); }, landsIn));
+          else advanceTurnNow();
         }, 1000));
       }, 1000));
     }, 1000));

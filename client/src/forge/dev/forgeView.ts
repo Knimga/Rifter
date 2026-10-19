@@ -2,9 +2,11 @@
 // so the builder page never needs more than one WebGL context.
 import * as THREE from 'three';
 import type { Model } from '../core/types';
-import { TILE_SIZE } from '../../data/constants';
-import { addForgeLights, fitGameCamera, fitIconCamera, layItemOnGround, makeGameCamera } from '../three/stage';
-import { disposeObject, sharedMaterials, toThree } from '../three/toThree';
+import { lootYaw } from '../core/stage-config';
+import { GAME_CAMERA } from '../../viewEngine/camera';
+import { TILE_SIZE } from '../../viewEngine/board';
+import { addForgeLights, aimKeyLight, fitIconCamera, fitViewCamera, layItemOnGround, makeGameCamera } from '../three/stage';
+import { animateParts, disposeObject, sharedMaterials, toThree } from '../three/toThree';
 
 export type CameraPreset = 'game' | 'icon' | 'top' | 'side';
 
@@ -40,13 +42,15 @@ export class ForgeView {
   private gameCam = makeGameCamera();
   private persp = new THREE.PerspectiveCamera();
   private ortho = new THREE.OrthographicCamera(-1, 1, 1, -1, -50, 50);
+  /** Key light: aimed for the game view in the game preset (it turns with GAME_CAMERA), unturned otherwise. */
+  private key: THREE.DirectionalLight;
 
   constructor() {
     // alpha: the game view is transparent so the DOM floor tiles show through, as in the game
     this.r = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
     this.r.setPixelRatio(window.devicePixelRatio);
     this.canvas = this.r.domElement;
-    addForgeLights(this.scene);
+    this.key = addForgeLights(this.scene);
     // 1x1 tile reference under the model
     const tile = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ color: 0x3a3846 }));
     tile.rotation.x = -Math.PI / 2;
@@ -59,8 +63,11 @@ export class ForgeView {
     this.scene.add(this.ground);
   }
 
-  /** Draw all cells. Objects not used by this call are disposed. */
-  render(cells: Cell[], opts: ViewOptions, size: { w: number; h: number }): void {
+  /**
+   * Draw all cells, moving parts posed at `sec` (see animateParts). Objects not used by this call are
+   * disposed.
+   */
+  render(cells: Cell[], opts: ViewOptions, size: { w: number; h: number }, sec = 0): void {
     this.r.setSize(size.w, size.h, false);
     this.r.setScissorTest(true);
     this.r.setClearColor(0x000000, 0);
@@ -71,6 +78,7 @@ export class ForgeView {
     const used = new Set<Model>();
     for (const o of this.objects.values()) o.visible = false;
     for (const m of Object.values(sharedMaterials)) m.wireframe = opts.wireframe;
+    aimKeyLight(this.key, opts.camera === 'game' ? GAME_CAMERA : undefined);
 
     for (const cell of cells) {
       used.add(cell.model);
@@ -81,13 +89,14 @@ export class ForgeView {
         this.scene.add(obj);
       }
       obj.visible = true;
+      animateParts(obj, sec);
 
       const { min, max } = cell.model.mesh.bounds;
       const isItem = cell.model.mesh.anchors.center !== undefined;
       const game = opts.camera === 'game';
-      // Game view: items lie flat on the tile, face up, resting on the floor, exactly as loot in the game;
-      // yaw then spins them in place on the floor. Other views keep items upright and centered.
-      if (game && isItem) layItemOnGround(obj, cell.model, cell.yaw);
+      // Game view: items lie flat on the tile, face up, resting on the floor, turned exactly as loot in the
+      // game (lootYaw); yaw then spins them in place on the floor. Other views keep items upright and centered.
+      if (game && isItem) layItemOnGround(obj, cell.model, lootYaw() + cell.yaw);
       else { obj.rotation.set(0, cell.yaw, 0, 'YXZ'); obj.position.y = 0; }
       this.ground.visible = opts.ground && !game; // game view: the page's DOM tiles are the ground
       this.ground.position.y = isItem ? min[1] - 0.02 : 0;
@@ -118,21 +127,17 @@ export class ForgeView {
     const aspect = w / h;
     const span = Math.max(max[0] - min[0], max[1] - min[1], max[2] - min[2]);
     if (preset === 'game') {
-      // Exactly the game: oblique projection at 1 tile = TILE_SIZE px, tile center at GAME_VIEW_ANCHOR.
-      fitGameCamera(this.gameCam, {
-        x0: -(w * GAME_VIEW_ANCHOR.x) / TILE_SIZE,
-        z0: -(h * GAME_VIEW_ANCHOR.y) / TILE_SIZE,
-        widthTiles: w / TILE_SIZE,
-        heightTiles: h / TILE_SIZE,
-      });
+      // Exactly the game (GAME_CAMERA) at 1 tile = TILE_SIZE px, the tile center at GAME_VIEW_ANCHOR.
+      const ax = w * GAME_VIEW_ANCHOR.x, ay = h * GAME_VIEW_ANCHOR.y;
+      fitViewCamera(this.gameCam, { left: -ax / TILE_SIZE, right: (w - ax) / TILE_SIZE, top: ay / TILE_SIZE, bottom: -(h - ay) / TILE_SIZE });
       return this.gameCam;
     }
     if (preset === 'top') {
-      // Straight down, scaled to fit. Standing models: feet ~70% down the cell.
+      // Straight down, unturned, scaled to fit. Standing models: feet ~70% down the cell.
       const widthTiles = Math.max(2.2, span * 1.6);
       const tall = widthTiles / aspect;
       const below = isItem ? 0.5 : 0.3;
-      fitGameCamera(this.gameCam, { x0: -widthTiles / 2, z0: -tall * (1 - below), widthTiles, heightTiles: tall }, 89.9);
+      fitViewCamera(this.gameCam, { left: -widthTiles / 2, right: widthTiles / 2, top: tall * (1 - below), bottom: -tall * below }, { elevationDeg: 89.9, yawDeg: 0 });
       return this.gameCam;
     }
     const cy = (min[1] + max[1]) / 2;

@@ -1,15 +1,15 @@
 import { useState, useMemo, lazy, Suspense } from 'react';
-import { GiMagicPortal, GiDoorway } from 'react-icons/gi';
 import type { AreaType, TargetType } from '../data/classes';
 import type { ActiveBuff, ActiveHot, ActiveDot } from '../data/stats';
 import type { EnemyInstance } from '../data/enemies';
 import type { ZoneData } from '../data/dungeonGen';
-import { affectedKeys, brightenHex, chebyshev, hasLineOfSight, isAdjacent, isValidMoveTarget, posKey, samePos, type Pos } from '../data/dungeonHelpers';
-import { TILE_SIZE } from '../data/constants';
+import { affectedKeys, brightenHex, chebyshev, hasLineOfSight, isAdjacent, posKey, samePos, type Pos } from '../data/dungeonHelpers';
+import { TILE_SIZE } from '../viewEngine/board';
 import type { Item } from '../data/gear';
 import FloatingCombatText, { type FloatingText } from './FloatingCombatText';
-import { ActiveGlow, EffectDotRow, EnemyHpBar, MoveLineOverlay, TILE_BORDER_CLASS, computeEffectDots, toMapMember, type PartyTokenData } from './mapParts';
-import type { MapLoot, UnitAim } from './ModelLayer';
+import { gameObjectModel } from '../data/gameObjects';
+import { Board, EffectDotRow, EnemyHpBar, MoveLineOverlay, TILE_BORDER_CLASS, UprightAt, UsableGlow, computeEffectDots, facingOpenSide, toMapMember, useBoard, type PartyTokenData } from './mapParts';
+import type { MapLoot, MapObject, UnitAim } from './ModelLayer';
 
 // 3D party, enemy and loot models over the tile grid. Lazy: it pulls in three.js (GameScreen preloads it on mount).
 const ModelLayer = lazy(() => import('./ModelLayer'));
@@ -30,7 +30,8 @@ interface Props {
   playerPos: Pos;                   // party leader (doors, portal and loot adjacency)
   activeMoverPos: Pos;
   party: PartyTokenData[];
-  movement: number;
+  /** Tiles the active mover can move to this turn (tile key -> steps), from GameScreen (partyMoveTargets). */
+  moveTargets: Map<string, number>;
   onMove: (pos: Pos) => void;
   onLocationChange: (location: 'sanctum') => void;
   onDoorClick: (doorId: string) => void;
@@ -54,6 +55,9 @@ interface Props {
   partyDots: ActiveDot[][];
   floorColor: string;
   wallColor: string;
+  /** GAME_OBJECTS ids of this dungeon's doors and exit portal (DungeonConfig). */
+  doorObject: string;
+  portalObject: string;
   enemyAoePreviewTiles?: Set<string>;
   enemyTargetPartyIdx: number | null;
   droppedItems?: Record<string, Item[]>;
@@ -62,9 +66,10 @@ interface Props {
   aims?: Record<string, UnitAim>;
 }
 
-export default function DungeonMap({ playerPos, activeMoverPos, party, movement, onMove, onLocationChange, onDoorClick, activeTarget, activeAbilityArea, aoeHighlightColor, actionRange, onAbilityUse, onAbilityDeselect, onMemberSelect, enemies, inCombat, isPlayerTurn, activeCombatantId, floatingTexts, onFloatingTextComplete, zone, portalPos, partyBuffs, partyHots, partyDots, floorColor, wallColor, enemyAoePreviewTiles, enemyTargetPartyIdx, droppedItems = {}, onLootClick, aims }: Props) {
+export default function DungeonMap({ playerPos, activeMoverPos, party, moveTargets, onMove, onLocationChange, onDoorClick, activeTarget, activeAbilityArea, aoeHighlightColor, actionRange, onAbilityUse, onAbilityDeselect, onMemberSelect, enemies, inCombat, isPlayerTurn, activeCombatantId, floatingTexts, onFloatingTextComplete, zone, portalPos, partyBuffs, partyHots, partyDots, floorColor, wallColor, doorObject, portalObject, enemyAoePreviewTiles, enemyTargetPartyIdx, droppedItems = {}, onLootClick, aims }: Props) {
   const { width, height, floors, doors } = zone;
   const [hoveredTile, setHoveredTile] = useState<Pos | null>(null);
+  const board = useBoard(width, height);
 
   const isAoE = !!activeAbilityArea && activeAbilityArea !== 'single';
   const canAct = !inCombat || isPlayerTurn;
@@ -92,20 +97,15 @@ export default function DungeonMap({ playerPos, activeMoverPos, party, movement,
     [party, partyBuffs, partyHots, partyDots],
   );
   const doorByKey = useMemo(() => new Map(doors.map(d => [posKey(d.pos), d])), [doors]);
+  // Doors and the exit portal, drawn as their game objects' models. A door stands in its wall tile facing
+  // the floor it opens onto.
+  const mapObjects = useMemo(() => {
+    const isFloor = (q: Pos) => floors.has(posKey(q));
+    const out: MapObject[] = doors.map(d => ({ id: d.id, link: gameObjectModel(doorObject), pos: d.pos, facing: facingOpenSide(d.pos, isFloor) }));
+    if (portalPos) out.push({ id: 'portal', link: gameObjectModel(portalObject), pos: portalPos, facing: facingOpenSide(portalPos, isFloor) });
+    return out;
+  }, [doors, floors, portalPos, doorObject, portalObject]);
 
-  // Every tile the active mover can step to this turn
-  const moveTargets = useMemo(() => {
-    const keys = new Set<string>();
-    const isOccupied = (p: Pos) => enemyByKey.has(posKey(p)) || memberByKey.has(posKey(p));
-    const isPortal = (p: Pos) => !!portalPos && samePos(p, portalPos);
-    for (let dx = -movement; dx <= movement; dx++) {
-      for (let dy = -movement; dy <= movement; dy++) {
-        const p = { x: activeMoverPos.x + dx, y: activeMoverPos.y + dy };
-        if (isValidMoveTarget(p, activeMoverPos, movement, q => floors.has(posKey(q)), isOccupied, isPortal)) keys.add(posKey(p));
-      }
-    }
-    return keys;
-  }, [activeMoverPos, movement, floors, enemyByKey, memberByKey, portalPos]);
 
   const inRangeWithLOS = (p: Pos) => chebyshev(activeMoverPos, p) <= actionRange && hasLineOfSight(activeMoverPos, p, floors);
 
@@ -156,10 +156,8 @@ export default function DungeonMap({ playerPos, activeMoverPos, party, movement,
     if (moveTargets.has(key)) onMove(p);
   };
 
-  return (
-    <div className="flex flex-col items-center">
-      <div className="bg-gray-800 p-4 rounded-lg inline-block">
-        <div className="relative">
+  const floor = (
+    <>
           {Array.from({ length: height }).map((_, y) => (
             <div key={y} className="flex">
               {Array.from({ length: width }).map((_, x) => {
@@ -217,43 +215,20 @@ export default function DungeonMap({ playerPos, activeMoverPos, party, movement,
                     className={`relative shrink-0 border flex items-center justify-center text-xs ${cellClass}`}
                   >
                     {tileItems?.[0] && (
+                      // The pile is drawn by ModelLayer; a glow on the floor under it shows it can be picked up
                       <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-0">
-                        <div className="relative">
-                          {/* The pile is drawn by ModelLayer; a glow under it shows it can be picked up */}
-                          <div
-                            className={`w-8 h-8 rounded-full ${isLootAdjacent ? 'animate-pulse' : 'invisible'}`}
-                            style={{ boxShadow: '0 0 10px 3px rgba(234,179,8,0.6)' }}
-                          />
-                          {tileItems.length > 1 && (
-                            <span className="absolute -top-1 -right-1 bg-yellow-500 text-black text-[8px] font-bold rounded-full w-3 h-3 flex items-center justify-center leading-none">
-                              {tileItems.length}
-                            </span>
-                          )}
-                        </div>
+                        <div
+                          className={`w-8 h-8 rounded-full ${isLootAdjacent ? 'animate-pulse' : 'invisible'}`}
+                          style={{ boxShadow: '0 0 10px 3px rgba(234,179,8,0.6)' }}
+                        />
                       </div>
                     )}
-                    {/* Members and enemies are drawn by ModelLayer; the active member stands on a floor glow */}
-                    {member?.active && <ActiveGlow />}
+                    {/* Members and enemies (and the active member's floor glow) are drawn by ModelLayer;
+                        doors, the portal and loot counts are upright markers (see below) */}
                     {enemy && <div className="w-full h-full cursor-pointer" />}
-                    {!member && !enemy && door && (
-                      <div
-                        className={`transition-all ${isDoorAdjacent && !inCombat ? 'animate-pulse' : ''}`}
-                        style={{ filter: isDoorAdjacent && !inCombat ? 'drop-shadow(0 0 8px rgba(209,213,219,0.8))' : 'none' }}
-                        onMouseEnter={(e) => { if (isDoorAdjacent && !inCombat) (e.currentTarget as HTMLElement).style.filter = 'drop-shadow(0 0 12px rgba(209,213,219,1))'; }}
-                        onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.filter = isDoorAdjacent && !inCombat ? 'drop-shadow(0 0 8px rgba(209,213,219,0.8))' : 'none'; }}
-                      >
-                        <GiDoorway className="w-8 h-8 text-gray-400" />
-                      </div>
-                    )}
-                    {!member && !enemy && !door && isPortal && (
-                      <div
-                        className={`transition-all ${isAdjacentToPortal ? 'cursor-pointer animate-pulse' : ''}`}
-                        style={{ filter: isAdjacentToPortal ? 'drop-shadow(0 0 8px rgba(34,211,238,0.8))' : 'none' }}
-                        onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.filter = 'drop-shadow(0 0 12px rgba(34,211,238,1))'; }}
-                        onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.filter = isAdjacentToPortal ? 'drop-shadow(0 0 8px rgba(34,211,238,0.8))' : 'none'; }}
-                      >
-                        <GiMagicPortal className="w-9 h-9 text-cyan-400" />
-                      </div>
+                    {/* A door or the portal the leader can use now: a soft pulsing glow on its tile (stronger on hover) */}
+                    {((door && isDoorAdjacent && !inCombat) || (isPortal && isAdjacentToPortal)) && (
+                      <UsableGlow color={door ? '209, 213, 219' : '178, 236, 192'} hovered={!!hoveredTile && samePos(hoveredTile, p)} />
                     )}
                     {enemyAoePreviewTiles?.has(key) && (
                       <div className="absolute inset-0 bg-red-900/50 border border-red-600 pointer-events-none z-20 animate-pulse" />
@@ -264,20 +239,35 @@ export default function DungeonMap({ playerPos, activeMoverPos, party, movement,
             </div>
           ))}
 
-          <Suspense fallback={null}>
-            <ModelLayer cols={width} rows={height} party={modelParty} enemies={modelEnemies} loot={modelLoot} renderEnemyOverlay={enemyOverlay} aims={aims} />
-          </Suspense>
-
           {!activeTarget && canAct && hoveredTile && moveTargets.has(posKey(hoveredTile)) && (
             <MoveLineOverlay from={activeMoverPos} to={hoveredTile} cols={width} rows={height} />
           )}
+    </>
+  );
 
-          {/* Floating combat text overlay */}
+  // No frame: the board floats on the game screen's background
+  return (
+        <Board board={board} floor={floor}>
+          <Suspense fallback={null}>
+            {/* Keyed by zone: entering another zone places every model fresh instead of gliding it across */}
+            <ModelLayer key={zone.id} board={board} party={modelParty} enemies={modelEnemies} loot={modelLoot} objects={mapObjects} renderEnemyOverlay={enemyOverlay} aims={aims} />
+          </Suspense>
+
+          {Object.entries(droppedItems).filter(([, items]) => items.length > 1).map(([key, items]) => {
+            const [x, y] = key.split(',').map(Number);
+            return (
+              <UprightAt key={key} board={board} x={x} y={y} height={0.2} className="z-10">
+                <span className="relative left-3 -top-2 bg-yellow-500 text-black text-[8px] font-bold rounded-full w-3 h-3 flex items-center justify-center leading-none">
+                  {items.length}
+                </span>
+              </UprightAt>
+            );
+          })}
+
+          {/* Floating combat text */}
           {floatingTexts.map(ft => (
-            <FloatingCombatText key={ft.id} ft={ft} onComplete={onFloatingTextComplete} />
+            <FloatingCombatText key={ft.id} ft={ft} at={board.toScreen(ft.gridX + 0.5, ft.gridY + 0.5, 0.5)} onComplete={onFloatingTextComplete} />
           ))}
-        </div>
-      </div>
-    </div>
+        </Board>
   );
 }

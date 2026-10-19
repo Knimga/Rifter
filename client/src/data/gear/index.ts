@@ -6,13 +6,13 @@ export { DAMAGE_ELEMENTS } from '../stats';
 import { BUFFABLE_STATS, DAMAGE_ELEMENTS } from '../stats';
 import type { DamageElement, BuffableStat, ActiveBuff } from '../stats';
 import type { ArmorSlot, WeaponType, GearSlots, Item, ArmorItem, ShieldItem, WeaponItem, Affix, Rarity, ImplicitDef } from './types';
-import { ARMOR_SLOTS, GEAR_SLOTS, PHYSICAL_ELEMENTS, RarityPerAffixCount } from './types';
+import { ARMOR_SLOTS, GEAR_SLOTS, PHYSICAL_ELEMENTS, RARITY_TILT_PER_LEVEL, RARITY_WEIGHT, RarityPerAffixCount } from './types';
 
 import { ARMOR_TYPE_BASE_VALUE, ARMOR_SLOT_MULTIPLIER, ARMOR_INVALID_AFFIXES, ARMOR_SERIES, ARMOR_IMPLICITS, armorName } from './armor';
 import { SHIELD_ARMOR_MULTIPLIER, SHIELDS, SHIELD_IMPLICIT } from './offhands';
 import { WEAPON_SERIES, WEAPON_TYPE_DATA, weaponName } from './weapons';
-import { PotencyBonusDivisor, STAT_POTENCY } from './affixes';
-import { chance, pick, randInt } from '../random';
+import { AFFIX_ROLLS, rollAffixValue } from './affixes';
+import { chance, pick, pickWeighted } from '../random';
 
 const MAGIC_ELEMENTS = DAMAGE_ELEMENTS.filter(el => !PHYSICAL_ELEMENTS.has(el));
 
@@ -81,18 +81,32 @@ function resolveImplicit(def: ImplicitDef, level: number): Affix {
   return { stat: def.statKey, value: Math.round(def.baseValue + def.growthPerLevel * (level - 1)) };
 }
 
+/** Each rarity's chance weight for an item of `level` (RARITY_WEIGHT, tilted toward rarer by RARITY_TILT_PER_LEVEL). */
+export function rarityWeights(level: number): Record<Rarity, number> {
+  const tilt = RARITY_TILT_PER_LEVEL * Math.max(0, level - 1);
+  return Object.fromEntries(
+    Object.entries(RarityPerAffixCount).map(([count, rarity]) => [rarity, RARITY_WEIGHT[rarity] * (1 + tilt * Number(count))]),
+  ) as Record<Rarity, number>;
+}
+
+/**
+ * An item's rarity and affixes: the rarity is rolled first (rarityWeights), and the item gets that many
+ * affixes (RarityPerAffixCount). Disabled (starting gear) = Common, no affixes.
+ */
 function rollAffixes(invalidAffixes: BuffableStat[], level: number, enabled: boolean): { affixes: Affix[]; rarity: Rarity } {
   const affixes: Affix[] = [];
   if (enabled) {
+    const weights = rarityWeights(level);
+    const rarity = pickWeighted(Object.keys(weights) as Rarity[], r => weights[r]);
+    const count = Number(Object.keys(RarityPerAffixCount).find(c => RarityPerAffixCount[Number(c)] === rarity));
     const invalid = new Set(invalidAffixes);
     const used = new Set<BuffableStat>();
-    while (affixes.length < 4 && chance(0.5)) {
+    while (affixes.length < count) {
       const available = BUFFABLE_STATS.filter(s => !invalid.has(s) && !used.has(s));
       if (available.length === 0) break;
-      const stat = pick(available);
+      const stat = pickWeighted(available, s => AFFIX_ROLLS[s].weight ?? 1);
       used.add(stat);
-      const potency = STAT_POTENCY.get(stat) ?? 'low';
-      affixes.push({ stat, value: Math.ceil(randInt(1, level) / PotencyBonusDivisor[potency]) });
+      affixes.push({ stat, value: rollAffixValue(stat, level) });
     }
   }
   return { affixes, rarity: RarityPerAffixCount[affixes.length] };

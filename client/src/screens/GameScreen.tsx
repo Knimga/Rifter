@@ -4,13 +4,13 @@ import { CLASSES } from '../data/classes';
 import { recomputeStats, type ActiveBuff, type ActiveHot, type ActiveDot } from '../data/stats';
 import { getGearArmorBonus, getGearBuffs, isShieldItem, isWeaponItem, generateLootDrop, type GearSlot, type GearSlots, type Item } from '../data/gear';
 import { isFull, addItem, canEquip, canUnequip, equipFromInventory, unequipToInventory, type Inventory } from '../data/inventory';
-import { OUT_OF_COMBAT_REGEN_INTERVAL_MS } from '../data/constants';
+import { AIM_TURN_LEAD_MS, OUT_OF_COMBAT_REGEN_INTERVAL_MS } from '../data/constants';
 import type { PartyMemberConfig } from '../data/party';
 import type { EnemyInstance } from '../data/enemies';
 import { withEnemyBuffs } from '../data/enemies';
-import { affectedKeys, chebyshev, findOpenTilesNear, hasLineOfSight, posKey, samePos, type Pos } from '../data/dungeonHelpers';
+import { affectedKeys, chebyshev, findOpenTilesNear, hasLineOfSight, partyMoveTargets, posKey, samePos, type Pos } from '../data/dungeonHelpers';
 import { SANCTUM, isSanctumWalkable } from '../data/sanctum';
-import { generateDungeon, spawnDungeonEnemies, type DungeonData, type ZoneData } from '../data/dungeonGen';
+import { generateDungeon, objectTilesOf, spawnDungeonEnemies, zoneWalkable, type DungeonData, type ZoneData } from '../data/dungeonGen';
 import { DUNGEON_PRESETS } from '../data/dungeonPresets';
 import { startCombat, joinCombat, advanceTurn, applyTopOfRound, tickRound, getCurrentCombatant, deadPartyIndices, type CombatState, type RoundTick } from '../data/combat';
 import { MP_DAMAGE_COLOR, executeAction, toAction, tickDurations, unitKey, type ActionOutcome, type CombatUnit, type UnitChange } from '../data/abilityExecution';
@@ -23,6 +23,7 @@ import CharacterSheet from '../components/CharacterSheet';
 import SanctumMap from '../components/SanctumMap';
 import DungeonMap from '../components/DungeonMap';
 import TopBar from '../components/TopBar';
+import PanView from '../components/PanView';
 import BottomBar from '../components/BottomBar';
 import { type SlotContent } from '../components/ActionBar';
 import type { PartyTokenData } from '../components/mapParts';
@@ -33,6 +34,13 @@ interface Props {
 }
 
 const AGGRO_RANGE = 5;
+
+/** A tile of `zone` where a party member can be placed: walkable, with no living enemy of that zone on it. */
+const isFreeFloor = (d: DungeonData, zone: ZoneData, enemies: EnemyInstance[]) => {
+  const walkable = zoneWalkable(d, zone);
+  const taken = new Set(enemies.filter(e => e.zoneId === zone.id && e.currentHp > 0).map(e => posKey(e.pos)));
+  return (p: Pos) => walkable(p) && !taken.has(posKey(p));
+};
 
 /** A party member's combat state, indexed like `party`. */
 interface MemberState {
@@ -166,6 +174,19 @@ export default function GameScreen({ party, setParty }: Props) {
     };
   }).filter(t => t.partyIndex === 0 || t.hp > 0);
 
+  // Where the active mover can go this turn (tile key -> steps it costs), by the shared movement rules
+  // (partyMoveTargets): walls, game objects (the portal) and enemies block the way, and nobody stops on an
+  // occupied tile. The maps highlight exactly these; handleMove accepts only these.
+  const moverPos = combat.active ? activePartyPos : playerPos;
+  const moverMovement = location === 'sanctum' ? stats.movement : combat.active ? combat.movementRemaining : activeStats.movement;
+  const unitTilesKey = [...partyTokens.map(t => posKey(t.pos)), '|', ...zoneEnemies.filter(e => e.currentHp > 0).map(e => posKey(e.pos))].join(';');
+  const moveTargets = useMemo(() => {
+    const isWalkable = zone && dungeon ? zoneWalkable(dungeon, zone) : isSanctumWalkable;
+    const enemyTiles = new Set(zoneEnemies.filter(e => e.currentHp > 0).map(e => posKey(e.pos)));
+    const unitTiles = new Set([...enemyTiles, ...partyTokens.map(t => posKey(t.pos))]);
+    return partyMoveTargets(moverPos, moverMovement, isWalkable, p => enemyTiles.has(posKey(p)), p => unitTiles.has(posKey(p)));
+  }, [moverPos.x, moverPos.y, moverMovement, zone, dungeon, unitTilesKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Selected action, normalised (weapon folded in) — drives map targeting and range
   const activeAction = activeAbility ? toAction(activeAbility, activeWeapon) : null;
 
@@ -195,7 +216,18 @@ export default function GameScreen({ party, setParty }: Props) {
   partyThreatRef.current = combat.partyThreat;
   const dungeonRef = useRef(dungeon);
   dungeonRef.current = dungeon;
-  const applyOutcomeRef = useRef<(outcome: ActionOutcome, caster: CombatUnit) => void>(() => {});
+  // Tiles of the current zone a game object stands on (the portal): enemies can't walk there either
+  const zoneObjectsRef = useRef(new Set<string>());
+  zoneObjectsRef.current = dungeon && zone ? objectTilesOf(dungeon, zone) : new Set();
+  const applyOutcomeRef = useRef<(outcome: ActionOutcome, caster: CombatUnit, aimAt?: Pos) => number>(() => 0);
+  const landOutcomeRef = useRef<(outcome: ActionOutcome, caster: CombatUnit) => void>(() => {});
+  // Outcomes waiting for their caster to finish turning toward the target (cancelled on a location change)
+  const pendingOutcomes = useRef(new Set<ReturnType<typeof setTimeout>>());
+  const cancelPendingOutcomes = () => {
+    pendingOutcomes.current.forEach(clearTimeout);
+    pendingOutcomes.current.clear();
+  };
+  useEffect(() => cancelPendingOutcomes, []);
 
   // ─── HP/MP limits ────────────────────────────────────────────────────────
 
@@ -287,6 +319,7 @@ export default function GameScreen({ party, setParty }: Props) {
   }, [updateMembers]);
 
   const handleLocationChange = (next: 'sanctum' | 'dungeon') => {
+    cancelPendingOutcomes();
     reviveDowned();
     setLocation(next);
     setCombat(INITIAL_COMBAT);
@@ -299,8 +332,9 @@ export default function GameScreen({ party, setParty }: Props) {
       setDungeon(d);
       setCurrentZone(d.startZoneId);
       setPlayerPos(d.playerStart);
-      setEnemies(spawnDungeonEnemies(d, config));
-      setFollowerPositions(findFollowerSpawns(d.playerStart, d.zones[d.startZoneId].floors, 2));
+      const spawned = spawnDungeonEnemies(d, config);
+      setEnemies(spawned);
+      setFollowerPositions(findFollowerSpawns(d.playerStart, isFreeFloor(d, d.zones[d.startZoneId], spawned), 2));
     } else {
       setDungeon(null);
       setCurrentZone(0);
@@ -326,6 +360,7 @@ export default function GameScreen({ party, setParty }: Props) {
   useEffect(() => {
     if (!combat.active || !currentCombatant?.isPlayer) return;
     if ((partyHp[currentCombatant.partyIndex ?? 0] ?? 1) > 0) return;
+    if (partyHp.every(hp => hp <= 0)) return; // a wipe: the death check above ends combat
     clearActiveSlot();
     setCombat(prev => advanceTurn(prev, zoneEnemies, partyAllStats.map(s => s.movement), deadPartyIndices(partyHp)));
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -366,13 +401,14 @@ export default function GameScreen({ party, setParty }: Props) {
     const pairedDoor = targetZone.doors.find(d => d.id === door.targetDoorId);
     if (!pairedDoor) return;
 
-    // Arrive on the first floor tile next to the paired door
-    const spawnPos = findOpenTilesNear(pairedDoor.pos, p => targetZone.floors.has(posKey(p)), 1, 1)[0];
+    // Arrive on the free floor tile closest to the paired door (never on an enemy), followers around it
+    const isFree = isFreeFloor(dungeon, targetZone, enemies);
+    const spawnPos = findOpenTilesNear(pairedDoor.pos, isFree, 1, 4)[0];
     if (!spawnPos) return;
 
     setCurrentZone(door.targetZoneId);
     setPlayerPos(spawnPos);
-    setFollowerPositions(findFollowerSpawns(spawnPos, targetZone.floors, 2));
+    setFollowerPositions(findFollowerSpawns(spawnPos, isFree, 2));
     clearFloats();
 
     triggerAggro(spawnPos, enemies.filter(e => e.zoneId === door.targetZoneId), targetZone.floors, false);
@@ -446,10 +482,10 @@ export default function GameScreen({ party, setParty }: Props) {
   // ─── Movement handler ────────────────────────────────────────────────────
 
   const handleMove = useCallback((newPos: Pos) => {
+    const steps = moveTargets.get(posKey(newPos));
+    if (steps === undefined) return; // not reachable this turn (walls, enemies or too far)
     if (combat.active) {
       if (!isPlayerTurn) return;
-      const distance = chebyshev(activePartyPos, newPos);
-      if (distance > combat.movementRemaining) return;
 
       if (activePartyIdx === 0) {
         setPlayerPos(newPos);
@@ -460,9 +496,12 @@ export default function GameScreen({ party, setParty }: Props) {
 
       setCombat(prev => ({
         ...prev,
-        movementRemaining: prev.movementRemaining - distance,
+        movementRemaining: prev.movementRemaining - steps,
       }));
     } else {
+      // Followers trail the leader over walkable floor, never onto (or through) an enemy or the portal
+      const enemyTiles = new Set(zoneEnemies.filter(e => e.currentHp > 0).map(e => posKey(e.pos)));
+      const walkable = zone && dungeon ? zoneWalkable(dungeon, zone) : isSanctumWalkable;
       const { f1, f2 } = computeFollowerPositions(
         newPos,
         playerPos,
@@ -470,7 +509,7 @@ export default function GameScreen({ party, setParty }: Props) {
         followerPositionsRef.current[1],
         partyStatsRef.current[1]?.movement ?? 3,
         partyStatsRef.current[2]?.movement ?? 3,
-        zone ? (p => zone.floors.has(posKey(p))) : isSanctumWalkable,
+        p => walkable(p) && !enemyTiles.has(posKey(p)),
       );
       setPlayerPos(newPos);
       setFollowerPositions([f1, f2]);
@@ -478,7 +517,7 @@ export default function GameScreen({ party, setParty }: Props) {
     }
 
     if (zone) triggerAggro(newPos, zoneEnemies, zone.floors, combat.active);
-  }, [combat.active, combat.movementRemaining, isPlayerTurn, activePartyIdx, activePartyPos, playerPos, zoneEnemies, zone, triggerAggro]);
+  }, [combat.active, moveTargets, isPlayerTurn, activePartyIdx, playerPos, zoneEnemies, zone, dungeon, triggerAggro]);
 
   // ─── End turn ────────────────────────────────────────────────────────────
 
@@ -490,15 +529,32 @@ export default function GameScreen({ party, setParty }: Props) {
 
   // ─── Action outcomes (shared by party and enemy actions) ─────────────────
 
-  const applyActionOutcome = useCallback((outcome: ActionOutcome, caster: CombatUnit, aimAt?: Pos) => {
-    for (const f of outcome.floats) spawnFloat(f.pos.x, f.pos.y, f.text, f.color);
-    // The caster's model turns to face where the ability was aimed (view state only)
-    if (aimAt && !samePos(aimAt, caster.pos)) {
-      const id = unitKey(caster.ref);
-      aimSeqRef.current += 1;
-      const seq = aimSeqRef.current;
-      setUnitAims(prev => ({ ...prev, [id]: { x: aimAt.x, y: aimAt.y, seq } }));
+  /**
+   * Resolve an action. When it is aimed at another tile, the caster's model first turns to face it (view
+   * state only), and the outcome lands AIM_TURN_LEAD_MS later, once the turn is done. Returns the delay (ms)
+   * before the outcome lands, so callers can wait for it.
+   */
+  const applyActionOutcome = useCallback((outcome: ActionOutcome, caster: CombatUnit, aimAt?: Pos): number => {
+    if (!aimAt || samePos(aimAt, caster.pos)) {
+      landOutcomeRef.current(outcome, caster);
+      return 0;
     }
+    const id = unitKey(caster.ref);
+    aimSeqRef.current += 1;
+    const seq = aimSeqRef.current;
+    setUnitAims(prev => ({ ...prev, [id]: { x: aimAt.x, y: aimAt.y, seq } }));
+    const timer = setTimeout(() => {
+      pendingOutcomes.current.delete(timer);
+      landOutcomeRef.current(outcome, caster);
+    }, AIM_TURN_LEAD_MS);
+    pendingOutcomes.current.add(timer);
+    return AIM_TURN_LEAD_MS;
+  }, []);
+  applyOutcomeRef.current = applyActionOutcome;
+
+  /** An action's effects: floating text, HP/MP/effect changes on party and enemies, loot, threat. */
+  const landOutcome = useCallback((outcome: ActionOutcome, caster: CombatUnit) => {
+    for (const f of outcome.floats) spawnFloat(f.pos.x, f.pos.y, f.text, f.color);
 
     const partyChanges = new Map<number, UnitChange>();
     const enemyChanges = new Map<string, UnitChange>();
@@ -565,7 +621,7 @@ export default function GameScreen({ party, setParty }: Props) {
         : prev);
     }
   }, [spawnFloat, updateCurrentZone, updateMembers]);
-  applyOutcomeRef.current = applyActionOutcome;
+  landOutcomeRef.current = landOutcome;
 
   // ─── Player action ───────────────────────────────────────────────────────
 
@@ -629,6 +685,7 @@ export default function GameScreen({ party, setParty }: Props) {
     partyThreat: partyThreatRef,
     zone: zoneRef,
     currentZone: currentZoneRef,
+    zoneObjects: zoneObjectsRef,
     applyOutcome: applyOutcomeRef,
   }), []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -654,7 +711,7 @@ export default function GameScreen({ party, setParty }: Props) {
   const isSupportAction = !!activeAction?.effects.some(e => e.type === 'heal' || e.type === 'buff' || e.type === 'hot');
 
   return (
-    <div className="h-screen bg-gray-900 text-gray-100 flex flex-col overflow-hidden">
+    <div className="h-screen bg-gray-800 text-gray-100 flex flex-col overflow-hidden">
       <TopBar
         stats={stats}
         location={location}
@@ -669,15 +726,16 @@ export default function GameScreen({ party, setParty }: Props) {
         onShowCharSheet={() => setShowCharSheet(true)}
       />
 
-      <div className="flex-1 overflow-auto p-6">
-        <div className="max-w-7xl mx-auto">
+      {/* The map: drag with the right mouse button to pan (PanView keeps it in view) */}
+      <div className="flex-1 min-h-0">
+        <PanView resetKey={`${location}:${zone?.id ?? ''}`}>
           {location === 'sanctum' && (
             <SanctumMap
               playerPos={playerPos}
               activeMoverPos={playerPos}
               party={partyTokens}
               aims={unitAims}
-              movement={stats.movement}
+              moveTargets={moveTargets}
               onMove={handleMove}
               onLocationChange={handleLocationChange}
               activeTarget={activeTarget}
@@ -692,7 +750,7 @@ export default function GameScreen({ party, setParty }: Props) {
               activeMoverPos={combat.active ? activePartyPos : playerPos}
               party={partyTokens}
               aims={unitAims}
-              movement={combat.active ? combat.movementRemaining : activeStats.movement}
+              moveTargets={moveTargets}
               onMove={handleMove}
               onLocationChange={handleLocationChange}
               onDoorClick={handleDoorClick}
@@ -716,13 +774,15 @@ export default function GameScreen({ party, setParty }: Props) {
               partyDots={partyDots}
               floorColor={DUNGEON_PRESETS.crypt.floorColor}
               wallColor={DUNGEON_PRESETS.crypt.wallColor}
+              doorObject={DUNGEON_PRESETS.crypt.doorObject}
+              portalObject={DUNGEON_PRESETS.crypt.portalObject}
               enemyAoePreviewTiles={enemyAoePreview?.tiles}
               enemyTargetPartyIdx={enemyTargetPartyIdx}
               droppedItems={zone?.droppedItems}
               onLootClick={handleLootPickup}
             />
           )}
-        </div>
+        </PanView>
       </div>
 
       <BottomBar

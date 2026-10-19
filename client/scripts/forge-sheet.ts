@@ -11,7 +11,9 @@
 //   --weapon "<type>"   class designs: hold this weapon type (posed for its hold), e.g. "Crossbows";
 //                       default = the class's starting gear
 import { writeFileSync } from 'node:fs';
-import { GAME_CAMERA, ITEM_GROUND_PITCH, LIGHT, SHEET_SHADING, itemRestLift, layItem, obliqueProject } from '../src/forge/core/stage-config';
+import { ITEM_GROUND_PITCH, SHEET_SHADING, itemRestLift, keyLightDir, layItem, lootYaw } from '../src/forge/core/stage-config';
+import { GAME_CAMERA, viewProject, type ViewAngles } from '../src/viewEngine/camera';
+import { rotY } from '../src/forge/core/vec';
 import type { Design, Model } from '../src/forge/core/types';
 import { ITEM_SEED, oneLook } from '../src/forge/core/link';
 import { loadDesigns } from './load-designs';
@@ -27,8 +29,9 @@ const only = opt('design', '');
 const seedArg = opt('seeds', '6');
 const seeds = seedArg.includes(',') ? seedArg.split(',').map(Number) : Array.from({ length: Number(seedArg) }, (_, i) => i + 1);
 const yaws = opt('yaws', '0').split(',').map((d) => (Number(d) * Math.PI) / 180);
-const elevDeg = Number(opt('elev', String(GAME_CAMERA.elevationDeg)));
-const elev = (elevDeg * Math.PI) / 180;
+// The game view (GAME_CAMERA), optionally at another elevation
+const VIEW: ViewAngles = { ...GAME_CAMERA, elevationDeg: Number(opt('elev', String(GAME_CAMERA.elevationDeg))) };
+const elev = (VIEW.elevationDeg * Math.PI) / 180, viewYaw = (VIEW.yawDeg * Math.PI) / 180;
 const cols = Number(opt('cols', '6'));
 const CELL = Number(opt('cell', '200'));
 const out = opt('out', 'forge-sheet.png');
@@ -44,15 +47,16 @@ function renderCell(model: Model, design: Design, yaw: number): Uint8Array {
 
   const ce = Math.cos(elev), se = Math.sin(elev), cy = Math.cos(yaw), sy = Math.sin(yaw);
   // world-ish space: rotate model by yaw about Y (matches rotY in vec.ts)
-  // Items lie on the floor as loot (flat and face up unless the design sets its own pitch), then everything turns by yaw.
+  // Items lie on the floor as loot (flat and face up unless the design sets its own pitch, turned like
+  // loot in the game: lootYaw), then everything turns by yaw.
   const isItem = design.fit.kind === 'item';
   const pitch = model.groundPitch ?? ITEM_GROUND_PITCH;
   const lift = isItem ? itemRestLift(model.mesh.positions, pitch) : 0;
-  const place = (p: number[]): number[] => (isItem ? layItem([p[0], p[1], p[2]], pitch, lift) : p);
+  const place = (p: number[]): number[] => (isItem ? rotY(layItem([p[0], p[1], p[2]], pitch, lift), lootYaw(VIEW)) : p);
   const rot = (q: number[]): [number, number, number] => { const p = place(q); return [p[0] * cy + p[2] * sy, p[1], -p[0] * sy + p[2] * cy]; };
-  // Same oblique projection as the game: ground maps 1:1, height lifts by y*cot(e). Returns [x, up, depth].
+  // The game's projection (viewProject). Returns [x, up, depth].
   const view = (p: number[]): [number, number, number] => {
-    const [x, down, depth] = obliqueProject([p[0], p[1], p[2]], elevDeg);
+    const [x, down, depth] = viewProject([p[0], p[1], p[2]], VIEW);
     return [x, -down, depth];
   };
 
@@ -64,7 +68,9 @@ function renderCell(model: Model, design: Design, yaw: number): Uint8Array {
   const toScreen = (v: [number, number, number]) => [cxp + v[0] * k, cyp - v[1] * k, v[2]] as const;
   const groundY = 0; // standing models' feet and flat-laid items both rest on y = 0
 
-  const fillTri = (a: readonly number[], b: readonly number[], c: readonly number[], rgb: number[], alpha: number, writeZ: boolean) => {
+  /** `rgb`: one color, or one per corner (a, b, c) blended across the triangle. */
+  const fillTri = (a: readonly number[], b: readonly number[], c: readonly number[], rgb: number[] | number[][], alpha: number, writeZ: boolean) => {
+    const corners = Array.isArray(rgb[0]) ? (rgb as number[][]) : null;
     const minX = Math.max(0, Math.floor(Math.min(a[0], b[0], c[0]))), maxX = Math.min(S - 1, Math.ceil(Math.max(a[0], b[0], c[0])));
     const minY = Math.max(0, Math.floor(Math.min(a[1], b[1], c[1]))), maxY = Math.min(S - 1, Math.ceil(Math.max(a[1], b[1], c[1])));
     const d = (b[1] - c[1]) * (a[0] - c[0]) + (c[0] - b[0]) * (a[1] - c[1]);
@@ -80,7 +86,10 @@ function renderCell(model: Model, design: Design, yaw: number): Uint8Array {
         const i = y * S + x;
         if (z <= zbuf[i]) continue;
         if (writeZ) zbuf[i] = z;
-        for (let ch = 0; ch < 3; ch++) color[i * 3 + ch] = color[i * 3 + ch] * (1 - alpha) + rgb[ch] * alpha;
+        for (let ch = 0; ch < 3; ch++) {
+          const v = corners ? w0 * corners[0][ch] + w1 * corners[1][ch] + w2 * corners[2][ch] : (rgb as number[])[ch];
+          color[i * 3 + ch] = color[i * 3 + ch] * (1 - alpha) + v * alpha;
+        }
       }
   };
 
@@ -96,7 +105,7 @@ function renderCell(model: Model, design: Design, yaw: number): Uint8Array {
     }
   }
 
-  const L = LIGHT.keyDir;
+  const L = keyLightDir(VIEW);
   const Ln = Math.hypot(...L);
   const { positions, colors, emissive, alpha, triCount } = model.mesh;
   const opaque: number[] = [], clear: number[] = [];
@@ -113,15 +122,16 @@ function renderCell(model: Model, design: Design, yaw: number): Uint8Array {
     const nl = Math.hypot(n[0], n[1], n[2]) || 1;
     n = n.map((v) => v / nl);
     // back-face cull (view direction toward camera in world space)
-    const toCam = [0, se, ce];
+    const toCam = [-Math.sin(viewYaw) * ce, se, Math.cos(viewYaw) * ce];
     if (n[0] * toCam[0] + n[1] * toCam[1] + n[2] * toCam[2] <= 0 && alpha[t] >= 0.99) return;
     const diff = Math.max(0, (n[0] * L[0] + n[1] * L[1] + n[2] * L[2]) / Ln);
     const sh = SHEET_SHADING.ambient + SHEET_SHADING.key * diff;
     const e = emissive[t];
-    const rgb = [0, 1, 2].map((ch) => {
-      const base = colors[t * 9 + ch] * 255; // vertex colors are flat per face
+    // Each corner's color, shaded (usually all three are the same; a blended face differs per corner)
+    const rgb = [0, 1, 2].map((v) => [0, 1, 2].map((ch) => {
+      const base = colors[t * 9 + v * 3 + ch] * 255;
       return Math.min(255, base * sh * (1 - e) + Math.min(255, base * 1.12) * e);
-    });
+    }));
     const [a, b, c] = P.map((p) => toScreen(view(p)));
     fillTri(a, b, c, rgb, alpha[t], writeZ);
   };

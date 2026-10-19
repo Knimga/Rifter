@@ -10,10 +10,17 @@ export interface FaceOpts {
   a?: number;
   /** Per-face brightness jitter amount. Default 0.16. This is what makes it look faceted. */
   j?: number;
+  /**
+   * A color per corner (for a, b, c as passed), blended across the face instead of one flat color: soft
+   * gradients, e.g. a blurred glow. Rare; the faceted look is the default.
+   */
+  vc?: [RGB, RGB, RGB];
 }
 export interface Face {
   v: [Vec3, Vec3, Vec3];
   c: RGB;
+  /** Corner colors (same order as v), when the face blends them (FaceOpts.vc). */
+  vc?: [RGB, RGB, RGB];
   e: number;
   a: number;
   j: number;
@@ -57,16 +64,19 @@ export class Mesh {
     const l = Math.hypot(nx, ny, nz);
     if (l < 1e-7) return; // degenerate (collapsed tip rings etc.)
     const mx = (a[0] + b[0] + c[0]) / 3, my = (a[1] + b[1] + c[1]) / 3, mz = (a[2] + b[2] + c[2]) / 3;
+    let vc = o.vc;
     if (nx * (mx - ctr[0]) + ny * (my - ctr[1]) + nz * (mz - ctr[2]) < 0) {
       const t = b;
       b = c;
       c = t;
       nx = -nx; ny = -ny; nz = -nz;
+      if (vc) vc = [vc[0], vc[2], vc[1]]; // corner colors follow their corners
     }
     const color = typeof col === 'function' ? col([mx, my, mz], [nx * (1 / l), ny * (1 / l), nz * (1 / l)]) : col;
     this.faces.push({
       v: [[a[0], a[1], a[2]], [b[0], b[1], b[2]], [c[0], c[1], c[2]]],
       c: color,
+      vc,
       e: o.e ?? 0,
       a: o.a ?? 1,
       j: 1 + (this.R() - 0.5) * (o.j ?? 0.16),
@@ -118,7 +128,7 @@ export function bake(m: Mesh): MeshData {
     for (let v = 0; v < 3; v++) {
       for (let k = 0; k < 3; k++) {
         positions[i * 9 + v * 3 + k] = f.v[v][k];
-        colors[i * 9 + v * 3 + k] = Math.max(0, Math.min(1, (f.c[k] / 255) * f.j));
+        colors[i * 9 + v * 3 + k] = Math.max(0, Math.min(1, ((f.vc ? f.vc[v] : f.c)[k] / 255) * f.j));
       }
     }
     emissive[i] = f.e;

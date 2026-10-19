@@ -8,6 +8,7 @@ import { WEAPON_SERIES, weaponName } from '../data/gear/weapons';
 import { ARMOR_SERIES, armorName } from '../data/gear/armor';
 import { SHIELDS } from '../data/gear/offhands';
 import { CLASSES, type ClassKey } from '../data/classes';
+import { GAME_OBJECTS } from '../data/gameObjects';
 import { ARMOR_SLOTS, type WeaponType } from '../data/gear/types';
 
 export interface DataEntry {
@@ -58,7 +59,13 @@ export function allDataEntries(): DataEntry[] {
     path: `data/classes.ts › ${key}`,
     link: c.model,
   }));
-  return [...enemies, ...weapons, ...armor, ...offhands, ...classes];
+  const objects: DataEntry[] = GAME_OBJECTS.map((o) => ({
+    ref: { table: 'gameObjects', key: o.id },
+    name: o.name,
+    path: `data/gameObjects.ts › ${o.id}`,
+    link: o.model,
+  }));
+  return [...enemies, ...weapons, ...armor, ...offhands, ...classes, ...objects];
 }
 
 // Built on first use. Game data is static at runtime (a hot reload re-runs this module).

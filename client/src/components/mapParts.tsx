@@ -1,10 +1,13 @@
+import { useMemo, type ReactNode } from 'react';
+import { TILE_SIZE, boardLayout, type BoardLayout } from '../viewEngine/board';
+import { yawFromGridMove } from '../forge/core/facing';
 import type { ActiveBuff, ActiveDot, ActiveHot } from '../data/stats';
 import type { ClassKey } from '../data/classes';
 import type { ModelLink } from '../forge/core/types';
 import type { HeldWeapon } from '../forge/equip';
 import type { MapPartyMember } from './ModelLayer';
 import type { Pos } from '../data/dungeonHelpers';
-import { DAMAGE_ELEMENT_COLOR, TILE_SIZE } from '../data/constants';
+import { DAMAGE_ELEMENT_COLOR } from '../data/constants';
 import { Tooltip } from './Tooltip';
 import MoveLine from './MoveLine';
 
@@ -34,20 +37,87 @@ export function toMapMember(m: PartyTokenData, dots: EffectDot[] = []): MapParty
     pos: m.pos,
     weapon: m.weapon,
     shield: m.shield,
+    active: m.active,
     overlay: <PartyOverlay member={m} dots={dots} />,
   };
 }
 
+// ─── Board ────────────────────────────────────────────────────────────────────
+
+/** A map's board layout (the game view's projection of its cols x rows grid), stable while the size is. */
+export function useBoard(cols: number, rows: number): BoardLayout {
+  return useMemo(() => boardLayout(cols, rows, TILE_SIZE), [cols, rows]);
+}
+
 /**
- * Floor glow under the active party member (drawn on the tile, beneath the model): a faint oval centered
- * on the feet, wider than tall, so it reads as lying on the floor in the game camera's perspective.
+ * A map's board, drawn in the game view (GAME_CAMERA): a box sized to the projected grid. `floor` is the
+ * flat tile grid and anything lying on it (highlights, the move line), in flat tile px (tile (x, y) at
+ * x·TILE_SIZE, y·TILE_SIZE); it is laid on the floor by one CSS transform, so clicks and hovers land on
+ * the right tiles. `children` are drawn above it, upright (models, overlays, markers), placed with
+ * board.toScreen (see UprightAt).
+ */
+export function Board({ board, floor, children }: { board: BoardLayout; floor: ReactNode; children?: ReactNode }) {
+  return (
+    <div className="relative" style={{ width: board.width, height: board.height }}>
+      <div
+        className="absolute left-0 top-0"
+        style={{ width: board.cols * TILE_SIZE, height: board.rows * TILE_SIZE, transform: board.floorTransform, transformOrigin: '0 0' }}
+      >
+        {floor}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+/**
+ * Upright DOM on the board (not laid on the floor): a TILE_SIZE-wide box centered on tile (x, y), its
+ * center `height` world tiles above the floor. Doesn't take clicks (the tile under it does).
+ */
+export function UprightAt({ board, x, y, height = 0, className = '', children }: { board: BoardLayout; x: number; y: number; height?: number; className?: string; children: ReactNode }) {
+  const p = board.toScreen(x + 0.5, y + 0.5, height);
+  return (
+    <div
+      className={`absolute pointer-events-none flex items-center justify-center ${className}`}
+      style={{ left: p.left - TILE_SIZE / 2, top: p.top - TILE_SIZE / 2, width: TILE_SIZE, height: TILE_SIZE }}
+    >
+      {children}
+    </div>
+  );
+}
+
+/**
+ * Yaw (radians) for a game object at `pos` to face its open side: the first walkable side tile (south, east,
+ * north, west), e.g. a door in a wall facing the floor it opens onto. 0 (south) if none is open.
+ */
+export function facingOpenSide(pos: Pos, isOpen: (p: Pos) => boolean): number {
+  for (const [dx, dy] of [[0, 1], [1, 0], [0, -1], [-1, 0]]) if (isOpen({ x: pos.x + dx, y: pos.y + dy })) return yawFromGridMove(dx, dy);
+  return 0;
+}
+
+/**
+ * A soft pulsing glow filling a floor tile: something there (a door, a portal) can be used now. `color`
+ * is "r, g b" (0-255); it brightens on hover. Goes inside the tile, on the floor layer.
+ */
+export function UsableGlow({ color, hovered }: { color: string; hovered: boolean }) {
+  return (
+    <div
+      className="absolute inset-0 pointer-events-none animate-pulse"
+      style={{ boxShadow: `inset 0 0 ${hovered ? 16 : 10}px ${hovered ? 4 : 2}px rgba(${color}, ${hovered ? 0.8 : 0.5})` }}
+    />
+  );
+}
+
+/**
+ * Floor glow under the active party member: a faint disc on the floor plane, beneath the model (ModelLayer
+ * moves it with the model). The floor transform turns it into the oval the floor shows in perspective.
  */
 export function ActiveGlow() {
   return (
     <div
       className="absolute pointer-events-none"
       style={{
-        left: '14%', right: '14%', top: '29%', bottom: '29%',
+        inset: '2%',
         // closest-side: the gradient reaches 0 exactly at the oval's edge, so it fades out with no rim
         background: 'radial-gradient(ellipse closest-side, rgba(240, 232, 196, 0.32) 0%, rgba(240, 232, 196, 0.14) 50%, rgba(240, 232, 196, 0) 100%)',
       }}

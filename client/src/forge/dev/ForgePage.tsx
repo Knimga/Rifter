@@ -11,9 +11,10 @@ import { buildPreview, classHolds, classOf } from '../equip';
 import { HOLD_LABEL } from '../designs/_character';
 import type { WeaponType } from '../../data/gear/types';
 import { DUNGEON_PRESETS } from '../../data/dungeonPresets';
-import { TILE_SIZE } from '../../data/constants';
 import { TILE_BORDER_CLASS } from '../../components/mapParts';
 import { ForgeView, GAME_VIEW_ANCHOR, type CameraPreset, type Cell } from './forgeView';
+import { floorMatrix } from '../../viewEngine/camera';
+import { TILE_SIZE } from '../../viewEngine/board';
 
 // Cell size follows the game's tile size (TILE_SIZE, the one constant the maps use), so the game view
 // always frames the same 3x3 tiles: if tiles get bigger, models and cells grow with them.
@@ -22,7 +23,7 @@ const LABEL_H = 0; // no per-cell text strip; a cell's name and seed show on hov
 const COLS = 6;
 // Left-panel sections, in order. Every Category must be listed (Record keeps that checked).
 const CATEGORY_LABEL: Record<Category, string> = {
-  creature: 'Creatures', character: 'Classes', weapon: 'Weapons', armor: 'Armor', offhand: 'Offhands',
+  creature: 'Creatures', character: 'Classes', weapon: 'Weapons', armor: 'Armor', offhand: 'Offhands', object: 'Game Objects',
 };
 const CATEGORIES = Object.keys(CATEGORY_LABEL) as Category[];
 const WALK_DIRS = [0, 1, 2, 3, 4, 5, 6, 7].map((i) => (i * Math.PI) / 4);
@@ -169,19 +170,22 @@ export default function ForgePage() {
           if (model) cells.push({ model, yaw, rect: rectOf(b, i) });
         }),
       );
-      view.render(cells, { camera, wireframe, ground }, { w: width, h: height });
+      view.render(cells, { camera, wireframe, ground }, { w: width, h: height }, performance.now() / 1000);
     };
-    if (motion === 'none') {
+    // Models with moving parts (a portal's swirl) animate even when the view is static
+    const hasMovingParts = built.some((block) => block.some(({ model }) => !!model?.motion?.length));
+    if (motion === 'none' && !hasMovingParts) {
       yawRef.current = (yawDeg * Math.PI) / 180;
       draw(yawRef.current);
       return;
     }
-    // Animate only while a motion test runs (turntable, or the 8-direction walk test).
+    // Animate only while a motion test runs (turntable, or the 8-direction walk test) or parts move.
     let raf = 0, last = performance.now(), walkIdx = 0, nextStep = last;
     const tick = (now: number) => {
       const dt = now - last;
       last = now;
-      if (motion === 'turntable') yawRef.current += dt * 0.0012;
+      if (motion === 'none') yawRef.current = (yawDeg * Math.PI) / 180;
+      else if (motion === 'turntable') yawRef.current += dt * 0.0012;
       else {
         if (now >= nextStep) { walkIdx = (walkIdx + 1) % WALK_DIRS.length; nextStep = now + 700; }
         yawRef.current = smoothYaw(yawRef.current, WALK_DIRS[walkIdx], dt);
@@ -378,30 +382,32 @@ const TILE_BORDER_RGBA = 'rgba(55, 65, 81, 0.3)'; // TILE_BORDER_CLASS as a colo
 type Rect = { x: number; y: number; w: number; h: number };
 
 /**
- * An N×N block of tiles (N odd, as many as fit) centered on the model's tile, in cell-relative px.
- * A block per cell rather than a full fill, so neighbouring cells' grids never meet out of step.
+ * The floor around the model's tile, as the game draws it: flat tiles in floor px (the model's tile
+ * spans -TILE_SIZE/2..+TILE_SIZE/2 around its center), laid on the floor by the game view's transform
+ * (floorMatrix) with the tile center at GAME_VIEW_ANCHOR. Enough tiles to cover the cell (it clips them);
+ * a block per cell, so neighbouring cells' grids never meet out of step.
  */
 function floorTiles(r: Rect): { left: number; top: number }[] {
-  let n = Math.floor((Math.min(r.w, r.h) - 20) / TILE_SIZE);
-  if (n % 2 === 0) n -= 1;
-  const cx = r.w * GAME_VIEW_ANCHOR.x - TILE_SIZE / 2;
-  const cy = r.h * GAME_VIEW_ANCHOR.y - TILE_SIZE / 2;
-  const half = (n - 1) / 2;
+  const half = Math.ceil(Math.max(r.w, r.h) / TILE_SIZE);
   const tiles: { left: number; top: number }[] = [];
-  for (let i = -half; i <= half; i++) for (let j = -half; j <= half; j++) tiles.push({ left: cx + i * TILE_SIZE, top: cy + j * TILE_SIZE });
+  for (let i = -half; i <= half; i++) for (let j = -half; j <= half; j++) tiles.push({ left: i * TILE_SIZE - TILE_SIZE / 2, top: j * TILE_SIZE - TILE_SIZE / 2 });
   return tiles;
 }
+/** The floor transform for a cell: floorMatrix, translated to the cell's anchor (cell-relative px). */
+const cellFloor = (r: Rect): [number, number, number, number, number, number] => [...floorMatrix(), r.w * GAME_VIEW_ANCHOR.x, r.h * GAME_VIEW_ANCHOR.y];
 
 function FloorCell({ rect }: { rect: Rect }) {
   return (
     <div className="absolute overflow-hidden" style={{ left: rect.x, top: rect.y, width: rect.w, height: rect.h }}>
-      {floorTiles(rect).map((t) => (
-        <div
-          key={`${t.left},${t.top}`}
-          className={`absolute border ${TILE_BORDER_CLASS}`}
-          style={{ left: t.left, top: t.top, width: TILE_SIZE, height: TILE_SIZE, backgroundColor: FLOOR }}
-        />
-      ))}
+      <div className="absolute left-0 top-0" style={{ transform: `matrix(${cellFloor(rect).join(', ')})`, transformOrigin: '0 0' }}>
+        {floorTiles(rect).map((t) => (
+          <div
+            key={`${t.left},${t.top}`}
+            className={`absolute border ${TILE_BORDER_CLASS}`}
+            style={{ left: t.left, top: t.top, width: TILE_SIZE, height: TILE_SIZE, backgroundColor: FLOOR }}
+          />
+        ))}
+      </div>
     </div>
   );
 }
@@ -420,11 +426,13 @@ function composeSnapshot(gl: HTMLCanvasElement, size: { w: number; h: number }, 
     ctx.beginPath();
     ctx.rect(r.x, r.y, r.w, r.h);
     ctx.clip();
+    const [a, b, c, d, tx, ty] = cellFloor(r);
+    ctx.transform(a, b, c, d, r.x + tx, r.y + ty);
     for (const t of floorTiles(r)) {
       ctx.fillStyle = FLOOR;
-      ctx.fillRect(r.x + t.left, r.y + t.top, TILE_SIZE, TILE_SIZE);
+      ctx.fillRect(t.left, t.top, TILE_SIZE, TILE_SIZE);
       ctx.strokeStyle = TILE_BORDER_RGBA;
-      ctx.strokeRect(r.x + t.left + 0.5, r.y + t.top + 0.5, TILE_SIZE - 1, TILE_SIZE - 1);
+      ctx.strokeRect(t.left + 0.5, t.top + 0.5, TILE_SIZE - 1, TILE_SIZE - 1);
     }
     ctx.restore();
   }

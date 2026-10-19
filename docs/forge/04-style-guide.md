@@ -6,15 +6,15 @@
 - **Color.** Mid-saturation bodies, one saturated accent. Glows that belong to the model (eyes, cores, gems, crystals) use emissive faces (`e` >= .5), so they pop under any light.
 - **No rarity or element glow in designs.** Item rarity glow (Superior and up) is applied by the renderer, so an item's mesh never depends on its rarity.
 - **Sizes.** Creatures about one tile (bosses larger via `fit`). Items are `fit.size` about 0.8: they sit on a tile and fill an icon.
-- **Facing.** Front (eyes, face) toward +z. Make the front obviously the front. Models only turn when they move (they face the direction they last moved) or use an ability (they face the tile it was aimed at).
+- **Facing.** Front (eyes, face) toward +z. Make the front obviously the front. Models turn when they move (toward the move, before gliding there) or use an ability (toward the tile it was aimed at); they have no other animation.
 - **Budgets.** Creatures <= 900 tris, items <= 600.
 - **Loot is motionless** on the ground and in the inventory. Build items facing +z (their outline in the x-y plane): they're shown flat on the tile in game and straight-on in icons, so the x-y outline is what players see.
 - **Weapons** lean with the tip up and to the LEFT (`WEAPON_ROLL`), matching the character sheet's left-hand weapon slot. Never pitch a weapon toward or away from the camera. Weapon designs draw `series` and `weaponType` from the game's weapon data (`weaponPalette`): the series sets the material, and the display name comes from `WEAPON_SERIES`.
 - **Don't** add detail smaller than about 3% of the model; it is invisible at game scale and costs triangles.
 
 ## Camera (read this before posing anything)
-The game uses an oblique top-down projection (see `stage-config.ts`): the ground maps 1:1 onto the tile grid and a point's height lifts it on screen by only `y * cot(60°)`, about 0.58 per unit.
+The game uses an isometric orthographic view looking down steeply (`GAME_CAMERA` in `src/viewEngine/camera.ts`: steep elevation, turned 45° so north is up-left). A point's height lifts it on screen by only `y * cos(elevation)` (half a tile per unit at 60°, 0.71 at 45°).
 
 - **Height is compressed, width is not.** Things that stick out sideways (shoulders, weapons held out, spider legs) read at full size; tall thin things read at about half.
-- **Never lean long parts toward or away from the camera.** A blade raised and tilted forward points at the viewer, and its height and forward lean cancel on screen, leaving a stub. Because models turn, "forward" is toward the camera for some facing, so lean weapons and limbs **outward (sideways)** instead. Check every design at yaw 0 and 180 (and 135) in `forge:sheet` or the builder's walk test.
+- **Never lean long parts toward or away from the camera.** A blade raised and tilted forward points at the viewer, and its height and forward lean cancel on screen, leaving a stub. Because models turn, "forward" is toward the camera for some facing, so lean weapons and limbs **outward (sideways)** instead. The camera looks along the grid's diagonal, so every grid move is seen at a 45° angle: check every design at yaw 0, 90, 180 and 270 (and the diagonals) in `forge:sheet` or the builder's walk test.
 - Horizontal parts pointing forward (a zombie's reaching arms) are fine: they read as pointing down the screen.

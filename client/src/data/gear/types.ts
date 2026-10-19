@@ -78,6 +78,7 @@ export interface Affix {
 
 export type Rarity = 'Common' | 'Quality' | 'Superior' | 'Rare' | 'Exquisite';
 
+/** A rarity is its number of affixes: Common has none, Exquisite 4. */
 export const RarityPerAffixCount: Record<number, Rarity> = {
   0: 'Common',
   1: 'Quality',
@@ -86,6 +87,24 @@ export const RarityPerAffixCount: Record<number, Rarity> = {
   4: 'Exquisite'
 }
 
+/**
+ * How likely each rarity is for a rolled item (relative weights) at item level 1. Higher levels tilt
+ * toward the rarer end: see RARITY_TILT_PER_LEVEL and rarityWeights (data/gear/index.ts).
+ */
+export const RARITY_WEIGHT: Record<Rarity, number> = {
+  Common: 45,
+  Quality: 30,
+  Superior: 15,
+  Rare: 5,
+  Exquisite: 5,
+};
+
+/**
+ * Per item level above 1, each rarity's weight grows by this × its affix count (Common 0 ... Exquisite 4),
+ * so the odds slowly shift from Common toward the rarer end. 0.04 → Common ~34% at level 10, ~26% at 20.
+ */
+export const RARITY_TILT_PER_LEVEL = 0.04;
+
 export const RarityTextColors: Record<Rarity, string> = { //hex codes
   Common: 'white',
   Quality: 'lightblue',
@@ -93,5 +112,3 @@ export const RarityTextColors: Record<Rarity, string> = { //hex codes
   Rare: 'slateblue',
   Exquisite: 'mediumturquoise'
 }
-
-export type AffixPotency = 'low' | 'medium' | 'high';

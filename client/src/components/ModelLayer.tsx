@@ -3,13 +3,13 @@
 import { useEffect, useMemo, useRef, type ReactNode } from 'react';
 import type { EnemyInstance } from '../data/enemies';
 import { CLASSES, type ClassKey } from '../data/classes';
-import { TILE_SIZE } from '../data/constants';
 import type { Design, Model, ModelLink } from '../forge/core/types';
 import { buildInstance, instanceSeed, linkedDesign } from '../forge/core/link';
-import { obliqueLift } from '../forge/core/stage-config';
+import { TILE_SIZE, type BoardLayout } from '../viewEngine/board';
 import { buildCharacter, type HeldWeapon } from '../forge/equip';
 import { designs } from '../forge/registry.vite';
 import { MapModelRenderer, type MapUnit } from '../forge/three/mapRenderer';
+import { ActiveGlow } from './mapParts';
 
 type Pos = { x: number; y: number };
 
@@ -17,6 +17,15 @@ export interface MapLoot {
   id: string;
   link: ModelLink;
   pos: Pos;
+}
+
+/** A game object on the map (a door, a portal): it stands on its tile, facing `facing` (yaw, radians), and never moves. */
+export interface MapObject {
+  /** Stable for the map's lifetime (e.g. the door's id); also seeds its look. */
+  id: string;
+  link: ModelLink;
+  pos: Pos;
+  facing: number;
 }
 
 /** A party member drawn as their class model, holding their equipped weapon and shield. */
@@ -29,16 +38,20 @@ export interface MapPartyMember {
   shield?: ModelLink;
   /** DOM drawn just above the model's head (HP/MP bars, effect dots). */
   overlay: ReactNode;
+  /** The active member stands on a floor glow (it follows the model as it moves). */
+  active?: boolean;
 }
 
 interface Props {
-  cols: number;
-  rows: number;
+  /** The board's layout (boardLayout): the canvas covers its box; overlays use its projection. */
+  board: BoardLayout;
   party?: MapPartyMember[];
   /** Living enemies. */
   enemies?: EnemyInstance[];
   /** Loot, one model per tile. Every item of a design looks the same. */
   loot?: MapLoot[];
+  /** Game objects (doors, portals): fixed, each facing its own way. Keep the array stable while unchanged. */
+  objects?: MapObject[];
   /** DOM drawn just above each enemy model's head (HP bar, effect dots). */
   renderEnemyOverlay?: (enemy: EnemyInstance) => ReactNode;
   /** Unit id ('party-0', an enemy id) → the tile it last aimed an ability at; a new `seq` turns it to face it. */
@@ -52,7 +65,7 @@ export interface UnitAim {
   seq: number;
 }
 
-export default function ModelLayer({ cols, rows, party = [], enemies = [], loot = [], renderEnemyOverlay, aims = {} }: Props) {
+export default function ModelLayer({ board, party = [], enemies = [], loot = [], objects = [], renderEnemyOverlay, aims = {} }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<MapModelRenderer | null>(null);
   // Built models by cache key (a unit id, or 'item:<design>' for loot, which every item of a design shares).
@@ -94,21 +107,57 @@ export default function ModelLayer({ cols, rows, party = [], enemies = [], loot 
   }, [enemyKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const lootKey = loot.map((l) => `${l.id}:${l.pos.x},${l.pos.y}`).join('|');
+  const objectKey = objects.map((o) => `${o.id}:${o.link}:${o.pos.x},${o.pos.y}:${o.facing}`).join('|');
   const aimKey = Object.entries(aims).map(([id, a]) => `${id}:${a.seq}`).join('|');
   const units: MapUnit[] = useMemo(() => {
     const out = [...partyUnits, ...enemyUnits].map((u) => (aims[u.id] ? { ...u, aim: aims[u.id] } : u));
+    for (const o of objects) {
+      const design = linkedDesign(designs, o.link);
+      if (design) out.push({ id: o.id, model: cached(o.id, o.link, [design], () => buildInstance(design, o.id)), pos: o.pos, facing: o.facing });
+    }
     for (const l of loot) {
       const design = linkedDesign(designs, l.link);
       if (design) out.push({ id: l.id, model: cached(`item:${design.id}`, '', [design], () => buildInstance(design, l.id)), pos: l.pos, lying: true });
     }
     // Forget models no longer on the map (dead enemies, picked-up loot)
-    const live = new Set([...partyUnits, ...enemyUnits].map((u) => u.id).concat(loot.map((l) => `item:${l.link}`)));
+    const live = new Set([...partyUnits, ...enemyUnits, ...objects].map((u) => u.id).concat(loot.map((l) => `item:${l.link}`)));
     for (const id of cache.current.keys()) if (!live.has(id)) cache.current.delete(id);
     return out;
-  }, [partyUnits, enemyUnits, lootKey, aimKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [partyUnits, enemyUnits, lootKey, objectKey, aimKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // DOM that follows each unit's drawn position (models glide between tiles): the overlay above its head
+  // and the active member's floor glow. The renderer reports every change (onPlace); a newly mounted
+  // element is placed where the model is drawn now.
+  const overlayEls = useRef(new Map<string, { head?: HTMLDivElement | null; glow?: HTMLDivElement | null }>());
+  const headHeight = useRef(new Map<string, number>()); // each unit's overhead anchor height (world tiles)
+  for (const u of [...partyUnits, ...enemyUnits]) headHeight.current.set(u.id, u.model.mesh.anchors.overhead[1]);
+  const boardRef = useRef(board);
+  boardRef.current = board;
+  const placeOverlays = (id: string, at: Pos) => {
+    const els = overlayEls.current.get(id);
+    if (els?.head) {
+      // Centered over the tile, its bottom at the projected overhead anchor
+      const p = boardRef.current.toScreen(at.x + 0.5, at.y + 0.5, headHeight.current.get(id) ?? 0);
+      els.head.style.left = `${p.left - TILE_SIZE / 2}px`;
+      els.head.style.top = `${p.top}px`;
+    }
+    if (els?.glow) {
+      // On the flat floor plane (transformed with the floor), in flat tile px
+      els.glow.style.left = `${at.x * TILE_SIZE}px`;
+      els.glow.style.top = `${at.y * TILE_SIZE}px`;
+    }
+  };
+  const placeRef = useRef(placeOverlays);
+  placeRef.current = placeOverlays;
+  const overlayRef = (u: MapUnit, kind: 'head' | 'glow') => (el: HTMLDivElement | null) => {
+    const els = overlayEls.current.get(u.id) ?? {};
+    els[kind] = el;
+    overlayEls.current.set(u.id, els);
+    if (el) placeOverlays(u.id, rendererRef.current?.drawnAt(u.id) ?? u.pos);
+  };
 
   useEffect(() => {
-    const r = new MapModelRenderer();
+    const r = new MapModelRenderer((id, at) => placeRef.current(id, at));
     rendererRef.current = r;
     hostRef.current!.appendChild(r.canvas);
     return () => {
@@ -118,25 +167,31 @@ export default function ModelLayer({ cols, rows, party = [], enemies = [], loot 
     };
   }, []);
 
-  useEffect(() => rendererRef.current?.setGrid(cols, rows, TILE_SIZE), [cols, rows]);
+  useEffect(() => rendererRef.current?.setBoard(board), [board]);
   useEffect(() => rendererRef.current?.setUnits(units), [units]);
 
-  /** DOM placed just above a model's head: its overhead anchor, lifted by the oblique projection. */
-  const overHead = (u: MapUnit, node: ReactNode) => {
-    const headPx = obliqueLift(u.model.mesh.anchors.overhead[1]) * TILE_SIZE;
-    return (
-      <div
-        key={u.id}
-        className="absolute flex flex-col items-center gap-px"
-        style={{ left: u.pos.x * TILE_SIZE, top: (u.pos.y + 0.5) * TILE_SIZE - headPx, width: TILE_SIZE, transform: 'translateY(-100%)' }}
-      >
-        {node}
-      </div>
-    );
-  };
+  /** DOM placed just above a model's head (its projected overhead anchor). Positioned by placeOverlays. */
+  const overHead = (u: MapUnit, node: ReactNode) => (
+    <div
+      key={u.id}
+      ref={overlayRef(u, 'head')}
+      className="absolute flex flex-col items-center gap-px"
+      style={{ width: TILE_SIZE, transform: 'translateY(-100%)' }}
+    >
+      {node}
+    </div>
+  );
 
   return (
     <div className="absolute inset-0 pointer-events-none z-10">
+      {/* Floor glow under the active member: on the floor plane, beneath the model canvas */}
+      <div className="absolute left-0 top-0" style={{ transform: board.floorTransform, transformOrigin: '0 0' }}>
+        {partyUnits.filter((u) => party.find((m) => m.id === u.id)?.active).map((u) => (
+          <div key={`glow-${u.id}`} ref={overlayRef(u, 'glow')} className="absolute" style={{ width: TILE_SIZE, height: TILE_SIZE }}>
+            <ActiveGlow />
+          </div>
+        ))}
+      </div>
       <div ref={hostRef} className="absolute left-0 top-0" />
       {partyUnits.map((u) => overHead(u, party.find((m) => m.id === u.id)!.overlay))}
       {renderEnemyOverlay && enemyUnits.map((u) => overHead(u, renderEnemyOverlay(enemies.find((e) => e.id === u.id)!)))}

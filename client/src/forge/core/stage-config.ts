@@ -1,21 +1,12 @@
 import type { Vec3 } from './vec';
+import { GAME_CAMERA, rad, turnWithView, type ViewAngles } from '../../viewEngine/camera';
 
 /**
- * ONE source of truth for how models are viewed. The game, the builder page and the
- * contact-sheet CLI all read this, so a design that looks right in one looks right in all.
- * Tune values by eye in the builder page, then leave them alone.
+ * How models are staged: their lighting, how loot lies on the floor, the reference character size and the
+ * icon camera. The game, the builder page and the contact-sheet CLI all read this, so a design that looks
+ * right in one looks right in all. The game VIEW (camera angle, projection, board layout) is not here:
+ * it belongs to the whole display, see src/viewEngine.
  */
-
-/**
- * Game view: OBLIQUE projection. The camera looks down from `elevationDeg`, but the view is
- * stretched vertically by 1/sin(elevation) so the ground plane maps 1:1 onto the DOM tile grid
- * (1 tile = TILE_SIZE px on both axes). A point at height y draws y·cot(elevation) tiles above
- * its footprint. See docs/forge-inventory.md "Projection".
- */
-export const GAME_CAMERA = {
-  /** Degrees above the ground plane. 90 = straight down. */
-  elevationDeg: 60,
-};
 
 /**
  * Inventory icon camera: straight-on (no elevation, no yaw), so an item's face is never tilted toward
@@ -31,9 +22,8 @@ export const CHARACTER_HEIGHT = 1.12;
 
 /**
  * Items on the map (loot) lie FLAT on their tile, face up: rotate the model -90° about X (its +z face
- * turns up, its +y "tip" points up the screen), then lift it so it rests on the floor. The oblique game
- * projection draws the ground plane without distortion, so a flat item shows its true outline,
- * not tilted toward or away from the camera. Used by the game renderer, the forge game view and forge:sheet.
+ * turns up, its +y "tip" points north), then lift it so it rests on the floor, and turn it by lootYaw so
+ * it keeps its icon's screen orientation. Used by the game renderer, the forge game view and forge:sheet.
  * A design can lie less tipped (fit.groundPitchDeg), e.g. a helm, so its open underside isn't on show.
  */
 export const ITEM_GROUND_PITCH = -Math.PI / 2;
@@ -61,7 +51,17 @@ export const layItem = (p: Vec3, pitch: number, lift: number): Vec3 => {
   return [q[0], q[1] + lift, q[2]];
 };
 
-/** World-fixed key light. Direction points TOWARD the light: from upper-left, toward the camera. */
+/**
+ * Yaw (radians, about world up) of loot lying on the floor: turned against the view's yaw, so an item
+ * keeps the screen orientation it has in its icon (tip up and to the left) whatever the view's yaw.
+ */
+export const lootYaw = (view: ViewAngles = GAME_CAMERA): number => -rad(view.yawDeg);
+
+/**
+ * Key light. `keyDir` points TOWARD the light, given for an unturned view (x = screen right, -z = up the
+ * screen): from the upper left, toward the camera. keyLightDir turns it with the view, so the light
+ * always comes from the screen's upper left whatever the view's yaw.
+ */
 export const LIGHT = {
   keyDir: [-0.45, 0.8, 0.55] as [number, number, number],
   /** three.js intensities (r155+ physical units). Tune in the builder page. */
@@ -71,20 +71,8 @@ export const LIGHT = {
   hemiIntensity: 1.1,
 };
 
+/** Direction toward the key light for a view (LIGHT.keyDir turned with it). */
+export const keyLightDir = (view: ViewAngles = GAME_CAMERA): Vec3 => turnWithView(LIGHT.keyDir, view);
+
 /** What the software contact-sheet renderer uses to approximate the above. Not used by the game. */
 export const SHEET_SHADING = { ambient: 0.42, key: 0.8 };
-
-const rad = (deg: number) => (deg * Math.PI) / 180;
-
-/**
- * World point -> game screen space, in TILES: [right, down, depth toward camera].
- * The ground (y = 0) maps 1:1: (x, 0, z) -> (x, z). Height moves a point up by y·cot(e).
- * The three.js game camera produces the same mapping (see three/stage.ts).
- */
-export function obliqueProject(p: Vec3, elevationDeg = GAME_CAMERA.elevationDeg): Vec3 {
-  const e = rad(elevationDeg);
-  return [p[0], p[2] - p[1] / Math.tan(e), p[1] * Math.sin(e) + p[2] * Math.cos(e)];
-}
-
-/** Screen offset (in tiles, upward) of a point `height` units above the ground. For DOM overlays. */
-export const obliqueLift = (height: number, elevationDeg = GAME_CAMERA.elevationDeg) => height / Math.tan(rad(elevationDeg));

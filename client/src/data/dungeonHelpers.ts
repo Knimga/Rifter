@@ -66,26 +66,73 @@ export function findOpenTilesNear(center: Pos, isOpen: (p: Pos) => boolean, coun
   return found;
 }
 
+// ─── Movement ─────────────────────────────────────────────────────────────────
+// One set of rules for everyone who walks (party members and enemies): a move is a path of steps to
+// any of the 8 neighbouring tiles, each costing 1 movement. A step must land on a walkable tile, and a
+// diagonal step may not cut a wall corner (both tiles beside it must be walkable too).
+
+const STEPS: readonly [number, number][] = [[0, 1], [1, 0], [0, -1], [-1, 0], [1, 1], [1, -1], [-1, 1], [-1, -1]];
+
+/** True if one step from `from` by (dx, dy) is allowed: onto a walkable tile, never cutting a wall corner. */
+export function canStep(from: Pos, dx: number, dy: number, isWalkable: (p: Pos) => boolean): boolean {
+  if (!isWalkable({ x: from.x + dx, y: from.y + dy })) return false;
+  return dx === 0 || dy === 0 || (isWalkable({ x: from.x + dx, y: from.y }) && isWalkable({ x: from.x, y: from.y + dy }));
+}
+
+/** A tile reached by walking: how many steps it takes, and the tile it is reached from (null at the start). */
+export interface Reach {
+  pos: Pos;
+  steps: number;
+  prev: Pos | null;
+}
+
 /**
- * Returns true if `pos` is a valid tile for the active mover to move to.
- * @param isWalkable  - tile is passable (floor, not wall)
- * @param isOccupied  - tile is blocked by an entity (enemy, NPC, party member)
- * @param isSpecialTile - tile is a special interactive tile that can't be moved onto (portal, etc.)
+ * Every tile reachable from `from` within `maxSteps` steps (the start included, at 0), by shortest path,
+ * in order of distance. `isWalkable`: floor (not wall). `isBlocked`: walkable tiles the mover may not pass
+ * through (e.g. enemies, for the party). Where a mover may END is the caller's choice (partyMoveTargets).
  */
-export function isValidMoveTarget(
-  pos: Pos,
-  activeMoverPos: Pos,
+export function reachableTiles(from: Pos, maxSteps: number, isWalkable: (p: Pos) => boolean, isBlocked: (p: Pos) => boolean = () => false): Map<string, Reach> {
+  const reach = new Map<string, Reach>([[posKey(from), { pos: from, steps: 0, prev: null }]]);
+  const queue: Reach[] = [reach.get(posKey(from))!];
+  for (let head = 0; head < queue.length; head++) {
+    const cur = queue[head];
+    if (cur.steps >= maxSteps) continue;
+    for (const [dx, dy] of STEPS) {
+      const next = { x: cur.pos.x + dx, y: cur.pos.y + dy };
+      const key = posKey(next);
+      if (reach.has(key) || isBlocked(next) || !canStep(cur.pos, dx, dy, isWalkable)) continue;
+      const r = { pos: next, steps: cur.steps + 1, prev: cur.pos };
+      reach.set(key, r);
+      queue.push(r);
+    }
+  }
+  return reach;
+}
+
+/** The path walked to a reached tile, start excluded, destination included. */
+export function pathTo(reach: Map<string, Reach>, to: Pos): Pos[] {
+  const path: Pos[] = [];
+  for (let r = reach.get(posKey(to)); r && r.prev; r = reach.get(posKey(r.prev))) path.push(r.pos);
+  return path.reverse();
+}
+
+/**
+ * Where a party member may move this turn: tile key -> steps it costs. Unwalkable tiles (walls, and
+ * tiles a game object stands on, like the portal: see isWalkable) and enemies block the way; the mover
+ * may pass other party members but can't stop on anyone.
+ */
+export function partyMoveTargets(
+  from: Pos,
   movement: number,
-  isWalkable: (pos: Pos) => boolean,
-  isOccupied: (pos: Pos) => boolean,
-  isSpecialTile: (pos: Pos) => boolean = () => false,
-): boolean {
-  if (!isWalkable(pos)) return false;
-  if (isSpecialTile(pos)) return false;
-  if (samePos(pos, activeMoverPos)) return false;
-  if (isOccupied(pos)) return false;
-  if (chebyshev(activeMoverPos, pos) > movement) return false;
-  return true;
+  isWalkable: (p: Pos) => boolean,
+  isEnemy: (p: Pos) => boolean,
+  isOccupied: (p: Pos) => boolean,
+): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const [key, r] of reachableTiles(from, movement, isWalkable, isEnemy)) {
+    if (r.steps > 0 && !isOccupied(r.pos)) out.set(key, r.steps);
+  }
+  return out;
 }
 
 // ─── Area-of-effect tile computation ──────────────────────────────────────────

@@ -191,10 +191,17 @@ function cloneStats(stats: Stats): Stats {
   return { ...stats, melee: { ...stats.melee }, ranged: { ...stats.ranged }, magic: { ...stats.magic }, elementalStats: { ...stats.elementalStats } };
 }
 
-/** Drop all-zero elemental entries so consumers only see elements with real modifiers. */
+/** Most an element resistance can reduce damage by (%), whatever stacks up (gear, passives, buffs). */
+export const ELEMENT_RESISTANCE_CAP = 75;
+
+/**
+ * Finish elemental stats: cap each resistance at ELEMENT_RESISTANCE_CAP, and drop all-zero entries so
+ * consumers only see elements with real modifiers.
+ */
 function pruneElementalStats(s: Stats): Stats {
   for (const el of DAMAGE_ELEMENTS) {
     const e = s.elementalStats[el];
+    if (e && e.resistance > ELEMENT_RESISTANCE_CAP) s.elementalStats[el] = { ...e, resistance: ELEMENT_RESISTANCE_CAP };
     if (e && !e.hit && !e.crit && !e.damage && !e.resistance && !e.penetration) delete s.elementalStats[el];
   }
   return s;

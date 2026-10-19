@@ -107,7 +107,7 @@ export const CLASSES: Record<ClassKey, ClassData> = {
   knight: {
     name: 'Knight',
     roles: ['tank', 'healer'],
-    description: 'A shield-bearing fighter that protects companions',
+    description: 'A shield-bearing fighter that protects companions.',
     attributes: { strength: 3, toughness: 4, finesse: 1, mind: 2, spirit: 4, speed: 0 },
     skills: { redoubt: 4, devotion: 4, expertise: 2, spellcraft: 2 },
     passives: {

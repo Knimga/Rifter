@@ -1,7 +1,20 @@
 import type { Vec3 } from './vec';
 import type { BuildCtx } from './ctx';
 
-export type Category = 'creature' | 'character' | 'weapon' | 'armor' | 'offhand';
+export type Category = 'creature' | 'character' | 'weapon' | 'armor' | 'offhand' | 'object';
+
+/**
+ * A part that keeps moving while the model is on screen (view state, like facing): it spins about `axis`
+ * (model space, through the part's pivot) at `turnsPerSec`. `frame` squashes the spin: the part is built
+ * as if round, then scaled by `frame` (e.g. a circle scaled to an oval); the spin happens in the round
+ * frame, so an oval part turns its pattern while keeping its oval outline. Models without motion are static.
+ */
+export interface PartSpin {
+  part: string;
+  axis: 'x' | 'y' | 'z';
+  turnsPerSec: number;
+  frame?: Vec3;
+}
 
 /**
  * How a finished mesh is scaled and positioned. Units are TILES (1 unit = 1 grid cell).
@@ -21,11 +34,12 @@ export type FitSpec =
  *  - armor: `${seriesId}/${slot}` ('apprentice/helm')
  *  - offhands: the offhand's id ('buckler')
  *  - classes: the class key ('knight'); the player character's body (it holds its gear, see equip.ts)
+ *  - gameObjects: the object's id ('heavy-door'): interactable things on the map (data/gameObjects.ts)
  * Lint checks that the entry exists, that the design's label is exactly the entry's display name, and
  * that the file name is that name slugged (see src/forge/dataRefs.ts).
  */
 export interface DataRef {
-  table: 'enemies' | 'weapons' | 'armor' | 'offhands' | 'classes';
+  table: 'enemies' | 'weapons' | 'armor' | 'offhands' | 'classes' | 'gameObjects';
   key: string;
 }
 
@@ -40,6 +54,8 @@ export interface Design {
   fit: FitSpec;
   /** Max triangles after build. Lint enforces it. */
   budget: number;
+  /** Parts that keep moving on screen (see PartSpin). */
+  motion?: PartSpin[];
   /** Draw into c.mesh. Return the display name. */
   build(c: BuildCtx): string;
 }
@@ -49,7 +65,7 @@ export interface MeshData {
   triCount: number;
   /** 9 floats per triangle. Winding is counter-clockwise seen from outside. */
   positions: Float32Array;
-  /** 9 floats per triangle, sRGB 0..1, flat per face, face-jitter already baked in. */
+  /** 9 floats per triangle (one color per corner), sRGB 0..1, face-jitter already baked in. Usually the same for all three corners (flat); differ only where a design blends corner colors (FaceOpts.vc). */
   colors: Float32Array;
   /** 1 float per triangle: 0 = lit, 1 = fully emissive (unlit glow). */
   emissive: Float32Array;
@@ -78,4 +94,6 @@ export interface Model {
   mesh: MeshData;
   /** Items only: the pitch (radians, about x) it lies at on the floor as loot. */
   groundPitch?: number;
+  /** The design's moving parts (PartSpin), if any: renderers animate them. */
+  motion?: PartSpin[];
 }

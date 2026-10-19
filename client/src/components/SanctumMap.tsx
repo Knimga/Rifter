@@ -1,20 +1,27 @@
 import { lazy, Suspense, useMemo, useState } from 'react';
-import { GiMagicPortal } from 'react-icons/gi';
 import type { TargetType } from '../data/classes';
-import { brightenHex, isAdjacent, isValidMoveTarget, posKey, type Pos } from '../data/dungeonHelpers';
-import { TILE_SIZE, SANCTUM_FLOOR_COLOR, SANCTUM_WALL_COLOR } from '../data/constants';
+import { gameObjectModel } from '../data/gameObjects';
+import { brightenHex, isAdjacent, posKey, type Pos } from '../data/dungeonHelpers';
+import { SANCTUM_FLOOR_COLOR, SANCTUM_WALL_COLOR } from '../data/constants';
+import { TILE_SIZE } from '../viewEngine/board';
 import { SANCTUM, isSanctumPortal, isSanctumWall, isSanctumWalkable } from '../data/sanctum';
-import { ActiveGlow, MoveLineOverlay, TILE_BORDER_CLASS, toMapMember, type PartyTokenData } from './mapParts';
+import { Board, MoveLineOverlay, TILE_BORDER_CLASS, UsableGlow, facingOpenSide, toMapMember, useBoard, type PartyTokenData } from './mapParts';
 
 // 3D party models over the tile grid. Lazy: it pulls in three.js (GameScreen preloads it on mount).
 const ModelLayer = lazy(() => import('./ModelLayer'));
-import type { UnitAim } from './ModelLayer';
+import type { MapObject, UnitAim } from './ModelLayer';
+
+/** The Sanctum's game objects: its portal into the dungeon, facing the open floor. */
+const SANCTUM_OBJECTS: MapObject[] = [
+  { id: 'sanctum-portal', link: gameObjectModel(SANCTUM.portalObject), pos: SANCTUM.portalPos, facing: facingOpenSide(SANCTUM.portalPos, isSanctumWalkable) },
+];
 
 interface Props {
   playerPos: Pos;
   activeMoverPos: Pos;
   party: PartyTokenData[];
-  movement: number;
+  /** Tiles the active mover can move to this turn (tile key -> steps), from GameScreen (partyMoveTargets). */
+  moveTargets: Map<string, number>;
   onMove: (pos: Pos) => void;
   onLocationChange: (location: 'dungeon') => void;
   activeTarget: TargetType | null;  // target type of the selected ability (null = none selected)
@@ -25,15 +32,15 @@ interface Props {
   aims?: Record<string, UnitAim>;
 }
 
-export default function SanctumMap({ playerPos, activeMoverPos, party, movement, onMove, onLocationChange, activeTarget, onAbilityUse, onAbilityDeselect, onMemberSelect, aims }: Props) {
+export default function SanctumMap({ playerPos, activeMoverPos, party, moveTargets, onMove, onLocationChange, activeTarget, onAbilityUse, onAbilityDeselect, onMemberSelect, aims }: Props) {
   const [hoveredTile, setHoveredTile] = useState<Pos | null>(null);
+  const board = useBoard(SANCTUM.width, SANCTUM.height);
 
   const memberByKey = useMemo(() => new Map(party.map(m => [posKey(m.pos), m])), [party]);
   // Party members drawn as their class models (HP/MP bars above their heads)
   const modelParty = useMemo(() => party.map(m => toMapMember(m)), [party]);
   const isAdjacentToPortal = isAdjacent(playerPos, SANCTUM.portalPos);
-  const canMoveTo = (p: Pos) =>
-    isValidMoveTarget(p, activeMoverPos, movement, isSanctumWalkable, q => memberByKey.has(posKey(q)), isSanctumPortal);
+  const canMoveTo = (p: Pos) => moveTargets.has(posKey(p));
 
   const handleClick = (p: Pos) => {
     if (isSanctumWall(p)) return;
@@ -53,10 +60,8 @@ export default function SanctumMap({ playerPos, activeMoverPos, party, movement,
     if (canMoveTo(p)) onMove(p);
   };
 
-  return (
-    <div className="flex flex-col items-center">
-      <div className="bg-gray-800 p-4 rounded-lg inline-block">
-        <div className="relative">
+  const floor = (
+    <>
         {Array.from({ length: SANCTUM.height }).map((_, y) => (
           <div key={y} className="flex">
             {Array.from({ length: SANCTUM.width }).map((_, x) => {
@@ -87,35 +92,28 @@ export default function SanctumMap({ playerPos, activeMoverPos, party, movement,
                     !isWall && allyHighlight
                       ? 'bg-green-900/40 border-2 border-green-400 cursor-crosshair'
                       : TILE_BORDER_CLASS
-                  }`}
+                  } ${isPortal && isAdjacentToPortal ? 'cursor-pointer' : ''}`}
                 >
-                  {/* Members are drawn by ModelLayer; the active one stands on a floor glow */}
-                  {member?.active && <ActiveGlow />}
-                  {!member && isPortal && (
-                    <div
-                      className={`transition-all ${isAdjacentToPortal ? 'cursor-pointer animate-pulse' : ''}`}
-                      style={{ filter: isAdjacentToPortal ? 'drop-shadow(0 0 8px rgba(192,132,252,0.8))' : 'none' }}
-                      onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.filter = 'drop-shadow(0 0 12px rgba(192,132,252,1))'; }}
-                      onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.filter = isAdjacentToPortal ? 'drop-shadow(0 0 8px rgba(192,132,252,0.8))' : 'none'; }}
-                    >
-                      <GiMagicPortal className="w-9 h-9 text-purple-400" />
-                    </div>
-                  )}
+                  {/* The portal (a model, see SANCTUM_OBJECTS) glows on its tile while the leader can use it */}
+                  {isPortal && isAdjacentToPortal && <UsableGlow color="178, 236, 192" hovered={isHovered} />}
                 </div>
               );
             })}
           </div>
         ))}
 
-        <Suspense fallback={null}>
-          <ModelLayer cols={SANCTUM.width} rows={SANCTUM.height} party={modelParty} aims={aims} />
-        </Suspense>
-
         {!activeTarget && hoveredTile && canMoveTo(hoveredTile) && (
           <MoveLineOverlay from={activeMoverPos} to={hoveredTile} cols={SANCTUM.width} rows={SANCTUM.height} />
         )}
-        </div>
-      </div>
-    </div>
+    </>
+  );
+
+  // No frame: the board floats on the game screen's background
+  return (
+    <Board board={board} floor={floor}>
+      <Suspense fallback={null}>
+        <ModelLayer board={board} party={modelParty} objects={SANCTUM_OBJECTS} aims={aims} />
+      </Suspense>
+    </Board>
   );
 }

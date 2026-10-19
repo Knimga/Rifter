@@ -20,5 +20,16 @@ export function shuffle<T>(items: readonly T[]): T[] {
   return out;
 }
 
+/** A random element of a non-empty array, each as likely as its weight. */
+export function pickWeighted<T>(items: readonly T[], weight: (item: T) => number): T {
+  const total = items.reduce((s, it) => s + weight(it), 0);
+  let r = Math.random() * total;
+  for (const it of items) {
+    r -= weight(it);
+    if (r < 0) return it;
+  }
+  return items[items.length - 1];
+}
+
 /** True with probability p (0–1). */
 export const chance = (p: number) => Math.random() < p;

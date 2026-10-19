@@ -107,6 +107,8 @@ export function advanceTurn(
   deadPartyIndices?: Set<number>,
 ): CombatState {
   const len = state.turnOrder.length;
+  // Combat may have ended before a queued advance runs (e.g. a party wipe resets it in the same render)
+  if (!state.active || len === 0) return state;
   let nextIndex = (state.currentTurnIndex + 1) % len;
   let wrapped = nextIndex === 0;
 
