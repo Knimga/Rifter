@@ -11,7 +11,7 @@ import { withEnemyBuffs } from '../data/enemies';
 import { affectedKeys, chebyshev, findOpenTilesNear, hasLineOfSight, partyMoveTargets, posKey, samePos, type Pos } from '../data/dungeonHelpers';
 import { SANCTUM, isSanctumWalkable } from '../data/sanctum';
 import { generateDungeon, objectTilesOf, spawnDungeonEnemies, zoneWalkable, type DungeonData, type ZoneData } from '../data/dungeonGen';
-import { DUNGEON_PRESETS } from '../data/dungeonPresets';
+import { DUNGEON_PRESETS, type DungeonKey } from '../data/dungeonPresets';
 import { startCombat, joinCombat, advanceTurn, applyTopOfRound, tickRound, getCurrentCombatant, deadPartyIndices, type CombatState, type RoundTick } from '../data/combat';
 import { executeAction, toAction, tickDurations, unitKey, type ActionOutcome, type CombatUnit, type UnitChange } from '../data/abilityExecution';
 import type { UnitAim } from '../components/ModelLayer';
@@ -91,6 +91,9 @@ export default function GameScreen({ party, setParty }: Props) {
   const { floatingTexts, spawnFloat, removeFloat, clearFloats } = useFloatingText();
   const [showCharSheet, setShowCharSheet] = useState(false);
   const [dungeon, setDungeon] = useState<DungeonData | null>(null);
+  // Which dungeon the party is in (or last entered): its preset gives the map's colors, doors and exit portal
+  const [dungeonKey, setDungeonKey] = useState<DungeonKey>('crypt');
+  const preset = DUNGEON_PRESETS[dungeonKey];
   const [enemyAoePreview, setEnemyAoePreview] = useState<EnemyAoePreview | null>(null);
   const [enemyTargetPartyIdx, setEnemyTargetPartyIdx] = useState<number | null>(null);
   const [currentZone, setCurrentZone] = useState(0);
@@ -315,16 +318,18 @@ export default function GameScreen({ party, setParty }: Props) {
     });
   }, [updateMembers]);
 
-  const handleLocationChange = (next: 'sanctum' | 'dungeon') => {
+  /** Go back to the Sanctum, or into a dungeon (a fresh one, generated from its preset). */
+  const handleLocationChange = (next: 'sanctum' | DungeonKey) => {
     cancelPendingOutcomes();
     reviveDowned();
-    setLocation(next);
+    setLocation(next === 'sanctum' ? 'sanctum' : 'dungeon');
     setCombat(INITIAL_COMBAT);
     clearFloats();
     updateMembers(m => ({ ...m, buffs: [], hots: [], dots: [] }));
 
-    if (next === 'dungeon') {
-      const config = DUNGEON_PRESETS.crypt;
+    if (next !== 'sanctum') {
+      const config = DUNGEON_PRESETS[next];
+      setDungeonKey(next);
       const d = generateDungeon(config);
       setDungeon(d);
       setCurrentZone(d.startZoneId);
@@ -713,7 +718,7 @@ export default function GameScreen({ party, setParty }: Props) {
   const dockIdx = combat.active ? (isPlayerTurn ? activePartyIdx : null) : barViewIdx;
   const dockSlotContent = dockIdx !== null ? partySlots[dockIdx]?.[partyActiveSlot[dockIdx] ?? -1] ?? null : null;
   const armedName = dockSlotContent === 'weapon-attack' ? (activeWeapon?.name ?? 'Attack') : dockSlotContent?.name;
-  const locationName = location === 'sanctum' ? 'The Sanctum' : zone ? `Dungeon · Zone ${zone.id + 1}` : '';
+  const locationName = location === 'sanctum' ? 'The Sanctum' : zone ? `${preset.name} · Zone ${zone.id + 1}` : '';
 
   return (
     <Backdrop variant="game" className="h-screen">
@@ -729,7 +734,7 @@ export default function GameScreen({ party, setParty }: Props) {
               aims={unitAims}
               moveTargets={moveTargets}
               onMove={handleMove}
-              onLocationChange={handleLocationChange}
+              onEnterDungeon={handleLocationChange}
               activeTarget={activeTarget}
               onAbilityUse={handlePlayerAttack}
               onAbilityDeselect={clearActiveSlot}
@@ -764,10 +769,10 @@ export default function GameScreen({ party, setParty }: Props) {
               partyBuffs={partyBuffs}
               partyHots={partyHots}
               partyDots={partyDots}
-              floorColor={DUNGEON_PRESETS.crypt.floorColor}
-              wallColor={DUNGEON_PRESETS.crypt.wallColor}
-              doorObject={DUNGEON_PRESETS.crypt.doorObject}
-              portalObject={DUNGEON_PRESETS.crypt.portalObject}
+              floorColor={preset.floorColor}
+              wallColor={preset.wallColor}
+              doorObject={preset.doorObject}
+              portalObject={preset.portalObject}
               enemyAoePreviewTiles={enemyAoePreview?.tiles}
               enemyTargetPartyIdx={enemyTargetPartyIdx}
               droppedItems={zone?.droppedItems}

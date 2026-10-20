@@ -1,5 +1,5 @@
 import { PHYSICAL_ELEMENTS, type AttackCategory, type DamageElement } from './gear';
-import type { Stats } from './stats';
+import { ELEMENT_RESISTANCE_FLOOR, type Stats } from './stats';
 import { randInt } from './random';
 
 // ─── Tuning Constants ────────────────────────────────────────────────────────
@@ -72,8 +72,10 @@ export function applyDR(
     ? target.armor
     : target.armor * 0.5 + target.magicResistance;
   const drPercent = Math.max(0, (defense / (defense + DR_DIVISOR)) * DR_CAP - penetration / 100);
-  const afterArmor = Math.max(1, rawDamage - Math.floor(rawDamage * drPercent));
-  const elementRes = Math.max(0, (target.elementalStats[element]?.resistance ?? 0) - elementPenetration);
+  // Rounded to the nearest point (not down), so on average the reduction matches DR% even for small hits
+  const afterArmor = Math.max(1, rawDamage - Math.round(rawDamage * drPercent));
+  // Negative resistance (a weakness, or penetration past zero) adds damage, down to the floor (-75 = 1.75x)
+  const elementRes = Math.max(ELEMENT_RESISTANCE_FLOOR, (target.elementalStats[element]?.resistance ?? 0) - elementPenetration);
   if (elementRes === 0) return afterArmor;
   return Math.max(1, Math.round(afterArmor * (1 - elementRes / 100)));
 }

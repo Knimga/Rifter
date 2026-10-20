@@ -137,10 +137,8 @@ export const formatStat = (key: string, value: number) => `${formatStatValue(key
 
 export const BASE_ATTRIBUTES = 5;
 export const BASE_SKILLS = 0;
-// Enemies' auto-allocated attribute points at level 1. Players have no point-buy at level 1: their
-// attributes are BASE_ATTRIBUTES + class attributes, skills BASE_SKILLS + class skills.
-export const STARTING_ATTR_POINTS = 6;
-export const ATTRIBUTE_POINTS_PER_LEVEL = 3; // additional points per level above 1
+/** Attribute points gained per level above 1 (enemies now; party members once they level up). */
+export const ATTRIBUTE_POINTS_PER_LEVEL = 3;
 
 const fl = (n: number) => Math.floor(n);
 const ATTRIBUTE_KEYS_SET = new Set<string>(ATTRIBUTE_KEYS);
@@ -164,6 +162,14 @@ interface StatAccessor {
 
 const EMPTY_ELEMENT_STATS: ElementStats = { hit: 0, crit: 0, damage: 0, resistance: 0, penetration: 0 };
 
+/** Most an element resistance can reduce damage by (%), whatever stacks up (gear, passives, buffs). */
+export const ELEMENT_RESISTANCE_CAP = 75;
+/**
+ * Lowest an element resistance can go (%): negative resistance is a weakness, adding that much damage taken
+ * (-75 = 1.75x damage), whatever stacks up (debuffs, penetration).
+ */
+export const ELEMENT_RESISTANCE_FLOOR = -75;
+
 const scalar = (key: ScalarStatKey, opts: Partial<StatAccessor> = {}): StatAccessor =>
   ({ key, get: s => s[key], set: (s, v) => { s[key] = v; }, ...opts });
 
@@ -183,6 +189,8 @@ const STAT_ACCESSORS: StatAccessor[] = [
       key: `${el}${capitalize(f)}`,
       get: s => s.elementalStats[el]?.[f] ?? 0,
       set: (s, v) => { s.elementalStats[el] = { ...(s.elementalStats[el] ?? EMPTY_ELEMENT_STATS), [f]: v }; },
+      // Resistance may go negative (a weakness), down to the floor
+      ...(f === 'resistance' ? { min: ELEMENT_RESISTANCE_FLOOR } : {}),
     }))),
 ];
 
@@ -191,78 +199,19 @@ function cloneStats(stats: Stats): Stats {
   return { ...stats, melee: { ...stats.melee }, ranged: { ...stats.ranged }, magic: { ...stats.magic }, elementalStats: { ...stats.elementalStats } };
 }
 
-/** Most an element resistance can reduce damage by (%), whatever stacks up (gear, passives, buffs). */
-export const ELEMENT_RESISTANCE_CAP = 75;
-
 /**
- * Finish elemental stats: cap each resistance at ELEMENT_RESISTANCE_CAP, and drop all-zero entries so
- * consumers only see elements with real modifiers.
+ * Finish elemental stats: keep each resistance between ELEMENT_RESISTANCE_FLOOR and ELEMENT_RESISTANCE_CAP,
+ * and drop all-zero entries so consumers only see elements with real modifiers.
  */
 function pruneElementalStats(s: Stats): Stats {
   for (const el of DAMAGE_ELEMENTS) {
     const e = s.elementalStats[el];
-    if (e && e.resistance > ELEMENT_RESISTANCE_CAP) s.elementalStats[el] = { ...e, resistance: ELEMENT_RESISTANCE_CAP };
+    if (e && (e.resistance > ELEMENT_RESISTANCE_CAP || e.resistance < ELEMENT_RESISTANCE_FLOOR)) {
+      s.elementalStats[el] = { ...e, resistance: Math.min(ELEMENT_RESISTANCE_CAP, Math.max(ELEMENT_RESISTANCE_FLOOR, e.resistance)) };
+    }
     if (e && !e.hit && !e.crit && !e.damage && !e.resistance && !e.penetration) delete s.elementalStats[el];
   }
   return s;
-}
-
-// ─── Enemy Attribute Point Generation ────────────────────────────────────────
-
-
-/**
- * Distribute attribute points for an enemy based on level and high/low preferences.
- * Returns pointsSpent (allocated beyond BASE_ATTRIBUTES), same shape as player point-buy.
- */
-export function generateEnemyAttributePoints(
-  level: number,
-  highAttributes: AttributeKey[],
-  lowAttributes: AttributeKey[],
-): Record<AttributeKey, number> {
-  const total = STARTING_ATTR_POINTS + ATTRIBUTE_POINTS_PER_LEVEL * (level - 1);
-  const alloc: Record<AttributeKey, number> = { strength: 0, toughness: 0, finesse: 0, mind: 0, spirit: 0, speed: 0 };
-  const neutral = ATTRIBUTE_KEYS.filter(a => !highAttributes.includes(a) && !lowAttributes.includes(a));
-
-  // Weighted random allocation
-  const weight = (a: AttributeKey) => highAttributes.includes(a) ? 3 : lowAttributes.includes(a) ? 0.5 : 1;
-  const totalWeight = ATTRIBUTE_KEYS.reduce((sum, a) => sum + weight(a), 0);
-
-  for (let i = 0; i < total; i++) {
-    let r = Math.random() * totalWeight;
-    for (const attr of ATTRIBUTE_KEYS) {
-      r -= weight(attr);
-      if (r <= 0) { alloc[attr]++; break; }
-    }
-  }
-
-  // Fix constraint violations: enforce min(high) > max(neutral) > max(low)
-  let changed = true;
-  while (changed) {
-    changed = false;
-    for (const n of neutral) {
-      for (const l of lowAttributes) {
-        if (alloc[n] <= alloc[l] && alloc[l] > 0) {
-          alloc[l]--; alloc[n]++; changed = true;
-        }
-      }
-    }
-    for (const h of highAttributes) {
-      for (const n of neutral) {
-        if (alloc[h] <= alloc[n] && alloc[n] > 0) {
-          alloc[n]--; alloc[h]++; changed = true;
-        }
-      }
-    }
-    for (const h of highAttributes) {
-      for (const l of lowAttributes) {
-        if (alloc[h] <= alloc[l] && alloc[l] > 0) {
-          alloc[l]--; alloc[h]++; changed = true;
-        }
-      }
-    }
-  }
-
-  return alloc;
 }
 
 // ─── Minimal Enemy Class Shape (for stat computation) ─────────────────────────
@@ -272,6 +221,7 @@ export function generateEnemyAttributePoints(
 
 export interface EnemyClassStats {
   attributes: Partial<Record<AttributeKey, number>>;
+  baseHp: number;
   skills?: Partial<Record<SkillKey, number>>;
   baseArmor: number;
   armorPerLevel: number;
@@ -306,6 +256,7 @@ function buildRawStats(
   level: number,
   armorBonus: number,
   movement: number,
+  baseHp: number,
 ): Stats {
   const { strength: str, toughness: tou, finesse: fin, mind: mnd, spirit: spr, speed: spd } = attrs;
   const { perception, stealth, expertise, spellcraft, evasion, redoubt, devotion } = skills;
@@ -313,7 +264,7 @@ function buildRawStats(
     level,
     attributes: attrs,
     skills,
-    hp:              fl(20 + (2 * tou) + (str / 2) + (2 * level)),
+    hp:              fl(baseHp + (2 * tou) + (str / 2) + (2 * level)),
     mp:              fl(10 + (3 * mnd) + spr + level),
     hpRegen:         1 + fl((spr / 6) + (tou / 12)),
     mpRegen:         1 + fl((spr / 6) + (mnd / 12) + (devotion / 6)),
@@ -400,7 +351,7 @@ export function calculateStats(input: PlayerStatInput | EnemyStatInput): Stats {
   const passives = classData.passives ?? {};
   const scalingPassives = classData.scalingPassives ?? [];
 
-  let stats = buildRawStats(attrs, skills, level, armorBonus, movement);
+  let stats = buildRawStats(attrs, skills, level, armorBonus, movement, classData.baseHp);
   stats = applyFlatPassives(stats, passives);
   stats = applyScalingAndPctPassives(stats, passives, scalingPassives);
   return stats;

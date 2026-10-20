@@ -1,10 +1,32 @@
 import * as THREE from 'three';
 import type { Model, PartSpin } from '../../forge/core/types';
 
+/** How much brighter a glowing face is than its color (fully emissive faces, and the glow part of partly emissive ones). */
+const GLOW_BOOST = 1.12;
+
+/**
+ * Partial glow for the lit materials: each vertex carries its face's emissive amount (`glow`, 0..0.5; faces
+ * at 0.5 and up are drawn unlit instead). The face's color is lit at (1 - glow) of its strength and added
+ * back unlit at glow × GLOW_BOOST, so e.g. a 0.3 face keeps some brightness on its shadowed side, like the
+ * contact sheet shows (forge:sheet blends emissive the same way).
+ */
+function withPartialGlow<T extends THREE.Material>(material: T): T {
+  material.onBeforeCompile = (shader) => {
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <color_pars_vertex>', '#include <color_pars_vertex>\nattribute float glow;\nvarying float vGlow;')
+      .replace('#include <color_vertex>', '#include <color_vertex>\n\tvGlow = glow;');
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <color_pars_fragment>', '#include <color_pars_fragment>\nvarying float vGlow;')
+      .replace('#include <color_fragment>', '#include <color_fragment>\n\tvec3 glowColor = diffuseColor.rgb;\n\tdiffuseColor.rgb *= 1.0 - vGlow;')
+      .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>\n\ttotalEmissiveRadiance += glowColor * vGlow * ${GLOW_BOOST.toFixed(2)};`);
+  };
+  return material;
+}
+
 // Shared materials: every model reuses these three, so draw calls stay at <= 3 per model.
-const lit = new THREE.MeshLambertMaterial({ vertexColors: true });
+const lit = withPartialGlow(new THREE.MeshLambertMaterial({ vertexColors: true }));
 const unlit = new THREE.MeshBasicMaterial({ vertexColors: true });
-const glass = new THREE.MeshLambertMaterial({ vertexColors: true, transparent: true, depthWrite: false });
+const glass = withPartialGlow(new THREE.MeshLambertMaterial({ vertexColors: true, transparent: true, depthWrite: false }));
 export const sharedMaterials = { lit, unlit, glass };
 
 const srgbToLinear = (v: number) => (v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
@@ -14,15 +36,17 @@ const srgbToLinear = (v: number) => (v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1
  * color is converted to linear once and written to its three vertices; normals are each face's own.
  */
 function sub(model: Model, idx: Uint32Array, withAlpha: boolean, boost = 1, origin: readonly number[] = [0, 0, 0]): THREE.BufferGeometry {
-  const { positions: P, colors: C, alpha } = model.mesh;
+  const { positions: P, colors: C, alpha, emissive } = model.mesh;
   const n = idx.length;
   const stride = withAlpha ? 4 : 3;
   const pos = new Float32Array(n * 9);
   const nor = new Float32Array(n * 9);
+  const glow = new Float32Array(n * 3); // each vertex: its face's emissive amount (partial glow, lit materials)
   const col = new Float32Array(n * 3 * stride);
   for (let i = 0; i < n; i++) {
     const s = idx[i] * 9, o = i * 9;
     for (let k = 0; k < 9; k++) pos[o + k] = P[s + k] - origin[k % 3];
+    glow[i * 3] = glow[i * 3 + 1] = glow[i * 3 + 2] = Math.min(emissive[idx[i]], 0.5);
     // Face normal: (b - a) x (c - a), normalized
     const ux = P[s + 3] - P[s], uy = P[s + 4] - P[s + 1], uz = P[s + 5] - P[s + 2];
     const vx = P[s + 6] - P[s], vy = P[s + 7] - P[s + 1], vz = P[s + 8] - P[s + 2];
@@ -48,6 +72,7 @@ function sub(model: Model, idx: Uint32Array, withAlpha: boolean, boost = 1, orig
   geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
   geo.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
   geo.setAttribute('color', new THREE.BufferAttribute(col, stride));
+  geo.setAttribute('glow', new THREE.BufferAttribute(glow, 1));
   return geo;
 }
 
@@ -57,7 +82,7 @@ function addMeshes(g: THREE.Object3D, model: Model, tris: number[], origin?: rea
   const solid: number[] = [], glow: number[] = [], clear: number[] = [];
   for (const t of tris) (emissive[t] >= 0.5 ? glow : alpha[t] < 0.99 ? clear : solid).push(t);
   if (solid.length) g.add(new THREE.Mesh(sub(model, Uint32Array.from(solid), false, 1, origin), lit));
-  if (glow.length) g.add(new THREE.Mesh(sub(model, Uint32Array.from(glow), false, 1.12, origin), unlit));
+  if (glow.length) g.add(new THREE.Mesh(sub(model, Uint32Array.from(glow), false, GLOW_BOOST, origin), unlit));
   if (clear.length) {
     const m = new THREE.Mesh(sub(model, Uint32Array.from(clear), true, 1, origin), glass);
     m.renderOrder = 1;

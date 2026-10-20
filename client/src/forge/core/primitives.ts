@@ -91,6 +91,56 @@ function ico(level: number): { V: Vec3[]; F: number[][] } {
   return (ICO[level] = { V, F });
 }
 
+/**
+ * A lumpy ellipsoid (like `blob`) with glowing patches of molten rock: `share` (0..1) of its faces are emissive
+ * `lava`, the rest `col`. The lava grows as a few connected patches (from random seed faces, spreading to
+ * neighbouring faces), so it reads as magma showing between rock plates rather than scattered spots, and the
+ * share is exact for every seed.
+ */
+export function crackedBlob(m: Mesh, c: Vec3, r: Vec3, level: number, jit: number, col: Col, lava: RGB, share: number, o: FaceOpts = {}): void {
+  const { V, F } = ico(level);
+  const P = V.map((v): Vec3 => {
+    const k = 1 + (m.R() - 0.5) * 2 * jit;
+    return [c[0] + v[0] * r[0] * k, c[1] + v[1] * r[1] * k, c[2] + v[2] * r[2] * k];
+  });
+  // Faces sharing an edge are neighbours
+  const byEdge = new Map<string, number[]>();
+  F.forEach((f, i) => {
+    for (let e = 0; e < 3; e++) {
+      const a = f[e], b = f[(e + 1) % 3], k = a < b ? `${a}_${b}` : `${b}_${a}`;
+      byEdge.set(k, [...(byEdge.get(k) ?? []), i]);
+    }
+  });
+  const nbrs: number[][] = F.map(() => []);
+  for (const fs of byEdge.values()) if (fs.length === 2) { nbrs[fs[0]].push(fs[1]); nbrs[fs[1]].push(fs[0]); }
+
+  // Grow patches round-robin from random seed faces (about six faces a patch) until the share is reached
+  const lavaCount = Math.round(F.length * Math.max(0, Math.min(1, share)));
+  const isLava = new Set<number>();
+  const fronts: number[][] = [];
+  for (let p = 0; p < Math.max(1, Math.round(lavaCount / 6)) && isLava.size < lavaCount; p++) {
+    let seed = Math.floor(m.R() * F.length);
+    while (isLava.has(seed)) seed = (seed + 1) % F.length;
+    isLava.add(seed);
+    fronts.push([seed]);
+  }
+  while (isLava.size < lavaCount) {
+    let grew = false;
+    for (const front of fronts) {
+      if (isLava.size >= lavaCount) break;
+      const open = front.flatMap((f) => nbrs[f]).filter((f) => !isLava.has(f));
+      if (open.length === 0) continue;
+      const next = open[Math.floor(m.R() * open.length)];
+      isLava.add(next);
+      front.push(next);
+      grew = true;
+    }
+    if (!grew) break;
+  }
+  F.forEach(([a, b, d], i) =>
+    isLava.has(i) ? m.tri(P[a], P[b], P[d], lava, c, { ...o, e: 0.85, j: 0.1 }) : m.tri(P[a], P[b], P[d], col, c, o));
+}
+
 /** Low-poly ellipsoid. level 0 = 20 tris, level 1 = 80. jit jitters every vertex radially (shared vertices, so no cracks). */
 export function blob(m: Mesh, c: Vec3, r: Vec3, level: number, jit: number, col: Col, o: FaceOpts & { floorY?: number } = {}): void {
   const { V, F } = ico(level);

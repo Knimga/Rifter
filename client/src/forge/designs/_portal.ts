@@ -10,6 +10,7 @@ import type { Mesh } from '../core/mesh';
 import { bipyr } from '../core/primitives';
 import { mixC, type RGB, type Vec3 } from '../core/vec';
 import { objectEntry } from './_object';
+import { floorGlow } from './_glow';
 
 /** A portal's colors: its brightest glow, the deeper glow the arms fade through, and its pool on the floor. */
 export interface PortalGlow {
@@ -93,23 +94,6 @@ function rim(m: Mesh, rf: (a: number, b: number) => number, { bright: NECROTIC }
   }
 }
 
-/**
- * A faint pool of necrotic light on the floor under the portal: translucent rings, each fainter than the
- * one inside it, so the pool fades out with no edge.
- */
-function floorGlow(m: Mesh, { ground: GROUND_GLOW }: PortalGlow): void {
-  const N = 16, rx = 0.8, rz = 0.42, y = 0.004;
-  const ALPHA = [0.3, 0.22, 0.14, 0.07, 0.025]; // center disc, then each ring outward
-  const pt = (k: number, i: number): Vec3 => {
-    const a = (i / N) * 2 * Math.PI, r = k / ALPHA.length;
-    return [Math.cos(a) * rx * r, y, Math.sin(a) * rz * r];
-  };
-  const below: Vec3 = [0, -1, 0]; // faces point up
-  for (let i = 0; i < N; i++) m.tri([0, y, 0], pt(1, i), pt(1, i + 1), GROUND_GLOW, below, { a: ALPHA[0], j: 0 });
-  for (let k = 1; k < ALPHA.length; k++)
-    for (let i = 0; i < N; i++) m.quad(pt(k, i), pt(k, i + 1), pt(k + 1, i + 1), pt(k + 1, i), GROUND_GLOW, below, { a: ALPHA[k], j: 0 });
-}
-
 /** The design for the portal entry `objectId` (GAME_OBJECTS), glowing in `glow`. */
 export function portalDesign(objectId: string, glow: PortalGlow): Design {
   const { id, label, source } = objectEntry(objectId);
@@ -126,8 +110,9 @@ export function portalDesign(objectId: string, glow: PortalGlow): Design {
       const m = c.mesh;
       m.anchor('feet', [0, 0, 0]); // under the portal's center: this point goes to the tile center
 
+      // A faint pool of the portal's light on the floor, as wide as the oval is tall
       m.part('glow');
-      floorGlow(m, glow);
+      floorGlow(m, glow.ground, 0.8, 0.42);
       m.part('swirl', CENTER);
       swirl(m, c.rf, glow);
       m.part('rim', CENTER);

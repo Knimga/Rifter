@@ -56,7 +56,8 @@
   --rift-foe-edge: #3a2a28;
   --rift-debuff-edge: #6d4a46;
   --rift-loot: #d1a766;
-  --rift-portal: #b2ecc0;
+  --rift-portal-necrotic: #b2ecc0; /* a usable portal's tile glow, in its own color */
+  --rift-portal-fire: #f0a060;
 
   /* Effect lines (ability cards, item tooltips) */
   --tone-base: var(--rift-muted);

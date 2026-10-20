@@ -4,6 +4,7 @@
 import type { Ability } from '../../data/classes';
 import { PHYSICAL_ELEMENTS, type DamageElement, type WeaponItem } from '../../data/gear';
 import { toAction } from '../../data/abilityExecution';
+import { isArea } from '../../data/dungeonHelpers';
 import { AREA_LABEL, EFFECT_TONE_COLOR, describeEffect, type EffectTone } from '../../data/detailStrings';
 import { DAMAGE_ELEMENT_COLOR } from '../../data/constants';
 
@@ -46,7 +47,7 @@ export default function AbilityCard({ ability, weapon = null, weaponAttack = fal
     weaponAttack ? null : `${ability.mpCost} MP`,
     TARGET_LABEL[ability.target],
     ability.target === 'self' ? null : `Range ${ability.range}`,
-    ability.area && ability.area !== 'single' ? AREA_LABEL[ability.area] : null,
+    ability.area && isArea(ability) ? AREA_LABEL[ability.area] : null,
   ].filter(Boolean).join(' · ');
 
   return (

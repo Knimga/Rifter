@@ -3,10 +3,10 @@ import type { AreaType, TargetType } from '../data/classes';
 import type { ActiveBuff, ActiveHot, ActiveDot } from '../data/stats';
 import type { EnemyInstance } from '../data/enemies';
 import type { ZoneData } from '../data/dungeonGen';
-import { affectedKeys, chebyshev, hasLineOfSight, isAdjacent, posKey, samePos, type Pos } from '../data/dungeonHelpers';
+import { affectedKeys, chebyshev, hasLineOfSight, isAdjacent, isArea, posKey, samePos, type Pos } from '../data/dungeonHelpers';
 import type { Item } from '../data/gear';
 import FloatingCombatText, { type FloatingText } from './FloatingCombatText';
-import { gameObjectModel } from '../data/gameObjects';
+import { gameObjectGlow, gameObjectModel } from '../data/gameObjects';
 import { Board, FloorGrid, FloorTile, MoveLineOverlay, TileHighlight, UprightAt, UsableGlow, facingOpenSide, toMapMember, useBoard, useHoveredTile, type PartyTokenData, TILE_HIGHLIGHT } from './mapParts';
 import UnitStatus, { statusMarkers } from './hud/UnitStatus';
 import type { MapLoot, MapObject, UnitAim } from './ModelLayer';
@@ -68,7 +68,7 @@ export default function DungeonMap({ playerPos, activeMoverPos, party, moveTarge
   const hoveredTile = hover.hovered;
   const board = useBoard(width, height);
 
-  const isAoE = !!activeAbilityArea && activeAbilityArea !== 'single';
+  const isAoE = isArea({ area: activeAbilityArea });
   const canAct = !inCombat || isPlayerTurn;
   const isAdjacentToPortal = portalPos ? isAdjacent(playerPos, portalPos) : false;
 
@@ -190,7 +190,7 @@ export default function DungeonMap({ playerPos, activeMoverPos, party, moveTarge
         )}
         {/* A door or the portal the leader can use now: a soft pulsing glow on its tile (stronger on hover) */}
         {((door && isDoorAdjacent && !inCombat) || (isPortal && isAdjacentToPortal)) && (
-          <UsableGlow color={door ? 'var(--glow)' : 'var(--rift-portal)'} hovered={hover.isHovered(p)} />
+          <UsableGlow color={gameObjectGlow(door ? doorObject : portalObject)} hovered={hover.isHovered(p)} />
         )}
         {highlight && <TileHighlight kind={highlight} />}
         {isHighlightedUnit && <TileHighlight kind="hovered" />}

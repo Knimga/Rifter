@@ -1,7 +1,6 @@
 import type { Ability, Passive, ScalingPassive } from './classes';
-
 import type { AttributeKey, SkillKey, ActiveBuff, ActiveHot, ActiveDot } from './stats';
-import { generateEnemyAttributePoints, calculateStats, recomputeStats } from './stats';
+import { ATTRIBUTE_KEYS, ATTRIBUTE_POINTS_PER_LEVEL, calculateStats, recomputeStats } from './stats';
 import type { Stats } from './stats';
 import type { ModelLink } from '../forge/core/types';
 import type { Pos } from './dungeonHelpers';
@@ -28,6 +27,7 @@ export interface EnemyClassData {
   lowAttributes: AttributeKey[];   // always allocated less than neutral
 
   // Armor scaling (replaces per-level gear for enemies)
+  baseHp: number;           // HP before attributes and level (stats.ts buildRawStats)
   baseArmor: number;
   armorPerLevel: number;
 
@@ -61,6 +61,66 @@ export interface EnemyInstance {
   zoneId: number;
   groupId: number;
   dots: ActiveDot[];
+}
+
+// ─── Attribute Points ────────────────────────────────────────────────────────
+
+/** Attribute points an enemy gets at level 1, on top of BASE_ATTRIBUTES + its class's (players get none at level 1). */
+const ENEMY_STARTING_ATTR_POINTS = 6;
+
+/**
+ * Distribute attribute points for an enemy based on level and high/low preferences.
+ * Returns pointsSpent (allocated beyond BASE_ATTRIBUTES), same shape as player point-buy.
+ */
+function generateEnemyAttributePoints(
+  level: number,
+  highAttributes: AttributeKey[],
+  lowAttributes: AttributeKey[],
+): Record<AttributeKey, number> {
+  const total = ENEMY_STARTING_ATTR_POINTS + ATTRIBUTE_POINTS_PER_LEVEL * (level - 1);
+  const alloc: Record<AttributeKey, number> = { strength: 0, toughness: 0, finesse: 0, mind: 0, spirit: 0, speed: 0 };
+  const neutral = ATTRIBUTE_KEYS.filter(a => !highAttributes.includes(a) && !lowAttributes.includes(a));
+
+  // Weighted random allocation
+  const weight = (a: AttributeKey) => highAttributes.includes(a) ? 3 : lowAttributes.includes(a) ? 0.5 : 1;
+  const totalWeight = ATTRIBUTE_KEYS.reduce((sum, a) => sum + weight(a), 0);
+
+  for (let i = 0; i < total; i++) {
+    let r = Math.random() * totalWeight;
+    for (const attr of ATTRIBUTE_KEYS) {
+      r -= weight(attr);
+      if (r <= 0) { alloc[attr]++; break; }
+    }
+  }
+
+  // Fix constraint violations: enforce min(high) > max(neutral) > max(low)
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const n of neutral) {
+      for (const l of lowAttributes) {
+        if (alloc[n] <= alloc[l] && alloc[l] > 0) {
+          alloc[l]--; alloc[n]++; changed = true;
+        }
+      }
+    }
+    for (const h of highAttributes) {
+      for (const n of neutral) {
+        if (alloc[h] <= alloc[n] && alloc[n] > 0) {
+          alloc[n]--; alloc[h]++; changed = true;
+        }
+      }
+    }
+    for (const h of highAttributes) {
+      for (const l of lowAttributes) {
+        if (alloc[h] <= alloc[l] && alloc[l] > 0) {
+          alloc[l]--; alloc[h]++; changed = true;
+        }
+      }
+    }
+  }
+
+  return alloc;
 }
 
 // ─── Instance Generation ──────────────────────────────────────────────────────
@@ -115,8 +175,9 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
     attributes: { strength: 2 },
     highAttributes: ['strength', 'finesse'],
     lowAttributes: ['mind', 'spirit'],
-    baseArmor: 0,
-    armorPerLevel: 1,
+    baseHp: 15,
+    baseArmor: 10,
+    armorPerLevel: 4,
     abilities: [
       {
         name: 'Rusted Sword',
@@ -128,7 +189,7 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
         effects: [{ type: 'damage', appliesTo: 'target', damageElement: 'slashing', minDamage: 5, maxDamage: 8 }],
       },
     ],
-    dropChance: 0.50,
+    dropChance: 0.4,
     model: 'creature.skeleton',
   },
   {
@@ -137,8 +198,9 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
     attributes: { strength: 2, toughness: 4 },
     highAttributes: ['toughness', 'strength'],
     lowAttributes: ['finesse', 'mind'],
+    baseHp: 20,
     baseArmor: 2,
-    armorPerLevel: 2,
+    armorPerLevel: 4,
     abilities: [
       {
         name: 'Bite',
@@ -147,21 +209,137 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
         target: 'enemy',
         attackCategory: 'melee',
         displayElement: 'bludgeoning',
-        effects: [{ type: 'damage', appliesTo: 'target', damageElement: 'bludgeoning', minDamage: 4, maxDamage: 10 }],
+        effects: [{ type: 'damage', appliesTo: 'target', damageElement: 'bludgeoning', minDamage: 4, maxDamage: 9 }],
       },
+      {
+        name: 'Fetid Breath',
+        mpCost: 6,
+        range: 1,
+        target: 'enemy',
+        attackCategory: 'melee',
+        displayElement: 'poison',
+        effects: [
+          {type: 'damage', appliesTo: 'target', damageElement: 'poison', minDamage: 4, maxDamage: 4},
+          {type: 'dot', appliesTo: 'target', damageElement: 'poison', damagePerRound: 4, rounds: 3}
+        ]
+      }
     ],
-    dropChance: 0.50,
+    dropChance: 0.4,
     model: 'creature.zombie',
   },
+  {
+    id: 'lava-slime',
+    name: 'Lava Slime',
+    attributes: { toughness: 2, mind: 2 },
+    highAttributes: ['toughness', 'mind'],
+    lowAttributes: ['finesse', 'speed'],
+    baseHp: 15,
+    baseArmor: 0,
+    armorPerLevel: 4,
+    passives: {
+      fireResistance: { name: "Flameborn", flat: 20 },
+      piercingResistance: { name: "Slime Body", flat: 20 },
+      slashingResistance: { name: "Slime Body", flat: 20 }
+    },
+    abilities: [
+      {
+        name: 'Lava Lick',
+        mpCost: 0,
+        range: 1,
+        target: 'enemy',
+        attackCategory: 'melee',
+        displayElement: 'fire',
+        effects: [
+          { type: 'damage', appliesTo: 'target', damageElement: 'fire', minDamage: 5, maxDamage: 7 }
+        ],
+      },
+      {
+        name: 'Flame Belch',
+        mpCost: 10,
+        range: 0,
+        area: 'blast1',
+        target: 'enemy',
+        attackCategory: 'magic',
+        displayElement: 'fire',
+        effects: [
+          { type: 'dot', appliesTo: 'target', damageElement: 'fire', damagePerRound: 4, rounds: 3 },
+          { type: 'debuff', appliesTo: 'target', stats: { fireResistance: -20 }, rounds: 2}
+        ]
+      }
+    ],
+    dropChance: 0.3,
+    model: 'creature.lava-slime',
+  },
+  {
+    id: 'hellhound',
+    name: 'Hellhound',
+    attributes: { strength: 3, speed: 3, toughness: 3 },
+    highAttributes: ['strength', 'speed'],
+    lowAttributes: ['spirit', 'finesse'],
+    baseHp: 20,
+    baseArmor: 10,
+    armorPerLevel: 4,
+    passives: {
+      fireResistance: { name: 'Flameborn', flat: 20 },
+      glancingBlow: { name: 'Tough Hide', flat: 5 }
+    },
+    abilities: [
+      {
+        name: 'Burning Bite',
+        mpCost: 0,
+        range: 1,
+        target: 'enemy',
+        attackCategory: 'melee',
+        displayElement: 'fire',
+        effects: [
+          { type: 'damage', appliesTo: 'target', damageElement: 'piercing', minDamage: 3, maxDamage: 4 },
+          { type: 'damage', appliesTo: 'target', damageElement: 'fire', minDamage: 3, maxDamage: 4 }
+        ]
+      }
+    ],
+    dropChance: 0.3,
+    model: 'creature.hellhound'
+  },
+  {
+    id: 'flame-golem',
+    name: 'Flame Golem',
+    attributes: { strength: 3, toughness: 3 },
+    highAttributes: ['strength', 'toughness'],
+    lowAttributes: ['mind', 'finesse'],
+    baseHp: 30,
+    baseArmor: 20,
+    armorPerLevel: 4,
+    passives: {
+      fireResistance: { name: 'Flameborn', flat: 20 },
+      meleeHit: { name: 'Clumsy', flat: -10 }
+    },
+    abilities: [
+      {
+        name: 'Slam',
+        mpCost: 0,
+        range: 1,
+        target: 'enemy',
+        attackCategory: 'melee',
+        displayElement: 'bludgeoning',
+        effects: [
+          { type: 'damage', appliesTo: 'target', damageElement: 'bludgeoning', minDamage: 8, maxDamage: 10 },
+          { type: 'damage', appliesTo: 'target', damageElement: 'fire', minDamage: 4, maxDamage: 5 },
+        ]
+      }
+    ],
+    dropChance: 0.5,
+    model: 'creature.flame-golem'
+  }
 ];
 
 export const BOSS_CLASSES: EnemyClassData[] = [
   {
     id: 'necromancer',
     name: 'Necromancer',
-    attributes: { toughness: 10, mind: 8 },
+    attributes: { toughness: 8, mind: 8 },
     highAttributes: ['mind', 'toughness'],
     lowAttributes: ['spirit'],
+    baseHp: 20,
     baseArmor: 20,
     armorPerLevel: 1,
     abilities: [
@@ -202,6 +380,46 @@ export const BOSS_CLASSES: EnemyClassData[] = [
     ],
     dropChance: 1,
     model: 'creature.necromancer',
+  },
+  {
+    id: 'burning-spirit',
+    name: 'Burning Spirit',
+    attributes: { mind: 6, spirit: 6 },
+    highAttributes: ['mind', 'spirit'],
+    lowAttributes: ['speed', 'finesse'],
+    baseHp: 25,
+    baseArmor: 10,
+    armorPerLevel: 1,
+    passives: {
+      fireResistance: { name: 'Flameborn', flat: 30 }
+    },
+    abilities: [
+      {
+        name: 'Conflagrate',
+        mpCost: 20,
+        range: 5,
+        target: 'enemy',
+        area: 'blast2',
+        attackCategory: 'magic',
+        displayElement: 'fire',
+        effects: [
+          { type: 'dot', appliesTo: 'target', damageElement: 'fire', damagePerRound: 5, rounds: 3 }
+        ]
+      },
+      {
+        name: 'Firebolt',
+        mpCost: 6,
+        range: 5,
+        target: 'enemy',
+        attackCategory: 'magic',
+        displayElement: 'fire',
+        effects: [
+          { type: 'damage', appliesTo: 'target', damageElement: 'fire', minDamage: 9, maxDamage: 9 }
+        ]
+      }
+    ],
+    dropChance: 1,
+    model: 'creature.burning-spirit',
   }
 ];
 

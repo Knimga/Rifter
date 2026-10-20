@@ -1,7 +1,7 @@
 import type { EnemyClassData, EnemyInstance } from './enemies';
 import type { Item } from './gear';
 import { generateEnemyInstance } from './enemies';
-import { posKey, type Pos } from './dungeonHelpers';
+import { posKey, reachableTiles, type Pos } from './dungeonHelpers';
 import { chance, pick, randInt, shuffle } from './random';
 
 // ─── Core Types ──────────────────────────────────────────────────────────────
@@ -85,6 +85,9 @@ export interface DungeonConfig {
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 type Rect = Pick<Room, 'x' | 'y' | 'w' | 'h'>;
+
+/** Whether `p` lies inside the rectangle. */
+const inRect = (p: Pos, r: Rect) => p.x >= r.x && p.x < r.x + r.w && p.y >= r.y && p.y < r.y + r.h;
 
 function roomCenter(room: Rect): Pos {
   return {
@@ -303,28 +306,59 @@ function findDoorCandidates(zone: ZoneData): Pos[] {
   return [...candidates.values()];
 }
 
-function placeDoorPair(
-  zoneA: ZoneData,
-  zoneB: ZoneData,
-  usedPositions: Set<string>,
-  nextDoorId: { value: number },
-): void {
-  const candidatesA = findDoorCandidates(zoneA).filter(p => !usedPositions.has(`${zoneA.id}:${posKey(p)}`));
-  const candidatesB = findDoorCandidates(zoneB).filter(p => !usedPositions.has(`${zoneB.id}:${posKey(p)}`));
+/** How close to the farthest a "far" pick must be: candidates within this share of the max distance qualify. */
+const FAR_SHARE = 0.85;
 
-  if (candidatesA.length === 0 || candidatesB.length === 0) return;
+/** Walking distance (steps, by the movement rules) from `from` to every floor tile of `zone` it can reach. */
+function walkDistances(zone: ZoneData, from: Pos): Map<string, number> {
+  const steps = new Map<string, number>();
+  for (const [key, r] of reachableTiles(from, Infinity, p => zone.floors.has(posKey(p)))) steps.set(key, r.steps);
+  return steps;
+}
 
-  const posA = pick(candidatesA);
-  const posB = pick(candidatesB);
+/** Walking distance to a door (a wall tile): to the nearest floor tile beside it. Infinity if none is reached. */
+function doorDistance(door: Pos, steps: Map<string, number>): number {
+  let best = Infinity;
+  for (const [dx, dy] of [[0, 1], [1, 0], [0, -1], [-1, 0]]) best = Math.min(best, steps.get(posKey({ x: door.x + dx, y: door.y + dy })) ?? Infinity);
+  return best;
+}
 
+/**
+ * A door spot as far as possible from `from` by walking: a random pick among the candidates within
+ * FAR_SHARE of the farthest, so doors vary between runs but always sit across the zone.
+ */
+function farDoorSpot(zone: ZoneData, from: Pos, exclude: Pos[] = []): Pos | null {
+  const steps = walkDistances(zone, from);
+  const scored = findDoorCandidates(zone)
+    .filter(c => !exclude.some(e => e.x === c.x && e.y === c.y))
+    .map(c => ({ c, d: doorDistance(c, steps) }))
+    .filter(s => Number.isFinite(s.d));
+  if (scored.length === 0) return null;
+  const max = Math.max(...scored.map(s => s.d));
+  return pick(scored.filter(s => s.d >= max * FAR_SHARE)).c;
+}
+
+/** A random floor tile of the zone. */
+const randomFloor = (zone: ZoneData): Pos => {
+  const [x, y] = pick([...zone.floors]).split(',').map(Number);
+  return { x, y };
+};
+
+/** The floor tile farthest (by walking) from `from`: one end of the zone. */
+function farFloor(zone: ZoneData, from: Pos): Pos {
+  let far = from, best = -1;
+  for (const [key, d] of walkDistances(zone, from)) {
+    if (d > best) { best = d; const [x, y] = key.split(',').map(Number); far = { x, y }; }
+  }
+  return far;
+}
+
+/** Link two neighbouring zones with a pair of doors (A's way forward, B's way back). */
+function linkDoors(zoneA: ZoneData, posA: Pos, zoneB: ZoneData, posB: Pos, nextDoorId: { value: number }): void {
   const idA = `door-${nextDoorId.value++}`;
   const idB = `door-${nextDoorId.value++}`;
-
   zoneA.doors.push({ id: idA, pos: posA, targetZoneId: zoneB.id, targetDoorId: idB });
   zoneB.doors.push({ id: idB, pos: posB, targetZoneId: zoneA.id, targetDoorId: idA });
-
-  usedPositions.add(`${zoneA.id}:${posKey(posA)}`);
-  usedPositions.add(`${zoneB.id}:${posKey(posB)}`);
 }
 
 // ─── Main Generator ─────────────────────────────────────────────────────────
@@ -340,11 +374,27 @@ export function generateDungeon(config: DungeonConfig): DungeonData {
   const { zone: bossZone, bossRoom } = generateBossZoneMain(bossZoneId, config.bossZone);
   zones.push(bossZone);
 
-  // Linear chain 0 → 1 → … → boss, one door pair per link
-  const usedDoorPositions = new Set<string>();
+  // The party arrives in the first zone at one end of it: the center of the room around the zone's far
+  // end from a random point (roughly one end of its longest walk)
+  const startEnd = farFloor(zones[0], randomFloor(zones[0]));
+  const startRoom = zones[0].rooms.find(r => inRect(startEnd, r)) ?? zones[0].rooms[0];
+  const playerStart = roomCenter(startRoom);
+
+  // Linear chain 0 → 1 → … → boss, no branches: the first zone has one door (forward), every later zone a
+  // door back and a door forward. A zone's forward door is as far as possible (by walking) from where the
+  // party enters it (the portal in, or its door back), so moving on means crossing the zone.
   const nextDoorId = { value: 0 };
+  let entry = playerStart;
   for (let i = 0; i < zones.length - 1; i++) {
-    placeDoorPair(zones[i], zones[i + 1], usedDoorPositions, nextDoorId);
+    const zone = zones[i], next = zones[i + 1];
+    const back = zone.doors.map(d => d.pos);
+    const forward = farDoorSpot(zone, entry, back);
+    // The next zone's door back: at one end of it, so its own forward door can go to the other end.
+    // (The boss zone is one room: anywhere along its wall.)
+    const nextBack = next.id === bossZoneId ? pick(findDoorCandidates(next)) : farDoorSpot(next, randomFloor(next));
+    if (!forward || !nextBack) break;
+    linkDoors(zone, forward, next, nextBack, nextDoorId);
+    entry = nextBack;
   }
 
   // Determine entry direction from the boss zone's entry door, then add antechamber
@@ -356,7 +406,7 @@ export function generateDungeon(config: DungeonConfig): DungeonData {
     zones,
     startZoneId: 0,
     endZoneId: bossZoneId,
-    playerStart: roomCenter(zones[0].rooms[0]),
+    playerStart,
     portalPos,
     baseEnemyLevel: config.baseEnemyLevel,
   };
@@ -412,11 +462,11 @@ export function spawnDungeonEnemies(dungeon: DungeonData, config: DungeonConfig)
       continue;
     }
 
-    // Regular zone: one random group per selected room (never the start room)
+    // Regular zone: one random group per selected room (never the room the party arrives in)
     const zoneConfig = config.zones[zone.id];
     if (!zoneConfig || zoneConfig.enemyGroups.length === 0) continue;
 
-    const eligibleRooms = zone.id === dungeon.startZoneId ? zone.rooms.slice(1) : zone.rooms;
+    const eligibleRooms = zone.id === dungeon.startZoneId ? zone.rooms.filter(r => !inRect(dungeon.playerStart, r)) : zone.rooms;
     if (eligibleRooms.length === 0) continue;
 
     const groupCount = Math.ceil(eligibleRooms.length / 2) + randInt(0, Math.floor(eligibleRooms.length / 4));

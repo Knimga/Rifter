@@ -7,8 +7,8 @@ import type { ModelLink } from '../../forge/core/types';
 // ─── Armor Generation ─────────────────────────────────────────────────────────
 
 export const ARMOR_TYPE_BASE_VALUE: Record<ArmorProficiency, number> = {
-  Cloth: 2,
-  Light: 4,
+  Cloth: 4,
+  Light: 7,
   Medium: 8,
   Heavy: 12,
 };

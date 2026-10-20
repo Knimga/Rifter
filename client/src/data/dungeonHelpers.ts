@@ -129,6 +129,15 @@ export function partyMoveTargets(
 
 // ─── Area-of-effect tile computation ──────────────────────────────────────────
 
+/** Whether an ability hits an area (blast, line) rather than one unit. */
+export const isArea = (a: { area?: AreaType }): boolean => !!a.area && a.area !== 'single';
+
+/**
+ * A burst from self: an area ability with range 0, so it can only be aimed at the caster's own tile and hits
+ * the area around it (e.g. Cleave, Flame Belch: everything adjacent).
+ */
+export const isSelfBurst = (a: { area?: AreaType; range: number }): boolean => isArea(a) && a.range === 0;
+
 /** Returns the floor tiles affected by an area ability aimed at `target`. */
 export function getAffectedTiles(
   caster: Pos,

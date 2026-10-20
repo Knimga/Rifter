@@ -4,7 +4,7 @@ import type { ZoneData } from '../data/dungeonGen';
 import type { Stats } from '../data/stats';
 import { advanceTurn, deadPartyIndices, type CombatState, type Combatant } from '../data/combat';
 import { computeEnemyTurn } from '../data/enemyAI';
-import { affectedKeys, posKey, type Pos } from '../data/dungeonHelpers';
+import { affectedKeys, isArea, posKey, type Pos } from '../data/dungeonHelpers';
 import { executeAction, type ActionOutcome, type CombatUnit } from '../data/abilityExecution';
 
 type Refs = {
@@ -73,7 +73,7 @@ export function useEnemyTurn(
       }
 
       // Determine target party indices (AoE may hit multiple members)
-      const isAoe = !!ability?.area && ability.area !== 'single';
+      const isAoe = !!ability && isArea(ability);
       const aoeTiles = isAoe && action.abilityTargetPos
         ? affectedKeys(finalPos, action.abilityTargetPos, ability!.area, z.floors)
         : null;

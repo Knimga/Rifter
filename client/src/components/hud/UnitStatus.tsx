@@ -47,8 +47,11 @@ export function statusMarkers(buffs: ActiveBuff[], hots: ActiveHot[], dots: Acti
 
 function Marker({ m }: { m: StatusMarker }) {
   return (
+    // flex: the hover area is exactly the marker box (a plain block wrapper takes a text line's height, with
+    // the box on its baseline, so the hover area sat offset from the box)
     <Tooltip
       gap={6}
+      className="flex"
       content={
         <div className="w-[168px] box-border px-2.5 py-2 text-left">
           <span className="block font-display text-xs tracking-[0.04em] text-rift-bright">{m.name}</span>

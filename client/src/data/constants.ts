@@ -52,7 +52,7 @@ export const COMBAT_TEXT_COLOR = {
 /* ----- GAMEPLAY CONSTANTS ----- */
 
 /** Interval in ms between out-of-combat passive regen ticks. */
-export const OUT_OF_COMBAT_REGEN_INTERVAL_MS = 10000;
+export const OUT_OF_COMBAT_REGEN_INTERVAL_MS = 5000;
 
 /**
  * How long a unit (party member or enemy) turns toward an ability's target before the ability lands. Just
