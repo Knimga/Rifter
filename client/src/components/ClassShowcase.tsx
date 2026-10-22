@@ -1,12 +1,13 @@
 // The class models of character select, drawn on one WebGL canvas laid over the class columns. Each column
-// marks where its model goes with `data-showcase-slot="<classKey>"`; models stand facing the viewer, spin
+// marks where its model goes with `data-showcase-slot="<classKey>"`; models stand turned slightly to the
+// viewer's right (SHOWCASE_REST_YAW), spin
 // while their column is hovered or focused, grow when focused, and dim when another class is focused.
 // Lazy-loaded (it pulls in three.js).
 import { useEffect, useMemo, useRef, type RefObject } from 'react';
 import type { ClassKey } from '../data/classes';
 import { startingGear } from '../data/party';
 import { characterModel, heldGear } from './characterModel';
-import { SHOWCASE_SPIN_MS, ShowcaseRenderer } from '../viewEngine/three/showcase';
+import { SHOWCASE_REST_YAW, SHOWCASE_SPIN_MS, ShowcaseRenderer } from '../viewEngine/three/showcase';
 import type { Model } from '../forge/core/types';
 
 export interface ShowcaseItem {
@@ -53,7 +54,7 @@ export default function ClassShowcase({ hostRef, items }: { hostRef: RefObject<H
         const model = models.get(it.classKey);
         const slot = host.querySelector(`[data-showcase-slot="${it.classKey}"]`);
         if (!model || !slot) continue;
-        const p = pose.current.get(it.classKey) ?? { yaw: 0, scale: 1 };
+        const p = pose.current.get(it.classKey) ?? { yaw: SHOWCASE_REST_YAW, scale: 1 };
         if (it.active) { p.yaw += (dt / SHOWCASE_SPIN_MS) * 2 * Math.PI; animating = true; }
         const target = scaleFor(it);
         p.scale += (target - p.scale) * Math.min(1, dt / EASE_MS);

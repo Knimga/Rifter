@@ -1,5 +1,6 @@
 import { useState, useRef, type ReactNode, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
+import { PiMouseLeftClickFill, PiMouseRightClickFill } from 'react-icons/pi';
 import { isArmorItem, isShieldItem, isWeaponItem, type Item, type WeaponItem, type ArmorItem, type ShieldItem } from '../data/gear';
 import type { Stats } from '../data/stats';
 import { RARITY_COLOR } from '../data/constants';
@@ -19,10 +20,12 @@ interface TooltipProps {
   gap?: number;
   /** The content is its own box (e.g. an AbilityCard): no tooltip frame (.rf-tip) around it. */
   bare?: boolean;
+  /** Where it opens: centered above (default), or below with right edges aligned (things at the top of the screen). */
+  placement?: 'above' | 'below-end';
 }
 
-/** Shows `content` above its children while they are hovered or hold keyboard focus. */
-export function Tooltip({ content, children, className, style, gap = 8, bare = false }: TooltipProps) {
+/** Shows `content` above (or below) its children while they are hovered or hold keyboard focus. */
+export function Tooltip({ content, children, className, style, gap = 8, bare = false, placement = 'above' }: TooltipProps) {
   const [visible, setVisible] = useState(false);
   const [pos, setPos] = useState({ x: 0, y: 0 });
   const ref = useRef<HTMLDivElement>(null);
@@ -30,7 +33,7 @@ export function Tooltip({ content, children, className, style, gap = 8, bare = f
   const show = () => {
     if (!content || !ref.current) return;
     const r = ref.current.getBoundingClientRect();
-    setPos({ x: r.left + r.width / 2, y: r.top });
+    setPos(placement === 'above' ? { x: r.left + r.width / 2, y: r.top } : { x: r.right, y: r.bottom });
     setVisible(true);
   };
   const hide = () => setVisible(false);
@@ -42,7 +45,7 @@ export function Tooltip({ content, children, className, style, gap = 8, bare = f
         <div
           role="tooltip"
           className="fixed z-[9999] pointer-events-none font-tech text-rift-ink"
-          style={{ left: pos.x, top: pos.y, transform: `translate(-50%, calc(-100% - ${gap}px))` }}
+          style={{ left: pos.x, top: pos.y, transform: placement === 'above' ? `translate(-50%, calc(-100% - ${gap}px))` : `translate(-100%, ${gap}px)` }}
         >
           {bare ? content : <div className="rf-tip text-sm overflow-hidden">{content}</div>}
         </div>,
@@ -64,6 +67,20 @@ export function Hint({ text, className = 'inline-flex', children }: { text: stri
   );
 }
 
+/**
+ * What clicking does, for the bottom of a tooltip: the mouse button as an icon, then the action, e.g.
+ * [right-click] Equip. Use this instead of writing "Right-click to ..." in words.
+ */
+export function ClickHint({ button, children, className = '' }: { button: 'left' | 'right'; children: ReactNode; className?: string }) {
+  const Icon = button === 'left' ? PiMouseLeftClickFill : PiMouseRightClickFill;
+  return (
+    <div className={`flex items-center gap-1.5 text-[11px] text-rift-label ${className}`}>
+      <Icon role="img" aria-label={`${button === 'left' ? 'Left' : 'Right'}-click:`} className="w-4 h-4 shrink-0 text-rift-muted" />
+      <span>{children}</span>
+    </div>
+  );
+}
+
 /** A short plain-text tooltip (e.g. what an attribute does), in the theme's tooltip style. */
 export function TextTip({ children }: { children: ReactNode }) {
   return <div className="w-[220px] box-border px-2.5 py-2 text-xs leading-[1.5] text-rift-soft">{children}</div>;
@@ -71,8 +88,8 @@ export function TextTip({ children }: { children: ReactNode }) {
 
 // ─── Item tooltips ────────────────────────────────────────────────────────────
 
-/** What right-clicking the item does here, if anything. */
-export type ItemClickAction = 'Equip' | 'Unequip';
+/** What right-clicking the item does here, if anything (equip it, unequip it, take it from a container). */
+export type ItemClickAction = 'Equip' | 'Unequip' | 'Loot';
 
 interface ItemTooltipProps {
   stats?: Stats;
@@ -98,7 +115,7 @@ function ItemTip({ item, type, proficient, clickAction, children }: Omit<ItemToo
           {item.affixes.map((affix, i) => <div key={i}>{formatModifier(affix.stat, affix.value)}</div>)}
         </div>
       )}
-      {clickAction && <div className="mt-2 text-[11px] text-rift-label">Right-click: {clickAction}</div>}
+      {clickAction && <ClickHint button="right" className="mt-2">{clickAction}</ClickHint>}
     </div>
   );
 }

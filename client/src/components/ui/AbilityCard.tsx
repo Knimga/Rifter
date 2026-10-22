@@ -64,6 +64,7 @@ export default function AbilityCard({ ability, weapon = null, weaponAttack = fal
       <div className="flex items-center gap-2">
         {Icon && <Icon className="w-5 h-5 shrink-0 text-rift-muted" />}
         <span className="font-display text-[15px] tracking-[0.04em] text-rift-bright">{ability.name}</span>
+        <ApDots count={action?.apCost ?? ability.apCost} className="!gap-[3px] -translate-y-px" />
       </div>
       <div className="mt-1 text-[11px] tracking-[0.12em] uppercase text-rift-label">{meta}</div>
       <hr className="my-3 h-px border-0 bg-rift-line" />
@@ -75,6 +76,15 @@ export default function AbilityCard({ ability, weapon = null, weaponAttack = fal
       </div>
       {warning && <div className="mt-2.5 text-xs text-rift-warn">{warning}</div>}
     </div>
+  );
+}
+
+/** An ability's AP cost as small dots, one per action point (ability cards, after the name; action bar slots). */
+export function ApDots({ count, className = '' }: { count: number; className?: string }) {
+  return (
+    <span role="img" aria-label={`${count} action point${count === 1 ? '' : 's'}`} className={`rf-apdots ${className}`}>
+      {Array.from({ length: count }, (_, i) => <span key={i} />)}
+    </span>
   );
 }
 

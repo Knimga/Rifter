@@ -1,19 +1,25 @@
 // The party window (UI handoff, 04 party modal): party rail, the member's model and equipment, the shared
 // inventory, and their attributes, skills, stats and offense. Values raised or lowered by buffs and debuffs
 // show green / red with an arrow.
+// Level-up (UI handoff: level-up and XP tracking): the party's XP bar on the rail; a member with points to
+// spend is marked on the rail, gets a header banner (Reset, Confirm) and + / - on their attribute and skill
+// rows. Placed points stay pending (kept by GameScreen, so closing the window keeps them) until Confirm.
 import { lazy, Suspense, useEffect, useMemo, useState, type ComponentType, type MouseEvent, type ReactNode } from 'react';
 import { Crown, Shirt, Hand, Footprints, Sword, Shield } from 'lucide-react';
 import { CLASSES } from '../data/classes';
 import { ATTACK_CATEGORY_COLOR } from '../data/constants';
 import { ATTRIBUTE_KEYS, SKILL_KEYS, recomputeStats, formatStat, type Stats } from '../data/stats';
-import { GEAR_SLOTS, getGearArmorBonus, getGearBuffs, type GearSlot, type Item } from '../data/gear';
-import type { PartyMemberConfig } from '../data/party';
+import { GEAR_SLOTS, getGearBuffs, type GearSlot, type Item } from '../data/gear';
+import { hasPointsToSpend, memberStatInput, noPendingPoints, pointsLeft, type PartyMemberConfig, type PendingPoints } from '../data/party';
+import { xpToNext, type PartyProgress } from '../data/xp';
 import { INVENTORY_COLS, INVENTORY_SIZE, canEquip, canUnequip, isFull, isProficient, type Inventory } from '../data/inventory';
 import { AttributeTooltips, SkillTooltips, ATTR_LABEL, SLOT_LABEL, capitalize } from '../data/detailStrings';
 import { Tooltip, ItemTooltipContent, TextTip } from './Tooltip';
-import ItemIcon from './ItemIcon';
+import ItemIcon, { rarityGlow } from './ItemIcon';
+import ItemGrid from './ItemGrid';
 import Portrait from './hud/Portrait';
 import { PanelTitle } from './ui/Panel';
+import { XpBar } from './hud/XpBar';
 import { characterLookKey, characterModel, heldGear } from './characterModel';
 
 // The turning model (lazy: it pulls in three.js)
@@ -28,6 +34,14 @@ interface Props {
   onClose: () => void;
   onEquipItem?: (inventoryIdx: number, charIdx: number) => void;
   onUnequipItem?: (slot: GearSlot, charIdx: number) => void;
+  /** The party's shared level and XP. */
+  progress: PartyProgress;
+  /** Each member's placed, unconfirmed level-up points. */
+  pending: PendingPoints[];
+  /** Change a member's placed points: `update` gets the latest ones (so quick clicks never overwrite each other). */
+  onPendingChange: (charIdx: number, update: (pending: PendingPoints) => PendingPoints) => void;
+  /** Spend the member's pending points (Confirm). */
+  onConfirmPoints: (charIdx: number) => void;
 }
 
 /** The window's design size (px); it scales down to fit smaller screens. */
@@ -78,16 +92,45 @@ function Val({ delta, children, className = '' }: { delta: number; children: Rea
   );
 }
 
-/** A labelled value on a dark strip (attributes and skills); hovering or focusing the label explains it. */
-function TipRow({ label, tip, delta, value, caps }: { label: string; tip: string; delta: number; value: number; caps?: boolean }) {
+/** Level-up controls on an attribute or skill row. */
+interface PointControls {
+  /** Points placed here, not yet confirmed (shown as "+n"). */
+  pending: number;
+  /** The panel still has points to place: show "+". */
+  canAdd: boolean;
+  onAdd: () => void;
+}
+
+/**
+ * A labelled value on a dark strip (attributes and skills); hovering or focusing the label explains it.
+ * While levelling up, "+" adds a point (the banner's Reset takes them all back); the value includes placed points.
+ */
+function TipRow({ label, tip, delta, value, caps, points }: { label: string; tip: string; delta: number; value: number; caps?: boolean; points?: PointControls }) {
+  const name = capitalize(label.toLowerCase());
   return (
     <div className="flex items-center justify-between gap-1.5 box-border min-h-6 px-2.5 bg-rift-void border border-rift-seam rounded-sm">
       <Tooltip content={<TextTip>{tip}</TextTip>} gap={6}>
         <span tabIndex={0} className={`rf-tiplabel text-[11px] ${caps ? 'tracking-[0.08em]' : ''}`}>{label}</span>
       </Tooltip>
-      <Val delta={delta} className="text-sm">{value}</Val>
+      <span className="flex items-center gap-1.5">
+        {points && points.pending > 0 && <span className="text-[11px]" style={{ color: 'var(--glow)' }}>+{points.pending}</span>}
+        {points?.canAdd && (
+          <button type="button" className="rf-pt" aria-label={`Add point to ${name}`} onClick={points.onAdd}>
+            <svg aria-hidden="true" width="8" height="8" viewBox="0 0 8 8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"><path d="M1 4h6M4 1v6" /></svg>
+          </button>
+        )}
+        <Val delta={delta} className="text-sm min-w-[2ch] justify-end">{value}</Val>
+      </span>
     </div>
   );
+}
+
+/** The level-up banner's Reset and Confirm: small raised buttons in the technical font. */
+const BANNER_BTN = 'rf-btn relative min-h-[36px] px-4 font-tech text-[11px] tracking-[0.14em]';
+
+/** "n left" beside an Attributes / Skills heading while levelling up, "Done" once all are placed. */
+function PointsLeft({ left }: { left: number }) {
+  return <span className="text-[11px] tracking-[0.04em]" style={{ color: 'var(--glow)' }}>{left > 0 ? `${left} left` : 'Done'}</span>;
 }
 
 /** Right-click handler that suppresses the browser menu on item cells and runs `action` when allowed. */
@@ -110,7 +153,7 @@ function GearSlotBox({ slot, item, stats, onUnequip }: { slot: GearSlot; item: I
   }
   return (
     <Tooltip gap={10} style={pos} content={<ItemTooltipContent item={item} stats={stats} clickAction={onUnequip ? 'Unequip' : undefined} />}>
-      <div className="rf-eqs is-filled" aria-label={`${SLOT_LABEL[slot]}: ${item.name}`} onContextMenu={rightClick(true, onUnequip)}>
+      <div className={`rf-eqs is-filled ${rarityGlow(item).className}`} style={rarityGlow(item).style} aria-label={`${SLOT_LABEL[slot]}: ${item.name}`} onContextMenu={rightClick(true, onUnequip)}>
         <ItemIcon item={item} className="w-[34px] h-[34px]" />
         <span className="text-[10px] tracking-[0.08em] uppercase">{SLOT_LABEL[slot]}</span>
       </div>
@@ -130,7 +173,7 @@ function useFitScale(): number {
   return scale;
 }
 
-export default function CharacterSheet({ party, partyHp, partyMp, partyStats, inventory, onClose, onEquipItem, onUnequipItem }: Props) {
+export default function CharacterSheet({ party, partyHp, partyMp, partyStats, inventory, onClose, onEquipItem, onUnequipItem, progress, pending: pendingAll, onPendingChange, onConfirmPoints }: Props) {
   const [selectedIdx, setSelectedIdx] = useState(0);
   const scale = useFitScale();
 
@@ -141,11 +184,9 @@ export default function CharacterSheet({ party, partyHp, partyMp, partyStats, in
   const hp = partyHp[selectedIdx] ?? stats.hp;
   const mp = partyMp[selectedIdx] ?? stats.mp;
 
-  // Stats without combat buffs (gear affixes included): what buffs and debuffs are compared against
-  const baseStats = recomputeStats(
-    { mode: 'player', classKey: selectedClass, gearArmorBonus: getGearArmorBonus(gear) },
-    getGearBuffs(gear),
-  );
+  // Stats without combat buffs (gear affixes and spent points included, at the party's level): what buffs and
+  // debuffs are compared against
+  const baseStats = recomputeStats(memberStatInput(member, stats.level), getGearBuffs(gear));
 
   // The member's model, holding their equipped weapon and shield
   const held = heldGear(gear);
@@ -153,6 +194,24 @@ export default function CharacterSheet({ party, partyHp, partyMp, partyStats, in
   const model = useMemo(() => characterModel(selectedClass, held.weapon, held.shield), [lookKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const invFull = isFull(inventory);
+
+  // Level-up: the member's placed points and what's left to place
+  const pending = pendingAll[selectedIdx];
+  const leveling = hasPointsToSpend(member);
+  const left = pointsLeft(member, pending);
+  const placed = left.attr < member.unspentAttributePoints || left.skill < member.unspentSkillPoints;
+  const ready = leveling && left.attr === 0 && left.skill === 0;
+  const setPending = (fn: (p: PendingPoints) => PendingPoints) => onPendingChange(selectedIdx, fn);
+  const attrPoints = (k: (typeof ATTRIBUTE_KEYS)[number]): PointControls | undefined => leveling ? {
+    pending: pending.attr[k], canAdd: left.attr > 0,
+    onAdd: () => setPending(p => (pointsLeft(member, p).attr > 0 ? { ...p, attr: { ...p.attr, [k]: p.attr[k] + 1 } } : p)),
+  } : undefined;
+  const skillPoints = (k: (typeof SKILL_KEYS)[number]): PointControls | undefined => leveling ? {
+    pending: pending.skill[k], canAdd: left.skill > 0,
+    onAdd: () => setPending(p => (pointsLeft(member, p).skill > 0 ? { ...p, skill: { ...p.skill, [k]: p.skill[k] + 1 } } : p)),
+  } : undefined;
+  const hint = ready ? 'All points spent. Confirm to apply.'
+    : `Spend ${[left.attr > 0 && `${left.attr} attribute`, left.skill > 0 && `${left.skill} skill`].filter(Boolean).join(' and ')} point${left.attr + left.skill === 1 ? '' : 's'}`;
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center font-tech text-rift-ink bg-[rgba(4,5,6,0.76)] backdrop-blur-[2px]">
@@ -169,17 +228,30 @@ export default function CharacterSheet({ party, partyHp, partyMp, partyStats, in
       >
         {/* ── Party rail ── */}
         <nav aria-label="Party members" className="flex-none w-[188px] flex flex-col gap-2">
-          <PanelTitle variant="heading" className="h-14 flex items-center">Party</PanelTitle>
+          {/* The heading block: "Party" and the party's XP toward the next level */}
+          <div className="h-14 flex flex-col justify-center gap-2">
+            <PanelTitle variant="heading">Party</PanelTitle>
+            <div className="flex items-center gap-2.5 text-[10px] tracking-[0.1em]">
+              <span className="flex-none uppercase text-rift-muted">LV {progress.level}</span>
+              <XpBar progress={progress} className="flex-1" />
+              <span className="flex-none text-rift-soft">{progress.xp} / {xpToNext(progress.level)}</span>
+            </div>
+          </div>
           {party.map((m, i) => {
             const sel = i === selectedIdx;
             const held = heldGear(m.gear);
+            const memberLeveling = hasPointsToSpend(m);
+            const memberLeft = pointsLeft(m, pendingAll[i]);
             return (
               <button key={i} type="button" aria-pressed={sel} onClick={() => setSelectedIdx(i)}
-                className={`rf-row ${sel ? 'is-view' : ''} flex items-center gap-3 w-full min-h-16 box-border px-3 text-left text-inherit`}>
+                className={`rf-row ${sel ? 'is-view' : ''} ${memberLeveling ? 'is-levelup' : ''} flex items-center gap-3 w-full min-h-16 box-border px-3 py-2 text-left text-inherit`}>
                 <Portrait classKey={m.selectedClass} {...held} size={36} />
                 <span className="flex-1 min-w-0">
                   <span className={`block text-[13px] truncate ${sel ? 'text-rift-bright' : 'text-rift-soft'}`}>{m.characterName}</span>
                   <span className="block mt-[3px] text-[11px] tracking-[0.08em] uppercase text-rift-label">{CLASSES[m.selectedClass].name}</span>
+                  {memberLeveling && (
+                    <span className="rf-levelup-label block mt-[3px]">{memberLeft.attr === 0 && memberLeft.skill === 0 ? 'Confirm' : 'Level up'}</span>
+                  )}
                 </span>
                 {sel && <span aria-hidden="true" className="flex-none w-1.5 h-1.5 rotate-45" style={{ background: 'var(--glow)' }} />}
               </button>
@@ -195,6 +267,22 @@ export default function CharacterSheet({ party, partyHp, partyMp, partyStats, in
               <h2 id="party-who" className="m-0 font-display font-normal text-[26px] tracking-[0.06em] leading-[1.1] text-rift-bright">{characterName}</h2>
               <p className="mt-1.5 mb-0 text-xs tracking-[0.14em] uppercase text-rift-muted">{classData.name} · Level {stats.level}</p>
             </div>
+            {leveling && (
+              <div role="status" className="relative ml-auto flex items-center gap-4">
+                <span className="relative text-right">
+                  {/* A pale yellow wedge glowing behind the label and hint (tall on the right, tapering to a point
+                      about 64px left of the text). Blurred on a wrapper: the clip on the inner shape keeps its form,
+                      the blur on the outside softens its edges. */}
+                  <span aria-hidden="true" className="absolute -left-16 right-0 -top-2.5 -bottom-2.5 pointer-events-none" style={{ filter: 'blur(14px)' }}>
+                    <span className="absolute inset-0" style={{ background: 'color-mix(in srgb, var(--rift-levelup) 16%, transparent)', clipPath: 'polygon(0 50%, 100% 0, 100% 100%)' }} />
+                  </span>
+                  <span className="relative block font-display text-base tracking-[0.04em] text-rift-bright">Level up</span>
+                  <span className="relative block mt-0.5 text-xs text-rift-soft">{hint}</span>
+                </span>
+                <button type="button" className={BANNER_BTN} disabled={!placed} onClick={() => onPendingChange(selectedIdx, noPendingPoints)}>Reset</button>
+                <button type="button" className={BANNER_BTN} disabled={!ready} onClick={() => onConfirmPoints(selectedIdx)}>Confirm</button>
+              </div>
+            )}
             <button type="button" className="rf-btn flex-none w-11 h-11 flex items-center justify-center p-0 text-rift-soft" aria-label="Close" onClick={onClose}>
               <svg aria-hidden="true" width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><path d="M2 2l10 10M12 2L2 12" /></svg>
             </button>
@@ -227,21 +315,10 @@ export default function CharacterSheet({ party, partyHp, partyMp, partyStats, in
                   <PanelTitle variant="heading">Inventory <span className="font-tech text-[10px] tracking-[0.1em] text-rift-label">Shared</span></PanelTitle>
                   <span className={`text-xs ${invFull ? 'text-rift-warn' : 'text-rift-muted'}`}>{inventory.length} / {INVENTORY_SIZE}{invFull ? ' · Full' : ''}</span>
                 </div>
-                <div className="grid gap-1" style={{ gridTemplateColumns: `repeat(${INVENTORY_COLS}, 46px)` }}>
-                  {Array.from({ length: INVENTORY_SIZE }).map((_, i) => {
-                    const item: Item | undefined = inventory[i];
-                    if (!item) return <div key={i} className="rf-cell" />;
-                    const proficient = isProficient(classData, item);
-                    const equip = onEquipItem && canEquip(classData, item) ? () => onEquipItem(i, selectedIdx) : null;
-                    return (
-                      <Tooltip key={i} gap={10} content={<ItemTooltipContent item={item} stats={stats} proficient={proficient} clickAction={equip ? 'Equip' : undefined} />}>
-                        <div className="rf-cell is-filled" aria-label={`${item.name}${proficient ? '' : ', not proficient'}`} onContextMenu={rightClick(true, equip)}>
-                          <ItemIcon item={item} className={`w-[30px] h-[30px] ${proficient ? '' : 'opacity-50'}`} />
-                        </div>
-                      </Tooltip>
-                    );
-                  })}
-                </div>
+                <ItemGrid items={inventory} cols={INVENTORY_COLS} size={INVENTORY_SIZE} stats={stats}
+                  canUse={(item) => isProficient(classData, item)}
+                  action={(item) => (onEquipItem && canEquip(classData, item) ? 'Equip' : null)}
+                  onAction={(i) => onEquipItem?.(i, selectedIdx)} unusableNote=", not proficient" />
               </section>
             </div>
 
@@ -249,20 +326,26 @@ export default function CharacterSheet({ party, partyHp, partyMp, partyStats, in
             <div className="flex-1 min-w-0 flex flex-col gap-2">
               <div className="flex-none flex gap-2 items-stretch">
                 <section aria-label="Attributes" className="rf-panel flex-1 min-w-0 p-3 flex flex-col">
-                  <PanelTitle variant="heading">Attributes</PanelTitle>
+                  <div className="flex items-baseline justify-between">
+                    <PanelTitle variant="heading">Attributes</PanelTitle>
+                    {leveling && <PointsLeft left={left.attr} />}
+                  </div>
                   <div className="flex-1 min-h-0 grid grid-cols-1 auto-rows-fr gap-1 mt-2">
                     {ATTRIBUTE_KEYS.map(attr => (
-                      <TipRow key={attr} label={ATTR_LABEL[attr]} tip={AttributeTooltips[attr]} caps
-                        value={stats.attributes[attr]} delta={stats.attributes[attr] - baseStats.attributes[attr]} />
+                      <TipRow key={attr} label={ATTR_LABEL[attr]} tip={AttributeTooltips[attr]} caps points={attrPoints(attr)}
+                        value={stats.attributes[attr] + pending.attr[attr]} delta={stats.attributes[attr] - baseStats.attributes[attr]} />
                     ))}
                   </div>
                 </section>
                 <section aria-label="Skills" className="rf-panel flex-1 min-w-0 p-3">
-                  <PanelTitle variant="heading">Skills</PanelTitle>
+                  <div className="flex items-baseline justify-between">
+                    <PanelTitle variant="heading">Skills</PanelTitle>
+                    {leveling && <PointsLeft left={left.skill} />}
+                  </div>
                   <div className="grid grid-cols-1 gap-1 mt-2">
                     {SKILL_KEYS.map(skill => (
-                      <TipRow key={skill} label={capitalize(skill)} tip={SkillTooltips[skill]}
-                        value={stats.skills[skill]} delta={stats.skills[skill] - baseStats.skills[skill]} />
+                      <TipRow key={skill} label={capitalize(skill)} tip={SkillTooltips[skill]} points={skillPoints(skill)}
+                        value={stats.skills[skill] + pending.skill[skill]} delta={stats.skills[skill] - baseStats.skills[skill]} />
                     ))}
                   </div>
                 </section>

@@ -18,6 +18,9 @@ export interface ShowcaseCell {
 /** A full turn of a spinning showcase model (ms): character select and the party window. */
 export const SHOWCASE_SPIN_MS = 8000;
 
+/** How a character select model stands before it is spun: turned slightly to the viewer's right (radians). */
+export const SHOWCASE_REST_YAW = 0.45;
+
 /** Camera tilt: looks slightly down on the model. */
 const ELEVATION = (12 * Math.PI) / 180;
 /** World height a cell shows at scale 1, and the gap below the feet (world units). */

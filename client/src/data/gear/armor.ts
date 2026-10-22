@@ -1,21 +1,87 @@
-// Static armor data for the armor drop generator.
+// Armor data: what each armor type gives (ARMOR_TYPE_DATA), how much armor each slot gets (BASE_ARMOR_MULTIPLIER),
+// and the armor series: the named sets of four pieces, one series per type and tier (ARMOR_SERIES).
+// Like weapons, a piece is a type x tier: its type sets its stats, its series its name and model.
 import type { BuffableStat } from '../stats';
-import { rangedStats, type ArmorSlot } from './types';
+import { meleeStats, rangedStats, type ArmorSlot } from './types';
 import type { ArmorProficiency } from '../classes';
 import type { ModelLink } from '../../forge/core/types';
 
-// ─── Armor Generation ─────────────────────────────────────────────────────────
+// ─── Armor Types ──────────────────────────────────────────────────────────────
 
-export const ARMOR_TYPE_BASE_VALUE: Record<ArmorProficiency, number> = {
-  Cloth: 4,
-  Light: 7,
-  Medium: 8,
-  Heavy: 12,
+/** An implicit's value in one slot: baseValue at item level 1, + growthPerLevel per level above 1. */
+export interface ArmorSlotScaling {
+  baseValue: number;
+  growthPerLevel: number;
+}
+
+/** Everything an armor type gives, whatever its series. */
+export interface ArmorTypeData {
+  /** Armor at item level 1 in the chest; other slots scale it by BASE_ARMOR_MULTIPLIER (shields by SHIELD_ARMOR_MULTIPLIER). Grows with item level. */
+  baseArmor: number;
+  /** The type's implicit: one stat, its value per slot (chest > helm/boots > gloves). */
+  implicit: { stat: BuffableStat; slots: Record<ArmorSlot, ArmorSlotScaling> };
+  /** Affixes armor (and shields) of this type never roll. */
+  invalidAffixes: BuffableStat[];
+}
+
+export const ARMOR_TYPE_DATA: Record<ArmorProficiency, ArmorTypeData> = {
+  Cloth: {
+    baseArmor: 4,
+    implicit: {
+      stat: 'magicResistance',
+      slots: {
+        chest:  { baseValue: 5, growthPerLevel: 0.40 },
+        helm:   { baseValue: 4, growthPerLevel: 0.30 },
+        boots:  { baseValue: 3, growthPerLevel: 0.30 },
+        gloves: { baseValue: 2, growthPerLevel: 0.20 },
+      },
+    },
+    invalidAffixes: ['strength', 'finesse', 'block', 'parry', 'glancingBlow', ...rangedStats, ...meleeStats],
+  },
+  Light: {
+    baseArmor: 7,
+    implicit: {
+      stat: 'dodge',
+      slots: {
+        chest:  { baseValue: 3, growthPerLevel: 0.40 },
+        boots:  { baseValue: 2, growthPerLevel: 0.30 },
+        helm:   { baseValue: 2, growthPerLevel: 0.20 },
+        gloves: { baseValue: 1, growthPerLevel: 0.10 },
+      },
+    },
+    invalidAffixes: ['magicHit', 'magicCrit', 'block', 'threatMultiplier'],
+  },
+  Medium: {
+    baseArmor: 8,
+    implicit: {
+      stat: 'initiative',
+      slots: {
+        chest:  { baseValue: 3, growthPerLevel: 0.30 },
+        helm:   { baseValue: 2, growthPerLevel: 0.20 },
+        boots:  { baseValue: 2, growthPerLevel: 0.20 },
+        gloves: { baseValue: 1, growthPerLevel: 0.10 },
+      },
+    },
+    invalidAffixes: [],
+  },
+  Heavy: {
+    baseArmor: 12,
+    implicit: {
+      stat: 'glancingBlow',
+      slots: {
+        chest:  { baseValue: 5, growthPerLevel: 0.40 },
+        helm:   { baseValue: 3, growthPerLevel: 0.30 },
+        boots:  { baseValue: 3, growthPerLevel: 0.30 },
+        gloves: { baseValue: 2, growthPerLevel: 0.20 },
+      },
+    },
+    invalidAffixes: ['initiative', 'dodge', 'evasion', 'movement', ...rangedStats],
+  },
 };
 
-export const ARMOR_SLOT_MULTIPLIER: Record<ArmorSlot, number> = {
+/** Each slot's share of its type's baseArmor. */
+export const BASE_ARMOR_MULTIPLIER: Record<ArmorSlot, number> = {
   chest:  1.00,
-  //shield: 0.80
   helm:   0.65,
   boots:  0.45,
   gloves: 0.35,
@@ -28,6 +94,8 @@ export interface ArmorSeries {
   name: string;               // e.g. 'Leather', 'Chainmail'
   armorType: ArmorProficiency;
   requiredLevel: number;
+  /** Scales the armor its pieces give (the type's baseArmor x slot share); starting gear is 1.0. */
+  armorMultiplier: number;
   names: Record<ArmorSlot, string>;   // item name per slot, after the series name: 'Apprentice Hood' (see armorName)
   // Each slot's forge design: how the item is drawn (icon and loot).
   models: Record<ArmorSlot, ModelLink>;
@@ -38,10 +106,11 @@ export function armorName(series: ArmorSeries, slot: ArmorSlot): string {
   return `${series.name} ${series.names[slot]}`;
 }
 
+/** Armor that drops as loot, by type and tier. */
 export const ARMOR_SERIES: ArmorSeries[] = [
   // ── Cloth ─────────────────────────────────────────────────────────────────
   {
-    id: 'apprentice', name: 'Apprentice', armorType: 'Cloth', requiredLevel: 1,
+    id: 'apprentice', name: 'Apprentice', armorType: 'Cloth', requiredLevel: 1, armorMultiplier: 1.2,
     names: { helm: 'Hood',     chest: 'Robes',      gloves: 'Handwraps', boots: 'Shoes'   },
     models: {
       helm:   'armor.apprentice-hood',
@@ -53,7 +122,7 @@ export const ARMOR_SERIES: ArmorSeries[] = [
 
   // ── Light ─────────────────────────────────────────────────────────────────
   {
-    id: 'leather', name: 'Leather', armorType: 'Light', requiredLevel: 1,
+    id: 'leather', name: 'Leather', armorType: 'Light', requiredLevel: 1, armorMultiplier: 1.2,
     names: { helm: 'Cap',         chest: 'Jerkin',        gloves: 'Gloves',  boots: 'Boots'       },
     models: {
       helm:   'armor.leather-cap',
@@ -65,7 +134,7 @@ export const ARMOR_SERIES: ArmorSeries[] = [
 
   // ── Medium ────────────────────────────────────────────────────────────────
   {
-    id: 'hide', name: 'Hide', armorType: 'Medium', requiredLevel: 1,
+    id: 'hide', name: 'Hide', armorType: 'Medium', requiredLevel: 1, armorMultiplier: 1.2,
     names: { helm: 'Skullcap',  chest: 'Hauberk',        gloves: 'Gauntlets', boots: 'Boots' },
     models: {
       helm:   'armor.hide-skullcap',
@@ -77,7 +146,7 @@ export const ARMOR_SERIES: ArmorSeries[] = [
 
   // ── Heavy ─────────────────────────────────────────────────────────────────
   {
-    id: 'iron', name: 'Iron', armorType: 'Heavy', requiredLevel: 1,
+    id: 'iron', name: 'Iron', armorType: 'Heavy', requiredLevel: 1, armorMultiplier: 1.2,
     names: { helm: 'Helm',            chest: 'Breastplate',  gloves: 'Gauntlets', boots: 'Sabatons' },
     models: {
       helm:   'armor.iron-helm',
@@ -88,62 +157,11 @@ export const ARMOR_SERIES: ArmorSeries[] = [
   },
 ];
 
-// ─── Armor Type Implicits ─────────────────────────────────────────────────────────
+/** A starter version of a series: "Worn", weaker (armorMultiplier 1.0), drawn with the series' own models. */
+const worn = (s: ArmorSeries): ArmorSeries => ({ ...s, id: `worn-${s.id}`, name: `Worn ${s.name}`, armorMultiplier: 1.0 });
 
-// Scaling values for one slot within an implicit definition.
-export interface ArmorSlotScaling {
-  baseValue: number;       // value at item level 1
-  growthPerLevel: number;  // added per item level above 1
-}
-
-// One implicit per armor type; values differ per slot (chest > helm/boots > gloves).
-export interface ArmorImplicitDef {
-  statKey: BuffableStat;
-  slots: Record<ArmorSlot, ArmorSlotScaling>;
-}
-
-export const ARMOR_IMPLICITS: Record<ArmorProficiency, ArmorImplicitDef> = {
-  Cloth: {
-    statKey: 'magicResistance',
-    slots: {
-      chest:  { baseValue: 5, growthPerLevel: 0.40 },
-      helm:   { baseValue: 4, growthPerLevel: 0.30 },
-      boots:  { baseValue: 3, growthPerLevel: 0.30 },
-      gloves: { baseValue: 2, growthPerLevel: 0.20 },
-    },
-  },
-  Light: {
-    statKey: 'dodge',
-    slots: {
-      chest:  { baseValue: 3, growthPerLevel: 0.40 },
-      boots:  { baseValue: 2, growthPerLevel: 0.30 },
-      helm:   { baseValue: 2, growthPerLevel: 0.20 },
-      gloves: { baseValue: 1, growthPerLevel: 0.10 },
-    },
-  },
-  Medium: {
-    statKey: 'initiative',
-    slots: {
-      chest:  { baseValue: 3, growthPerLevel: 0.30 },
-      helm:   { baseValue: 2, growthPerLevel: 0.20 },
-      boots:  { baseValue: 2, growthPerLevel: 0.20 },
-      gloves: { baseValue: 1, growthPerLevel: 0.10 },
-    },
-  },
-  Heavy: {
-    statKey: 'glancingBlow',
-    slots: {
-      chest:  { baseValue: 5, growthPerLevel: 0.40 },
-      helm:   { baseValue: 3, growthPerLevel: 0.30 },
-      boots:  { baseValue: 3, growthPerLevel: 0.30 },
-      gloves: { baseValue: 2, growthPerLevel: 0.20 },
-    },
-  },
-};
-
-export const ARMOR_INVALID_AFFIXES: Record<ArmorProficiency, BuffableStat[]> = {
-  Cloth: ['strength', 'finesse', 'block', 'parry', 'glancingBlow', ...rangedStats],
-  Light: ['magicHit', 'magicCrit', 'block', 'threatMultiplier'],
-  Medium: ['block', 'threatMultiplier'],
-  Heavy: ['block', 'initiative', 'dodge', ...rangedStats]
-}
+/**
+ * Starting gear only: never drops, so even a common first drop is an upgrade. A Worn version of each
+ * armor type's first series (they have no designs of their own).
+ */
+export const STARTER_ARMOR_SERIES: ArmorSeries[] = ['apprentice', 'leather', 'hide', 'iron'].map((id) => worn(ARMOR_SERIES.find((s) => s.id === id)!));

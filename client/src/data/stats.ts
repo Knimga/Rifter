@@ -15,7 +15,7 @@ export type DamageElement = typeof DAMAGE_ELEMENTS[number];
 export type ElementStatKey = `${DamageElement}${typeof ELEMENT_STAT_SUFFIXES[number]}`;
 
 const MISC_STATS = [
-  'hpRegen', 'mpRegen', 'initiative', 'movement',
+  'hpRegen', 'mpRegen', 'initiative', 'movement', 'apMax',
   'armor', 'dodge', 'parry', 'block', 'glancingBlow', 'magicResistance', 'healing',
   'meleeHit', 'meleeDamage', 'meleeCrit', 'meleePenetration',
   'rangedHit', 'rangedDamage', 'rangedCrit', 'rangedPenetration',
@@ -66,6 +66,8 @@ export interface Stats {
   mpRegen:         number;
   initiative:      number;
   movement:        number;
+  /** Action points each combat turn: moving (1 per movement's worth of tiles) and abilities spend them. */
+  apMax:           number;
   armor:           number;
   dodge:           number;
   parry:           number;
@@ -137,8 +139,10 @@ export const formatStat = (key: string, value: number) => `${formatStatValue(key
 
 export const BASE_ATTRIBUTES = 5;
 export const BASE_SKILLS = 0;
-/** Attribute points gained per level above 1 (enemies now; party members once they level up). */
+/** Attribute points gained per level above 1 (party members on each level-up; enemies auto-allocate theirs). */
 export const ATTRIBUTE_POINTS_PER_LEVEL = 3;
+/** Skill points a party member gains per level-up. */
+export const SKILL_POINTS_PER_LEVEL = 3;
 
 const fl = (n: number) => Math.floor(n);
 const ATTRIBUTE_KEYS_SET = new Set<string>(ATTRIBUTE_KEYS);
@@ -149,7 +153,7 @@ const ATTRIBUTE_KEYS_SET = new Set<string>(ATTRIBUTE_KEYS);
 // passive / BuffableStat key. The modifier phases iterate this table instead of listing
 // each stat by hand.
 
-type ScalarStatKey = 'hp' | 'mp' | 'hpRegen' | 'mpRegen' | 'initiative' | 'movement' | 'armor' | 'dodge'
+type ScalarStatKey = 'hp' | 'mp' | 'hpRegen' | 'mpRegen' | 'initiative' | 'movement' | 'apMax' | 'armor' | 'dodge'
   | 'parry' | 'block' | 'glancingBlow' | 'magicResistance' | 'healing' | 'threatMultiplier';
 
 interface StatAccessor {
@@ -177,6 +181,7 @@ const STAT_ACCESSORS: StatAccessor[] = [
   ...(['hp', 'mp', 'hpRegen', 'mpRegen', 'initiative', 'armor', 'dodge', 'parry', 'block', 'glancingBlow', 'magicResistance', 'healing'] as const)
     .map(k => scalar(k)),
   scalar('movement', { min: 1 }),
+  scalar('apMax'), // a stun can take it to 0: the unit skips its turn
   scalar('threatMultiplier', { noFloor: true, min: 0.1 }),
   ...(['melee', 'ranged', 'magic'] as const).flatMap(cat =>
     (['hit', 'damage', 'crit', 'penetration'] as const).map((f): StatAccessor => ({
@@ -234,7 +239,12 @@ export interface EnemyClassStats {
 export type PlayerStatInput = {
   mode: 'player';
   classKey: ClassKey;
+  /** The party's level (default 1). */
+  level?: number;
   gearArmorBonus?: number;
+  /** Attribute and skill points the member has spent (level-ups). */
+  pointsSpent?: Partial<Record<AttributeKey, number>>;
+  skillPointsSpent?: Partial<Record<SkillKey, number>>;
   attrBuffs?: Partial<Record<AttributeKey, number>>;
 };
 
@@ -249,6 +259,10 @@ export type EnemyStatInput = {
 
 // ─── Stat Calculation ─────────────────────────────────────────────────────────
 
+/** Action points per combat turn (Stats.apMax): the party's and every enemy's. */
+export const PLAYER_AP_MAX = 3;
+export const ENEMY_AP_MAX = 3;
+
 /** Phase 1 — pure attribute + skill formulas, no passives. */
 function buildRawStats(
   attrs: Record<AttributeKey, number>,
@@ -256,6 +270,7 @@ function buildRawStats(
   level: number,
   armorBonus: number,
   movement: number,
+  apMax: number,
   baseHp: number,
 ): Stats {
   const { strength: str, toughness: tou, finesse: fin, mind: mnd, spirit: spr, speed: spd } = attrs;
@@ -264,12 +279,13 @@ function buildRawStats(
     level,
     attributes: attrs,
     skills,
-    hp:              fl(baseHp + (2 * tou) + (str / 2) + (2 * level)),
-    mp:              fl(10 + (3 * mnd) + spr + level),
+    hp:              fl(baseHp + (str / 2) + (fl(tou / 2) * level)),
+    mp:              fl(10 + spr + (mnd * level)),
     hpRegen:         1 + fl((spr / 6) + (tou / 12)),
     mpRegen:         1 + fl((spr / 6) + (mnd / 12) + (devotion / 6)),
     initiative:      fl(3 + (spd / 4) + (fin / 8) + (perception / 3) + (stealth / 6)),
     movement:        movement + fl(spd / 12),
+    apMax,
     armor:           fl(tou + (armorBonus * (1 + redoubt * 0.02))),
     dodge:           3 + (spd / 3) + (fin / 6) + (evasion / 4),
     parry:           (spd / 6) + (fin / 6) + (evasion / 6),
@@ -280,19 +296,19 @@ function buildRawStats(
     melee: {
       hit:         (str / 4) + (fin / 3) + (expertise / 3),
       damage:      fl((str / 3) + (fin / 6)),
-      crit:        5 + (fin / 4) + (str / 4) + (expertise / 3),
+      crit:        5 + (fin / 4) + (str / 6) + (expertise / 3) + (stealth / 5),
       penetration: expertise / 3,
     },
     ranged: {
       hit:         (fin / 2) + (expertise / 3),
       damage:      fl(fin / 3),
-      crit:        5 + (fin / 2) + (expertise / 3),
+      crit:        5 + (fin / 2) + (expertise / 3) + (stealth / 5),
       penetration: expertise / 3,
     },
     magic: {
       hit:         (mnd / 2) + (spellcraft / 3),
       damage:      fl(mnd / 3),
-      crit:        5 + (mnd / 2) + (spellcraft / 3),
+      crit:        5 + (mnd / 2) + (spellcraft / 3) + (stealth / 5),
       penetration: spellcraft / 3,
     },
     threatMultiplier: 1 - (stealth * 0.02),
@@ -337,21 +353,23 @@ function applyScalingAndPctPassives(
 }
 
 export function calculateStats(input: PlayerStatInput | EnemyStatInput): Stats {
-  // Players: their class, level 1, armor from gear. Enemies: their class, level
-  // and level-scaled armor, plus their auto-allocated attribute points. Players have no point-buy.
+  // Players: their class, the party's level, armor from gear, the points they've spent on level-ups.
+  // Enemies: their class, level and level-scaled armor, plus their auto-allocated attribute points.
   const classData: EnemyClassStats | ClassData = input.mode === 'player' ? CLASSES[input.classKey] : input.classData;
-  const level = input.mode === 'player' ? 1 : input.level;
+  const level = input.mode === 'player' ? (input.level ?? 1) : input.level;
   const armorBonus = input.mode === 'player' ? (input.gearArmorBonus ?? 0) : input.classData.baseArmor + input.classData.armorPerLevel * level;
   const movement = 3;
+  const apMax = input.mode === 'player' ? PLAYER_AP_MAX : ENEMY_AP_MAX;
+  const skillPointsSpent = input.mode === 'player' ? input.skillPointsSpent : undefined;
 
   const attrs = Object.fromEntries(ATTRIBUTE_KEYS.map(key => [key, Math.max(0,
-    BASE_ATTRIBUTES + (classData.attributes[key] ?? 0) + (input.mode === 'enemy' ? input.pointsSpent[key] : 0) + (input.attrBuffs?.[key] ?? 0),
+    BASE_ATTRIBUTES + (classData.attributes[key] ?? 0) + (input.pointsSpent?.[key] ?? 0) + (input.attrBuffs?.[key] ?? 0),
   )])) as Record<AttributeKey, number>;
-  const skills = Object.fromEntries(SKILL_KEYS.map(key => [key, BASE_SKILLS + (classData.skills?.[key] ?? 0)])) as Record<SkillKey, number>;
+  const skills = Object.fromEntries(SKILL_KEYS.map(key => [key, BASE_SKILLS + (classData.skills?.[key] ?? 0) + (skillPointsSpent?.[key] ?? 0)])) as Record<SkillKey, number>;
   const passives = classData.passives ?? {};
   const scalingPassives = classData.scalingPassives ?? [];
 
-  let stats = buildRawStats(attrs, skills, level, armorBonus, movement, classData.baseHp);
+  let stats = buildRawStats(attrs, skills, level, armorBonus, movement, apMax, classData.baseHp);
   stats = applyFlatPassives(stats, passives);
   stats = applyScalingAndPctPassives(stats, passives, scalingPassives);
   return stats;

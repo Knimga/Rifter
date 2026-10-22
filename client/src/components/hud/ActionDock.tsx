@@ -1,15 +1,17 @@
 // The action bar (UI handoff, game screen, bottom centre): the acting member (portrait, name, class,
-// movement and action state), five slots (weapon attack or an ability; right-click to assign) and End
-// Turn. A slot dims when its ability costs more MP than the member has, or the member can't act now.
+// movement and, in combat, its AP tracker), five slots (weapon attack or an ability, its AP cost as dots;
+// right-click to assign) and End Turn. A slot dims when its ability costs more MP or AP than the member
+// has, or the member can't act now.
 import { createElement, useEffect, useRef, useState, type CSSProperties, type MouseEvent } from 'react';
 import { CLASSES, type Ability } from '../../data/classes';
 import type { PartyMemberConfig } from '../../data/party';
 import type { Stats } from '../../data/stats';
 import { isWeaponItem } from '../../data/gear';
 import { toAction } from '../../data/abilityExecution';
-import { TextTip, Tooltip } from '../Tooltip';
+import { ClickHint, TextTip, Tooltip } from '../Tooltip';
 import ItemIcon from '../ItemIcon';
-import AbilityCard, { abilityTint } from '../ui/AbilityCard';
+import AbilityCard, { ApDots, abilityTint } from '../ui/AbilityCard';
+import ApTracker, { type ApState } from './ApTracker';
 import RiftButton from '../ui/RiftButton';
 import Portrait from './Portrait';
 import { heldGear } from '../characterModel';
@@ -17,7 +19,7 @@ import { heldGear } from '../characterModel';
 /** What an action bar slot holds: the weapon attack, an ability, or nothing. */
 export type SlotContent = 'weapon-attack' | Ability | null;
 
-export default function ActionDock({ member, stats, mp, slots, onSlotsChange, armedSlot, onArmedSlotChange, inCombat, canAct, movementLeft, onEndTurn }: {
+export default function ActionDock({ member, stats, mp, slots, onSlotsChange, armedSlot, onArmedSlotChange, inCombat, canAct, ap, paidTiles, onEndTurn }: {
   member: PartyMemberConfig;
   stats: Stats;
   mp: number;
@@ -26,10 +28,12 @@ export default function ActionDock({ member, stats, mp, slots, onSlotsChange, ar
   armedSlot: number | null;
   onArmedSlotChange: (slot: number | null) => void;
   inCombat: boolean;
-  /** The member may use an action now (out of combat: always; in combat: their turn, not yet acted). */
+  /** The member may use an action now (out of combat: always; in combat: on their turn, AP permitting). */
   canAct: boolean;
-  /** In combat: movement left this turn. */
-  movementLeft: number;
+  /** In combat: the member's action points this turn (the tracker; abilities it can't pay for dim). */
+  ap: ApState | null;
+  /** In combat: tiles already paid for this turn and not walked yet. */
+  paidTiles: number;
   /** End Turn (shown in combat only). */
   onEndTurn?: () => void;
 }) {
@@ -56,9 +60,12 @@ export default function ActionDock({ member, stats, mp, slots, onSlotsChange, ar
   };
 
   const weaponAttack = weapon ? toAction('weapon-attack', weapon) : null;
+  // The armed slot's AP cost, previewed on the tracker
+  const armedContent = armedSlot !== null ? slots[armedSlot] : null;
+  const armedCost = (armedContent === 'weapon-attack' ? weaponAttack : armedContent)?.apCost ?? 0;
   const choices: { content: SlotContent; name: string; cost: string }[] = [
-    ...(weaponAttack && weapon ? [{ content: 'weapon-attack' as const, name: weapon.name, cost: '' }] : []),
-    ...abilities.map((a) => ({ content: a as SlotContent, name: a.name, cost: `${a.mpCost} MP` })),
+    ...(weaponAttack && weapon ? [{ content: 'weapon-attack' as const, name: weapon.name, cost: `${weaponAttack.apCost} AP` }] : []),
+    ...abilities.map((a) => ({ content: a as SlotContent, name: a.name, cost: `${a.apCost} AP · ${a.mpCost} MP` })),
   ];
 
   return (
@@ -69,8 +76,10 @@ export default function ActionDock({ member, stats, mp, slots, onSlotsChange, ar
         <div className="min-w-0 flex flex-col gap-[3px]">
           <span className="font-display text-lg tracking-[0.04em] text-rift-bright truncate">{member.characterName}</span>
           <span className="text-[11px] text-rift-label">{CLASSES[member.selectedClass].name}</span>
-          <span className="text-xs text-rift-soft">{inCombat ? `Moved ${stats.movement - movementLeft} / ${stats.movement}` : `Movement ${stats.movement}`}</span>
-          <span className="text-xs text-rift-muted min-h-4">{inCombat ? (canAct ? 'Action ready' : 'Action used') : ''}</span>
+          <span className="text-xs text-rift-soft">
+            {!inCombat ? `Movement ${stats.movement}` : paidTiles > 0 ? `Move ${paidTiles} more · 0 AP` : `Move up to ${stats.movement} · 1 AP`}
+          </span>
+          {inCombat && ap ? <ApTracker ap={ap} previewCost={armedCost} movement={stats.movement} /> : <span className="min-h-4" />}
         </div>
       </div>
 
@@ -81,7 +90,9 @@ export default function ActionDock({ member, stats, mp, slots, onSlotsChange, ar
         {slots.map((slot, i) => {
           const ability = slot === 'weapon-attack' ? weaponAttack : slot;
           const afford = !ability || ability.mpCost <= mp;
-          const usable = !!ability && afford && canAct;
+          const affordAp = !ability || !ap || ability.apCost <= ap.available;
+          const usable = !!ability && afford && affordAp && canAct;
+          const warning = !affordAp ? 'Not enough action points' : !afford ? 'Not enough mana' : undefined;
           const armed = armedSlot === i && !!ability;
           const card = ability && (slot === 'weapon-attack' && weapon ? { ...ability, name: weapon.name } : ability);
           // The same element wash as the ability's card
@@ -89,19 +100,23 @@ export default function ActionDock({ member, stats, mp, slots, onSlotsChange, ar
           return (
             <span key={i} className="relative block">
               <Tooltip bare={!!card} gap={14} content={menuSlot === i ? null : card ? (
-                <AbilityCard ability={card} weapon={weapon} weaponAttack={slot === 'weapon-attack'} warning={afford ? undefined : 'Not enough mana'} elevated className="w-[252px]" />
+                <AbilityCard ability={card} weapon={weapon} weaponAttack={slot === 'weapon-attack'} warning={warning} elevated className="w-[252px]" />
               ) : (
-                <TextTip>Empty slot. Right-click to assign an ability.</TextTip>
+                <TextTip>
+                  Empty slot.
+                  <ClickHint button="right" className="mt-1.5">Assign an ability</ClickHint>
+                </TextTip>
               )}>
                 <button type="button"
                   className={`rf-aslot ${!ability ? 'is-empty' : ''} ${ability && !usable ? 'is-dim' : ''} ${armed ? 'is-armed' : ''}`}
                   style={tint ? ({ '--tint': tint } as CSSProperties) : undefined}
                   aria-pressed={armed} aria-disabled={!usable}
-                  aria-label={ability ? `${card?.name}${ability.mpCost ? `, ${ability.mpCost} MP` : ''}${afford ? '' : ', not enough mana'}` : `Empty slot ${i + 1}`}
+                  aria-label={ability ? `${card?.name}, ${ability.apCost} AP${ability.mpCost ? `, ${ability.mpCost} MP` : ''}${warning ? `, ${warning.toLowerCase()}` : ''}` : `Empty slot ${i + 1}`}
                   onClick={() => usable && onArmedSlotChange(armed ? null : i)}
                   onContextMenu={(e: MouseEvent) => { e.preventDefault(); setMenuSlot(menuSlot === i ? null : i); }}>
                   {slot === 'weapon-attack' && weapon && <ItemIcon item={weapon} className="w-10 h-10" />}
                   {slot && slot !== 'weapon-attack' && slot.icon && createElement(slot.icon, { className: 'w-7 h-7' })}
+                  {ability && <ApDots count={ability.apCost} />}
                   {!ability && (
                     <svg aria-hidden="true" width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round"><path d="M9 4v10M4 9h10" /></svg>
                   )}

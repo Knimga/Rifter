@@ -2,12 +2,14 @@ import { useMemo, lazy, Suspense } from 'react';
 import type { AreaType, TargetType } from '../data/classes';
 import type { ActiveBuff, ActiveHot, ActiveDot } from '../data/stats';
 import type { EnemyInstance } from '../data/enemies';
-import type { ZoneData } from '../data/dungeonGen';
+import type { DungeonChest, ZoneData } from '../data/dungeonGen';
+import { yawFromGridMove } from '../forge/core/facing';
 import { affectedKeys, chebyshev, hasLineOfSight, isAdjacent, isArea, posKey, samePos, type Pos } from '../data/dungeonHelpers';
 import type { Item } from '../data/gear';
 import FloatingCombatText, { type FloatingText } from './FloatingCombatText';
+import { MoveCostPips } from './MoveLine';
 import { gameObjectGlow, gameObjectModel } from '../data/gameObjects';
-import { Board, FloorGrid, FloorTile, MoveLineOverlay, TileHighlight, UprightAt, UsableGlow, facingOpenSide, toMapMember, useBoard, useHoveredTile, type PartyTokenData, TILE_HIGHLIGHT } from './mapParts';
+import { Board, FloorGrid, FloorTile, MoveLineOverlay, TileHighlight, UprightAt, UsableGlow, facingOpenSide, toMapMember, useBoard, useHoveredTile, useStableHandler, type PartyTokenData, TILE_HIGHLIGHT } from './mapParts';
 import UnitStatus, { statusMarkers } from './hud/UnitStatus';
 import type { MapLoot, MapObject, UnitAim } from './ModelLayer';
 
@@ -25,9 +27,17 @@ interface Props {
   party: PartyTokenData[];
   /** Tiles the active mover can move to this turn (tile key -> steps), from GameScreen (partyMoveTargets). */
   moveTargets: Map<string, number>;
+  /** In combat: the AP moving to a tile costs (shown on the hovered tile as pips; 0 = already paid for). */
+  moveApCost?: (steps: number) => number;
   onMove: (pos: Pos) => void;
   onLocationChange: (location: 'sanctum') => void;
   onDoorClick: (doorId: string) => void;
+  /** The zone's treasure chests. */
+  chests: DungeonChest[];
+  /** Chests that have been emptied: their lids stand open, and they no longer glow. */
+  emptiedChests: ReadonlySet<string>;
+  /** A chest next to the leader was clicked (out of combat): open its window. */
+  onOpenChest: (chestId: string) => void;
   activeTarget: TargetType | null;  // target type of the selected ability (null = none selected)
   activeAbilityArea?: AreaType;
   /** Whether the selected ability's area helps (heals, buffs) or harms: its tiles show green or red. */
@@ -62,7 +72,7 @@ interface Props {
   highlightUnitId?: string | null;
 }
 
-export default function DungeonMap({ playerPos, activeMoverPos, party, moveTargets, onMove, onLocationChange, onDoorClick, activeTarget, activeAbilityArea, areaTone, actionRange, onAbilityUse, onAbilityDeselect, onMemberSelect, enemies, inCombat, isPlayerTurn, activeCombatantId, floatingTexts, onFloatingTextComplete, zone, portalPos, partyBuffs, partyHots, partyDots, floorColor, wallColor, doorObject, portalObject, enemyAoePreviewTiles, enemyTargetPartyIdx, droppedItems = {}, onLootClick, aims, highlightUnitId = null }: Props) {
+export default function DungeonMap({ playerPos, activeMoverPos, party, moveTargets, moveApCost, onMove, onLocationChange, onDoorClick, chests, emptiedChests, onOpenChest, activeTarget, activeAbilityArea, areaTone, actionRange, onAbilityUse, onAbilityDeselect, onMemberSelect, enemies, inCombat, isPlayerTurn, activeCombatantId, floatingTexts, onFloatingTextComplete, zone, portalPos, partyBuffs, partyHots, partyDots, floorColor, wallColor, doorObject, portalObject, enemyAoePreviewTiles, enemyTargetPartyIdx, droppedItems = {}, onLootClick, aims, highlightUnitId = null }: Props) {
   const { width, height, floors, doors } = zone;
   const hover = useHoveredTile();
   const hoveredTile = hover.hovered;
@@ -94,14 +104,20 @@ export default function DungeonMap({ playerPos, activeMoverPos, party, moveTarge
     [party, partyBuffs, partyHots, partyDots],
   );
   const doorByKey = useMemo(() => new Map(doors.map(d => [posKey(d.pos), d])), [doors]);
-  // Doors and the exit portal, drawn as their game objects' models. A door stands in its wall tile facing
-  // the floor it opens onto.
+  const chestByKey = useMemo(() => new Map(chests.map(c => [posKey(c.pos), c])), [chests]);
+  // Doors, the exit portal and chests, drawn as their game objects' models. A door stands in its wall tile
+  // facing the floor it opens onto; a chest stands with its back to a wall (its `facing`), its lid open once
+  // it has been emptied (its 'open' animation).
+  const emptiedKey = [...emptiedChests].sort().join('|');
   const mapObjects = useMemo(() => {
     const isFloor = (q: Pos) => floors.has(posKey(q));
     const out: MapObject[] = doors.map(d => ({ id: d.id, link: gameObjectModel(doorObject), pos: d.pos, facing: facingOpenSide(d.pos, isFloor) }));
     if (portalPos) out.push({ id: 'portal', link: gameObjectModel(portalObject), pos: portalPos, facing: facingOpenSide(portalPos, isFloor) });
+    for (const c of chests) {
+      out.push({ id: c.id, link: gameObjectModel(c.object), pos: c.pos, facing: yawFromGridMove(...c.facing), played: emptiedChests.has(c.id) ? ['open'] : undefined });
+    }
     return out;
-  }, [doors, floors, portalPos, doorObject, portalObject]);
+  }, [doors, floors, portalPos, doorObject, portalObject, chests, emptiedKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const inRangeWithLOS = (p: Pos) => chebyshev(activeMoverPos, p) <= actionRange && hasLineOfSight(activeMoverPos, p, floors);
 
@@ -118,6 +134,12 @@ export default function DungeonMap({ playerPos, activeMoverPos, party, moveTarge
     const door = doorByKey.get(key);
     if (door) {
       if (!inCombat && isAdjacent(playerPos, p)) onDoorClick(door.id);
+      return;
+    }
+    // A chest: open it from beside it, out of combat
+    const chest = chestByKey.get(key);
+    if (chest) {
+      if (!inCombat && isAdjacent(playerPos, p)) onOpenChest(chest.id);
       return;
     }
     if (!floor) return;
@@ -152,6 +174,9 @@ export default function DungeonMap({ playerPos, activeMoverPos, party, moveTarge
     if (moveTargets.has(key)) onMove(p);
   };
 
+  // Stable for the memoized tiles; always runs the latest handleClick
+  const onTileClick = useStableHandler((p: Pos) => handleClick(p, floors.has(posKey(p))));
+
   const tile = (p: Pos) => {
     const key = posKey(p);
     const isPortal = !!portalPos && samePos(p, portalPos);
@@ -163,6 +188,8 @@ export default function DungeonMap({ playerPos, activeMoverPos, party, moveTarge
     const isMoverTile = samePos(p, activeMoverPos);
     const isSelfTile = activeTarget === 'self' && inCombat && isPlayerTurn && isMoverTile;
     const isDoorAdjacent = !!door && isAdjacent(playerPos, p);
+    const chest = chestByKey.get(key);
+    const isChestUsable = !!chest && !inCombat && !emptiedChests.has(chest.id) && isAdjacent(playerPos, p);
     const tileItems = floor ? droppedItems[key] : undefined;
     const isLootAdjacent = !inCombat && !!tileItems?.length && isAdjacent(playerPos, p);
     const isEnemyTargeted = enemyTargetPartyIdx !== null && member?.partyIndex === enemyTargetPartyIdx;
@@ -178,7 +205,7 @@ export default function DungeonMap({ playerPos, activeMoverPos, party, moveTarge
     const isHighlightedUnit = !!highlightUnitId && (enemy?.id === highlightUnitId || (!!member && `player-${member.partyIndex}` === highlightUnitId));
 
     return (
-      <FloorTile key={key} p={p} hover={hover} onClick={() => handleClick(p, floor)}
+      <FloorTile key={key} p={p} hover={hover} onClick={onTileClick}
         color={floor && !door ? floorColor : wallColor}
         brighten={floor && !door && !activeTarget && !highlight && moveTargets.has(key) && hover.isHovered(p)}>
         {tileItems?.[0] && (
@@ -188,10 +215,11 @@ export default function DungeonMap({ playerPos, activeMoverPos, party, moveTarge
               style={{ boxShadow: '0 0 10px 3px color-mix(in srgb, var(--rift-loot) 60%, transparent)' }} />
           </div>
         )}
-        {/* A door or the portal the leader can use now: a soft pulsing glow on its tile (stronger on hover) */}
+        {/* A door, the portal or a chest the leader can use now: a soft pulsing glow on its tile (stronger on hover) */}
         {((door && isDoorAdjacent && !inCombat) || (isPortal && isAdjacentToPortal)) && (
           <UsableGlow color={gameObjectGlow(door ? doorObject : portalObject)} hovered={hover.isHovered(p)} />
         )}
+        {chest && isChestUsable && <UsableGlow color={gameObjectGlow(chest.object)} hovered={hover.isHovered(p)} />}
         {highlight && <TileHighlight kind={highlight} />}
         {isHighlightedUnit && <TileHighlight kind="hovered" />}
         {enemyAoePreviewTiles?.has(key) && <TileHighlight kind="enemyArea" className="z-20 animate-pulse" />}
@@ -199,11 +227,13 @@ export default function DungeonMap({ playerPos, activeMoverPos, party, moveTarge
     );
   };
 
+  const showMoveLine = !activeTarget && canAct && !!hoveredTile && moveTargets.has(posKey(hoveredTile));
+  const hoveredMoveAp = showMoveLine && moveApCost ? moveApCost(moveTargets.get(posKey(hoveredTile!))!) : 0;
   const floor = (
     <>
       <FloorGrid cols={width} rows={height} tile={tile} />
-      {!activeTarget && canAct && hoveredTile && moveTargets.has(posKey(hoveredTile)) && (
-        <MoveLineOverlay from={activeMoverPos} to={hoveredTile} cols={width} rows={height} />
+      {showMoveLine && hoveredTile && (
+        <MoveLineOverlay from={activeMoverPos} to={hoveredTile} />
       )}
     </>
   );
@@ -215,6 +245,13 @@ export default function DungeonMap({ playerPos, activeMoverPos, party, moveTarge
         {/* Keyed by zone: entering another zone places every model fresh instead of gliding it across */}
         <ModelLayer key={zone.id} board={board} party={modelParty} enemies={modelEnemies} loot={modelLoot} objects={mapObjects} renderEnemyOverlay={enemyOverlay} aims={aims} />
       </Suspense>
+
+      {/* The AP the hovered move costs, where its move line ends */}
+      {hoveredMoveAp > 0 && hoveredTile && (
+        <UprightAt board={board} x={hoveredTile.x} y={hoveredTile.y} className="z-20">
+          <MoveCostPips ap={hoveredMoveAp} />
+        </UprightAt>
+      )}
 
       {/* How many items a pile holds, when more than one */}
       {Object.entries(droppedItems).filter(([, items]) => items.length > 1).map(([key, items]) => {

@@ -13,7 +13,7 @@ export const AttributeTooltips: Record<AttributeKey, string> = {
 
 export const SkillTooltips: Record<SkillKey, string> = {
     perception: "Increases initiative",
-    stealth: "Reduces threat generated and slightly increases initiative",
+    stealth: "Reduces threat generated and slightly increases crit chance and initiative",
     expertise: "For melee and ranged attacks, increases penetration and slightly increases hit and crit chance",
     spellcraft: "For magic attacks, increases penetration and slightly increases hit and crit chance",
     evasion: "Increases dodge, parry, and glancing blow chance",
@@ -49,13 +49,17 @@ export function capitalizeWords(s: string): string {
 export function formatStatLabel(key: string): string {
     return key.replace('Bonus', '').replace(/([A-Z])/g, ' $1').trim()
         .replace(/^\w/, c => c.toUpperCase())
-        .replace(/^Hp\b/, 'HP').replace(/^Mp\b/, 'MP');
+        .replace(/^Hp\b/, 'HP').replace(/^Mp\b/, 'MP').replace(/^Ap Max$/, 'Max AP');
 }
 
 /** Signed stat modifier, e.g. '+5 Armor', '−4 Movement', '+10% Dodge'. */
 export function formatModifier(stat: string, value: number, percent = false): string {
-    const sign = value < 0 ? '−' : '+';
-    return `${sign}${Math.abs(value)}${percent ? '%' : statSuffix(stat)} ${formatStatLabel(stat)}`;
+    return `${formatSigned(value)}${percent ? '%' : statSuffix(stat)} ${formatStatLabel(stat)}`;
+}
+
+/** A number with its sign, a typographic minus for negatives: '+1', '−2'. */
+export function formatSigned(value: number): string {
+    return `${value < 0 ? '−' : '+'}${Math.abs(value)}`;
 }
 
 // ─── Effect descriptions (ability cards and item tooltips) ───

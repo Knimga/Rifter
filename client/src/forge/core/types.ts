@@ -16,6 +16,26 @@ export interface PartSpin {
   frame?: Vec3;
 }
 
+/** One part's move in an animation: it turns `angleDeg` about `axis` (model space, through the part's pivot). */
+export interface PartTurn {
+  part: string;
+  axis: 'x' | 'y' | 'z';
+  angleDeg: number;
+}
+
+/**
+ * A one-time animation (e.g. a chest's lid swinging open): from the rest pose, each listed part turns over
+ * `ms` (eased), then holds its end pose. The game plays one when its object's state calls for it (view
+ * state, like facing) and shows it already played on an object that appears in that state; the forge plays
+ * each one on demand. Unlike PartSpin, it never repeats.
+ */
+export interface PartAnimation {
+  /** Short name, shown in the forge and used by the game to ask for it: 'open'. */
+  name: string;
+  ms: number;
+  turns: PartTurn[];
+}
+
 /**
  * How a finished mesh is scaled and positioned. Units are TILES (1 unit = 1 grid cell).
  * standing: origin at the feet center, y up, scaled so height <= height and footprint radius <= maxRadius.
@@ -56,6 +76,8 @@ export interface Design {
   budget: number;
   /** Parts that keep moving on screen (see PartSpin). */
   motion?: PartSpin[];
+  /** One-time animations of its parts, by name (see PartAnimation). */
+  animations?: PartAnimation[];
   /** Draw into c.mesh. Return the display name. */
   build(c: BuildCtx): string;
 }
@@ -96,4 +118,6 @@ export interface Model {
   groundPitch?: number;
   /** The design's moving parts (PartSpin), if any: renderers animate them. */
   motion?: PartSpin[];
+  /** The design's one-time animations (PartAnimation), if any. */
+  animations?: PartAnimation[];
 }

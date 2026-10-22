@@ -1,0 +1,9 @@
+# Every text file uses LF line endings, in the repository and in the working tree (whatever core.autocrlf
+# says), so files never mix CRLF and LF.
+* text=auto eol=lf
+
+# Binary assets
+*.png binary
+*.jpg binary
+*.woff2 binary
+*.gz binary

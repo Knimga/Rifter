@@ -2,7 +2,8 @@ import type { EnemyInstance } from './enemies';
 import { withEnemyBuffs } from './enemies';
 import type { ActiveDot, ActiveHot, Stats } from './stats';
 import type { Pos } from './dungeonHelpers';
-import { tickDots, tickDurations, tickHots } from './abilityExecution';
+import { tickDots, tickDurations, tickHots, type ActionOutcome } from './abilityExecution';
+import { COMBAT_TEXT_COLOR } from './constants';
 import { randInt } from './random';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -20,8 +21,10 @@ export interface CombatState {
   turnOrder: Combatant[];
   currentTurnIndex: number;
   round: number;
-  playerActedThisTurn: boolean;
-  movementRemaining: number;
+  /** AP the current combatant has spent this turn; what it has left is apLeft (its live apMax minus this). */
+  apSpent: number;
+  /** Tiles the current combatant has paid for (1 AP buys `movement` of them) and not walked yet this turn. */
+  paidTiles: number;
   partyThreat: number[];  // indexed by partyIndex; resets to 0 each combat
 }
 
@@ -56,16 +59,38 @@ export function startCombat(
     return a.isPlayer ? -1 : 1;
   });
 
-  const first = combatants[0];
   return {
     active: true,
     turnOrder: combatants,
     currentTurnIndex: 0,
     round: 1,
-    playerActedThisTurn: false,
-    movementRemaining: first.isPlayer ? partyMembers[first.partyIndex ?? 0].stats.movement : 0,
+    apSpent: 0,
+    paidTiles: 0,
     partyThreat: partyMembers.map(() => 0),
   };
+}
+
+// ─── Action points ───────────────────────────────────────────────────────────
+//
+// Each turn a unit has its apMax in AP (read live, so a buff or debuff on it counts at once). Moving: 1 AP
+// buys `movement` tiles, which stay usable for the rest of the turn (move, attack, move on). Abilities cost
+// their apCost. Shared by the party and enemies (enemyAI spends its AP the same way).
+
+/** A unit that starts its turn with no AP (stunned) loses it: this shows over it (for STUNNED_PAUSE_MS) before the next turn. */
+export const stunnedOutcome = (pos: Pos): ActionOutcome => ({
+  changes: [], threat: 0, floats: [{ pos, text: 'Stunned', color: COMBAT_TEXT_COLOR.stopped }],
+});
+
+/** AP left this turn for a unit with `apMax`. */
+export const apLeft = (apMax: number, state: Pick<CombatState, 'apSpent'>) => Math.max(0, apMax - state.apSpent);
+
+/** Farthest a unit can move this turn (steps): the tiles already paid for, plus `movement` per AP left. */
+export const moveBudget = (paidTiles: number, ap: number, movement: number) => paidTiles + ap * movement;
+
+/** What a move of `steps` costs: the AP to pay (only once the paid tiles run out) and the paid tiles left after. */
+export function moveCost(steps: number, paidTiles: number, movement: number): { apSpent: number; tilesLeft: number } {
+  const apSpent = Math.max(0, Math.ceil((steps - paidTiles) / movement));
+  return { apSpent, tilesLeft: paidTiles + apSpent * movement - steps };
 }
 
 /** Insert newly-aggroed enemies into an ongoing combat's turn order. */
@@ -103,7 +128,6 @@ export const deadPartyIndices = (partyHp: number[]) => new Set(partyHp.flatMap((
 export function advanceTurn(
   state: CombatState,
   enemies: EnemyInstance[],
-  partyMovements: number[],
   deadPartyIndices?: Set<number>,
 ): CombatState {
   const len = state.turnOrder.length;
@@ -126,13 +150,12 @@ export function advanceTurn(
     if (nextIndex === 0) wrapped = true;
   }
 
-  const next = state.turnOrder[nextIndex];
   return {
     ...state,
     currentTurnIndex: nextIndex,
     round: state.round + (wrapped ? 1 : 0),
-    playerActedThisTurn: false,
-    movementRemaining: next.isPlayer ? (partyMovements[next.partyIndex ?? 0] ?? partyMovements[0] ?? 0) : 0,
+    apSpent: 0,
+    paidTiles: 0,
   };
 }
 
@@ -159,6 +182,14 @@ export function tickRound(stats: Stats, hp: number, mp: number, hots: ActiveHot[
   };
 }
 
+/**
+ * Whether a tick leaves a unit exactly as it was: no buffs, HoTs or DoTs to run down, and HP and MP already
+ * full (or unchanged). Such a unit is kept as the same object, so a quiet tick (out of combat, everyone
+ * full) changes no state and redraws nothing. Shared by party and enemies.
+ */
+export const tickChangesNothing = (tick: RoundTick, hp: number, mp: number, effects: { length: number }[]) =>
+  tick.hp === hp && tick.mp === mp && effects.every(list => list.length === 0);
+
 /** Per-enemy tick event, used to spawn floating text and attribute DoT threat. */
 export interface EnemyTickEvent {
   pos: Pos;
@@ -169,6 +200,7 @@ export interface EnemyTickEvent {
 export function applyTopOfRound(enemies: EnemyInstance[]): { enemies: EnemyInstance[]; events: EnemyTickEvent[] } {
   const events: EnemyTickEvent[] = [];
 
+  let changed = false;
   const updated = enemies.map(e => {
     if (e.currentHp <= 0) return e;
 
@@ -177,11 +209,14 @@ export function applyTopOfRound(enemies: EnemyInstance[]): { enemies: EnemyInsta
     const next = buffs.length !== e.buffs.length ? withEnemyBuffs(e, buffs) : { ...e, buffs };
 
     const tick = tickRound(next.stats, e.currentHp, e.currentMp, e.hots, e.dots);
+    if (tickChangesNothing(tick, e.currentHp, e.currentMp, [e.buffs, e.hots, e.dots])) return e;
+    changed = true;
     events.push({ pos: e.pos, tick });
     return { ...next, currentHp: tick.hp, currentMp: tick.mp, hots: tickDurations(e.hots), dots: tickDurations(e.dots) };
   });
 
-  return { enemies: updated, events };
+  // Nothing ticked: the same array, so the caller's state doesn't change
+  return { enemies: changed ? updated : enemies, events };
 }
 
 export function getCurrentCombatant(state: CombatState): Combatant | null {

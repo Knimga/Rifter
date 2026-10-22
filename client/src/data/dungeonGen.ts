@@ -3,6 +3,7 @@ import type { Item } from './gear';
 import { generateEnemyInstance } from './enemies';
 import { posKey, reachableTiles, type Pos } from './dungeonHelpers';
 import { chance, pick, randInt, shuffle } from './random';
+import { AGGRO_RANGE } from './constants';
 
 // ─── Core Types ──────────────────────────────────────────────────────────────
 
@@ -31,26 +32,48 @@ export interface ZoneData {
   droppedItems: Record<string, Item[]>; // "x,y" → items dropped at that tile
 }
 
+/** A treasure chest on the map: its id (keys its contents), zone, tile, look (GAME_OBJECTS id) and the floor side its lock faces. */
+export interface DungeonChest {
+  id: string;
+  zoneId: number;
+  pos: Pos;
+  object: string;
+  /** Grid direction it faces (away from the wall at its back), e.g. [0, 1] = south. */
+  facing: readonly [number, number];
+}
+
 export interface DungeonData {
   zones: ZoneData[];
   startZoneId: number;
   endZoneId: number;     // boss zone — portal lives here
   playerStart: Pos;
   portalPos: Pos;
+  /** Treasure chests: one in the boss room (the only place chests are found for now). */
+  chests: DungeonChest[];
   baseEnemyLevel: number;
 }
 
 /**
- * Tiles of a zone that a game object stands on (the exit portal): nobody walks onto or through them,
- * party or enemy. They stay floor (drawn as floor; they don't block sight or AoE). The Sanctum's portal
- * is handled the same way by isSanctumWalkable.
+ * Tiles of a zone that a game object stands on (the exit portal, chests): nobody walks onto or through
+ * them, party or enemy. They stay floor (drawn as floor; they don't block sight or AoE). The Sanctum's
+ * portals are handled the same way by isSanctumWalkable.
  */
-export const objectTilesOf = (d: DungeonData, zone: ZoneData): Set<string> => new Set(zone.id === d.endZoneId ? [posKey(d.portalPos)] : []);
+export const objectTilesOf = (d: DungeonData, zone: ZoneData): Set<string> => new Set([
+  ...(zone.id === d.endZoneId ? [posKey(d.portalPos)] : []),
+  ...d.chests.filter(c => c.zoneId === zone.id).map(c => posKey(c.pos)),
+]);
 
 /** Walkable tiles of a zone: floor without a game object on it. */
 export function zoneWalkable(d: DungeonData, zone: ZoneData): (p: Pos) => boolean {
   const objects = objectTilesOf(d, zone);
   return (p) => zone.floors.has(posKey(p)) && !objects.has(posKey(p));
+}
+
+/** A tile of `zone` where a party member can be placed: walkable, with no living enemy of that zone on it. */
+export function isFreeFloor(d: DungeonData, zone: ZoneData, enemies: EnemyInstance[]): (p: Pos) => boolean {
+  const walkable = zoneWalkable(d, zone);
+  const taken = new Set(enemies.filter(e => e.zoneId === zone.id && e.currentHp > 0).map(e => posKey(e.pos)));
+  return (p) => walkable(p) && !taken.has(posKey(p));
 }
 
 // ─── Config Types ─────────────────────────────────────────────────────────────
@@ -80,6 +103,7 @@ export interface DungeonConfig {
   wallColor: string;      // hex color for wall/non-floor tiles
   doorObject: string;     // GAME_OBJECTS id of the doors between zones
   portalObject: string;   // GAME_OBJECTS id of the exit portal in the boss zone
+  chestObject: string;    // GAME_OBJECTS id of the treasure chest in the boss room
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -401,6 +425,7 @@ export function generateDungeon(config: DungeonConfig): DungeonData {
   const entryDoor = bossZone.doors[0];
   const entryDir = entryDoor ? getEntryDirection(entryDoor.pos, bossRoom) : 'south';
   const portalPos = addBossAntechamber(bossZone, bossRoom, entryDir, config.bossZone.corridorWidth);
+  const chestSpot = entryDoor ? bossChestSpot(bossZone, bossRoom, entryDoor.pos) : null;
 
   return {
     zones,
@@ -408,11 +433,59 @@ export function generateDungeon(config: DungeonConfig): DungeonData {
     endZoneId: bossZoneId,
     playerStart,
     portalPos,
+    chests: chestSpot ? [{ id: 'boss-chest', zoneId: bossZoneId, object: config.chestObject, ...chestSpot }] : [],
     baseEnemyLevel: config.baseEnemyLevel,
   };
 }
 
+// ─── Treasure chest ──────────────────────────────────────────────────────────
+
+/** How far from the door the boss room's chest must be: among the spots within this share of the farthest (by walking). */
+const CHEST_FAR_SHARE = 0.6;
+
+/**
+ * Where the boss room's chest stands: against a wall, its back to it (facing into the room), never in a
+ * corner, never beside an opening (the door, the corridor to the antechamber: it must not block a way in or
+ * out), and far from the door. A random pick among the spots far enough away.
+ */
+function bossChestSpot(zone: ZoneData, room: Room, door: Pos): { pos: Pos; facing: readonly [number, number] } | null {
+  const isFloor = (p: Pos) => zone.floors.has(posKey(p));
+  const inRoom = (p: Pos) => inRect(p, room);
+  const steps = walkDistances(zone, door);
+  const spots: { pos: Pos; facing: readonly [number, number]; d: number }[] = [];
+  for (let x = room.x; x < room.x + room.w; x++) {
+    for (let y = room.y; y < room.y + room.h; y++) {
+      const pos = { x, y };
+      // The walls around it: exactly one (a corner has two) gives its back
+      const walls = ([[0, -1], [1, 0], [0, 1], [-1, 0]] as const).filter(([dx, dy]) => !isFloor({ x: x + dx, y: y + dy }));
+      if (walls.length !== 1) continue;
+      // Not beside an opening: no floor outside the room around it, and not next to the door
+      let nearOpening = Math.max(Math.abs(door.x - x), Math.abs(door.y - y)) <= 1;
+      for (let dx = -1; dx <= 1 && !nearOpening; dx++)
+        for (let dy = -1; dy <= 1; dy++) {
+          const q = { x: x + dx, y: y + dy };
+          if (isFloor(q) && !inRoom(q)) { nearOpening = true; break; }
+        }
+      if (nearOpening) continue;
+      const d = steps.get(posKey(pos));
+      if (d === undefined) continue;
+      const [wx, wy] = walls[0];
+      spots.push({ pos, facing: [-wx, -wy], d });
+    }
+  }
+  if (spots.length === 0) return null;
+  const far = Math.max(...spots.map(s => s.d));
+  const { pos, facing } = pick(spots.filter(s => s.d >= far * CHEST_FAR_SHARE));
+  return { pos, facing };
+}
+
 // ─── Enemy Spawning ──────────────────────────────────────────────────────────
+
+/**
+ * How far (walking steps) enemies stay from where the party enters a zone: out of aggro sight
+ * (AGGRO_RANGE), with a few steps to spare, so walking through a door never lands the party in a pack.
+ */
+const ENTRY_CLEAR_STEPS = AGGRO_RANGE + 3;
 
 export function spawnDungeonEnemies(dungeon: DungeonData, config: DungeonConfig): EnemyInstance[] {
   const instances: EnemyInstance[] = [];
@@ -422,29 +495,43 @@ export function spawnDungeonEnemies(dungeon: DungeonData, config: DungeonConfig)
   const occupied = new Set([
     `${dungeon.startZoneId}:${posKey(dungeon.playerStart)}`,
     `${dungeon.endZoneId}:${posKey(dungeon.portalPos)}`,
+    ...dungeon.chests.map(c => `${c.zoneId}:${posKey(c.pos)}`),
   ]);
   for (const zone of dungeon.zones) {
     for (const door of zone.doors) occupied.add(`${zone.id}:${posKey(door.pos)}`);
   }
 
-  /** Place one enemy group at random free tiles inside `area`. */
-  const placeGroup = (zone: ZoneData, area: Rect, group: EnemyClassData[]) => {
+  // Where the party enters each zone: the start tile in the first, else its door back (to the zone before).
+  // No enemy stands within ENTRY_CLEAR_STEPS of it.
+  const nearEntry = new Set<string>();
+  for (const zone of dungeon.zones) {
+    const entries = zone.id === dungeon.startZoneId ? [dungeon.playerStart]
+      : zone.doors.filter(d => d.targetZoneId < zone.id).map(d => d.pos);
+    for (const entry of entries) {
+      for (const [key, steps] of walkDistances(zone, entry)) if (steps <= ENTRY_CLEAR_STEPS) nearEntry.add(`${zone.id}:${key}`);
+    }
+  }
+
+  /** Place one enemy group on random free floor tiles inside `area`. False (nothing placed) if the group doesn't fit there. */
+  const placeGroup = (zone: ZoneData, area: Rect, group: EnemyClassData[]): boolean => {
+    const free: Pos[] = [];
+    for (let x = area.x; x < area.x + area.w; x++) {
+      for (let y = area.y; y < area.y + area.h; y++) {
+        const key = `${zone.id}:${posKey({ x, y })}`;
+        if (zone.floors.has(posKey({ x, y })) && !occupied.has(key) && !nearEntry.has(key)) free.push({ x, y });
+      }
+    }
+    if (free.length < group.length) return false;
+
     const groupId = nextGroupId++;
-    for (const type of group) {
-      let pos: Pos, key: string;
-      let attempts = 0;
-      do {
-        pos = { x: area.x + randInt(0, area.w - 1), y: area.y + randInt(0, area.h - 1) };
-        key = `${zone.id}:${posKey(pos)}`;
-        attempts++;
-      } while (occupied.has(key) && attempts < 100);
-
-      if (attempts >= 100) continue;
-      occupied.add(key);
-
+    const spots = shuffle(free);
+    group.forEach((type, i) => {
+      const pos = spots[i];
+      occupied.add(`${zone.id}:${posKey(pos)}`);
       const level = config.baseEnemyLevel + zone.id;
       instances.push(generateEnemyInstance(type, level, `${type.id}-${globalIdx++}`, pos, zone.id, groupId));
-    }
+    });
+    return true;
   };
 
   for (const zone of dungeon.zones) {
@@ -469,10 +556,13 @@ export function spawnDungeonEnemies(dungeon: DungeonData, config: DungeonConfig)
     const eligibleRooms = zone.id === dungeon.startZoneId ? zone.rooms.filter(r => !inRect(dungeon.playerStart, r)) : zone.rooms;
     if (eligibleRooms.length === 0) continue;
 
+    // Rooms in random order; one too close to the zone's entry for a group is passed over for the next
     const groupCount = Math.ceil(eligibleRooms.length / 2) + randInt(0, Math.floor(eligibleRooms.length / 4));
-    const selectedRooms = shuffle(eligibleRooms).slice(0, Math.min(groupCount, eligibleRooms.length));
-
-    for (const room of selectedRooms) placeGroup(zone, room, pick(zoneConfig.enemyGroups));
+    let placed = 0;
+    for (const room of shuffle(eligibleRooms)) {
+      if (placed >= groupCount) break;
+      if (placeGroup(zone, room, pick(zoneConfig.enemyGroups))) placed++;
+    }
   }
 
   return instances;

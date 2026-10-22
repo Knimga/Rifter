@@ -3,16 +3,16 @@ import type { ArmorProficiency } from '../classes';
 export * from './types';
 export type { DamageElement } from '../stats';
 export { DAMAGE_ELEMENTS } from '../stats';
-import { BUFFABLE_STATS, DAMAGE_ELEMENTS } from '../stats';
-import type { DamageElement, BuffableStat, ActiveBuff } from '../stats';
-import type { ArmorSlot, WeaponType, GearSlots, Item, ArmorItem, ShieldItem, WeaponItem, Affix, Rarity, ImplicitDef } from './types';
-import { ARMOR_SLOTS, GEAR_SLOTS, PHYSICAL_ELEMENTS, RARITY_TILT_PER_LEVEL, RARITY_WEIGHT, RarityPerAffixCount } from './types';
+import { DAMAGE_ELEMENTS } from '../stats';
+import type { DamageElement, ActiveBuff } from '../stats';
+import type { ArmorSlot, WeaponType, GearSlots, Item, ArmorItem, ShieldItem, WeaponItem, Affix, ImplicitDef, Rarity } from './types';
+import { ARMOR_SLOTS, GEAR_SLOTS, PHYSICAL_ELEMENTS } from './types';
 
-import { ARMOR_TYPE_BASE_VALUE, ARMOR_SLOT_MULTIPLIER, ARMOR_INVALID_AFFIXES, ARMOR_SERIES, ARMOR_IMPLICITS, armorName } from './armor';
-import { SHIELD_ARMOR_MULTIPLIER, SHIELDS, SHIELD_IMPLICIT } from './offhands';
-import { WEAPON_SERIES, WEAPON_TYPE_DATA, weaponName } from './weapons';
-import { AFFIX_ROLLS, rollAffixValue } from './affixes';
-import { chance, pick, pickWeighted } from '../random';
+import { ARMOR_TYPE_DATA, BASE_ARMOR_MULTIPLIER, ARMOR_SERIES, STARTER_ARMOR_SERIES, armorName } from './armor';
+import { SHIELD_ARMOR_MULTIPLIER, SHIELDS, STARTER_SHIELDS, SHIELD_IMPLICIT } from './offhands';
+import { STARTER_WEAPON_SERIES, WEAPON_SERIES, WEAPON_TYPE_DATA, weaponName } from './weapons';
+import { AFFIX_SLOTS_PER_GROUP, rollAffixes, starvedAffixGroups } from './affixes';
+import { chance, pick } from '../random';
 
 const MAGIC_ELEMENTS = DAMAGE_ELEMENTS.filter(el => !PHYSICAL_ELEMENTS.has(el));
 
@@ -63,10 +63,13 @@ export function getGearArmorBonus(gear: GearSlots): number {
 
 // ─── Item Generation ──────────────────────────────────────────────────────────
 //
-// One generator per item kind, used for both starting gear (affixes: false) and loot drops.
+// One generator per item kind, used for both starting gear (starter: true, affixes: false: the Worn
+// series, which never drop) and loot drops.
 
 interface GenerateOptions {
   affixes?: boolean;  // roll random affixes (default true); starting gear has none
+  starter?: boolean;  // from the starting gear series (STARTER_*), which never drop
+  rarityWeights?: Record<Rarity, number>; // rarity odds instead of the item level's (rarityWeights), e.g. a chest's
 }
 
 /** Pick a series within ±3 levels; fall back to the nearest one below. */
@@ -78,38 +81,17 @@ function pickSeriesForLevel<T extends { requiredLevel: number }>(series: T[], le
 }
 
 function resolveImplicit(def: ImplicitDef, level: number): Affix {
-  return { stat: def.statKey, value: Math.round(def.baseValue + def.growthPerLevel * (level - 1)) };
+  return { stat: def.stat, value: Math.round(def.baseValue + def.growthPerLevel * (level - 1)) };
 }
 
-/** Each rarity's chance weight for an item of `level` (RARITY_WEIGHT, tilted toward rarer by RARITY_TILT_PER_LEVEL). */
-export function rarityWeights(level: number): Record<Rarity, number> {
-  const tilt = RARITY_TILT_PER_LEVEL * Math.max(0, level - 1);
-  return Object.fromEntries(
-    Object.entries(RarityPerAffixCount).map(([count, rarity]) => [rarity, RARITY_WEIGHT[rarity] * (1 + tilt * Number(count))]),
-  ) as Record<Rarity, number>;
-}
-
-/**
- * An item's rarity and affixes: the rarity is rolled first (rarityWeights), and the item gets that many
- * affixes (RarityPerAffixCount). Disabled (starting gear) = Common, no affixes.
- */
-function rollAffixes(invalidAffixes: BuffableStat[], level: number, enabled: boolean): { affixes: Affix[]; rarity: Rarity } {
-  const affixes: Affix[] = [];
-  if (enabled) {
-    const weights = rarityWeights(level);
-    const rarity = pickWeighted(Object.keys(weights) as Rarity[], r => weights[r]);
-    const count = Number(Object.keys(RarityPerAffixCount).find(c => RarityPerAffixCount[Number(c)] === rarity));
-    const invalid = new Set(invalidAffixes);
-    const used = new Set<BuffableStat>();
-    while (affixes.length < count) {
-      const available = BUFFABLE_STATS.filter(s => !invalid.has(s) && !used.has(s));
-      if (available.length === 0) break;
-      const stat = pickWeighted(available, s => AFFIX_ROLLS[s].weight ?? 1);
-      used.add(stat);
-      affixes.push({ stat, value: rollAffixValue(stat, level) });
-    }
-  }
-  return { affixes, rarity: RarityPerAffixCount[affixes.length] };
+// Every item type must be able to fill both affix groups: warn (once, at load) about any whose excluded
+// affixes leave a group too few stats
+for (const [kind, invalid] of [
+  ...Object.entries(WEAPON_TYPE_DATA).map(([t, d]) => [`weapon type '${t}'`, d.invalidAffixes] as const),
+  ...Object.entries(ARMOR_TYPE_DATA).map(([t, d]) => [`armor/shield type '${t}'`, d.invalidAffixes] as const),
+]) {
+  const starved = starvedAffixGroups(invalid);
+  if (starved.length) console.warn(`${kind} excludes too many affixes: group ${starved.join(' and ')} has fewer than ${AFFIX_SLOTS_PER_GROUP} left`);
 }
 
 let itemCounter = 0;
@@ -119,15 +101,15 @@ const newItemId = () => `item-${Date.now().toString(36)}-${(itemCounter++).toStr
 export function generateWeapon(
   level: number,
   weaponType: WeaponType,
-  { element, affixes = true }: GenerateOptions & { element?: DamageElement } = {},
+  { element, affixes = true, starter = false, rarityWeights }: GenerateOptions & { element?: DamageElement } = {},
 ): WeaponItem {
-  const data = WEAPON_TYPE_DATA[weaponType]!;
-  const series = pickSeriesForLevel(WEAPON_SERIES, level);
+  const data = WEAPON_TYPE_DATA[weaponType];
+  const series = pickSeriesForLevel(starter ? STARTER_WEAPON_SERIES : WEAPON_SERIES, level);
   const m = series.damageMultiplier;
   return {
     name: weaponName(series, weaponType),
     slot: 'mainhand',
-    ...rollAffixes(data.invalidAffixes, level, affixes),
+    ...rollAffixes(data.invalidAffixes, level, affixes, rarityWeights),
     weaponType,
     attackCategory: data.defaultAttackCategory,
     damageElement: element ?? data.defaultDamageElement ?? pick(MAGIC_ELEMENTS),
@@ -137,7 +119,7 @@ export function generateWeapon(
     range: data.range,
     id: newItemId(),
     model: series.weapons[weaponType]!.model,
-    implicit: data.implicits ? resolveImplicit(data.implicits, level) : undefined,
+    implicit: data.implicit ? resolveImplicit(data.implicit, level) : undefined,
   };
 }
 
@@ -145,36 +127,39 @@ export function generateArmor(
   level: number,
   slot: ArmorSlot,
   armorType?: ArmorProficiency,
-  { affixes = true }: GenerateOptions = {},
+  { affixes = true, starter = false, rarityWeights }: GenerateOptions = {},
 ): ArmorItem {
-  const series = pickSeriesForLevel(armorType ? ARMOR_SERIES.filter(s => s.armorType === armorType) : ARMOR_SERIES, level);
+  const pool = starter ? STARTER_ARMOR_SERIES : ARMOR_SERIES;
+  const series = pickSeriesForLevel(armorType ? pool.filter(s => s.armorType === armorType) : pool, level);
   const type = series.armorType;
-  const implicitDef = ARMOR_IMPLICITS[type];
+  const typeData = ARMOR_TYPE_DATA[type];
   return {
     id: newItemId(),
     name: armorName(series, slot),
     slot,
-    ...rollAffixes(ARMOR_INVALID_AFFIXES[type], level, affixes),
+    ...rollAffixes(typeData.invalidAffixes, level, affixes, rarityWeights),
     armorType: type,
-    armorValue: Math.round(ARMOR_TYPE_BASE_VALUE[type] * level * ARMOR_SLOT_MULTIPLIER[slot]),
+    armorValue: Math.round(typeData.baseArmor * level * BASE_ARMOR_MULTIPLIER[slot] * series.armorMultiplier),
     model: series.models[slot],
-    implicit: resolveImplicit({ statKey: implicitDef.statKey, ...implicitDef.slots[slot] }, level),
+    implicit: resolveImplicit({ stat: typeData.implicit.stat, ...typeData.implicit.slots[slot] }, level),
   };
 }
 
 export function generateShield(
   level: number,
   armorType?: ArmorProficiency,
-  { affixes = true }: GenerateOptions = {},
+  { affixes = true, starter = false, rarityWeights }: GenerateOptions = {},
 ): ShieldItem {
-  const template = pickSeriesForLevel(armorType ? SHIELDS.filter(s => s.type === armorType) : SHIELDS, level);
+  const pool = starter ? STARTER_SHIELDS : SHIELDS;
+  const template = pickSeriesForLevel(armorType ? pool.filter(s => s.armorType === armorType) : pool, level);
+  const typeData = ARMOR_TYPE_DATA[template.armorType];
   return {
     id: newItemId(),
     name: template.name,
     slot: 'offhand',
-    ...rollAffixes(ARMOR_INVALID_AFFIXES[template.type], level, affixes),
-    armorType: template.type,
-    armorValue: Math.round(ARMOR_TYPE_BASE_VALUE[template.type] * level * SHIELD_ARMOR_MULTIPLIER),
+    ...rollAffixes(typeData.invalidAffixes, level, affixes, rarityWeights),
+    armorType: template.armorType,
+    armorValue: Math.round(typeData.baseArmor * level * SHIELD_ARMOR_MULTIPLIER * template.armorMultiplier),
     model: template.model,
     implicit: resolveImplicit(SHIELD_IMPLICIT, level),
   };
@@ -195,12 +180,35 @@ const LOOT_POOL: LootEntry[] = [
   { kind: 'shield' },
 ];
 
-export function generateLootDrop(dungeonLevel: number, dropChance = LOOT_DROP_CHANCE): Item | null {
-  if (!chance(dropChance)) return null;
-  const entry = pick(LOOT_POOL);
-  switch (entry.kind) {
-    case 'weapon': return generateWeapon(dungeonLevel, entry.weaponType);
-    case 'armor':  return generateArmor(dungeonLevel, entry.slot);
-    case 'shield': return generateShield(dungeonLevel);
+/**
+ * How much likelier a drop someone in the party can use (`usable`) is than one no one can: an unusable roll
+ * is kept only 1 time in this many, else rolled again.
+ */
+export const USABLE_LOOT_WEIGHT = 4;
+
+/**
+ * A loot drop (or none, by `dropChance`): any weapon, armor piece or shield. Items the party can use
+ * (`usable`, e.g. someone is proficient) come up USABLE_LOOT_WEIGHT times as often as ones it can't.
+ */
+export function generateLootDrop(dungeonLevel: number, dropChance = LOOT_DROP_CHANCE, usable?: (item: Item) => boolean): Item | null {
+  return chance(dropChance) ? generateLootItem(dungeonLevel, { usable }) : null;
+}
+
+/**
+ * One piece of loot of item `level`: any weapon, armor piece or shield. Items the party can use (`usable`)
+ * come up USABLE_LOOT_WEIGHT times as often; `rarityWeights` replaces the level's rarity odds (a chest's).
+ */
+export function generateLootItem(level: number, { usable, rarityWeights }: { usable?: (item: Item) => boolean; rarityWeights?: Record<Rarity, number> } = {}): Item {
+  const roll = (): Item => {
+    const entry = pick(LOOT_POOL);
+    switch (entry.kind) {
+      case 'weapon': return generateWeapon(level, entry.weaponType, { rarityWeights });
+      case 'armor':  return generateArmor(level, entry.slot, undefined, { rarityWeights });
+      case 'shield': return generateShield(level, undefined, { rarityWeights });
+    }
+  };
+  for (;;) {
+    const item = roll();
+    if (!usable || usable(item) || chance(1 / USABLE_LOOT_WEIGHT)) return item;
   }
 }

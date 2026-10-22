@@ -47,11 +47,17 @@ export const COMBAT_TEXT_COLOR = {
   stopped: 'var(--rift-bright)',  // missed, dodged, parried, blocked
   loot: 'var(--rift-loot)',
   warn: 'var(--rift-warn)',
+  levelUp: 'var(--rift-acting)',
 } as const;
 
 /* ----- GAMEPLAY CONSTANTS ----- */
 
-/** Interval in ms between out-of-combat passive regen ticks. */
+/** How far (tiles, in line of sight) an enemy spots the party: its whole group aggroes. */
+export const AGGRO_RANGE = 5;
+
+/* ----- PACING (ms): how the game's turns and ticks feel ----- */
+
+/** Interval between out-of-combat passive regen ticks. */
 export const OUT_OF_COMBAT_REGEN_INTERVAL_MS = 5000;
 
 /**
@@ -59,3 +65,13 @@ export const OUT_OF_COMBAT_REGEN_INTERVAL_MS = 5000;
  * over the model's half-turn time (smoothYaw in forge/core/facing.ts, 170 ms), so it faces the target first.
  */
 export const AIM_TURN_LEAD_MS = 180;
+
+/** How long a party member's turn lingers once it has nothing left to spend (no AP, no paid tiles), before it ends by itself. */
+export const AUTO_END_TURN_DELAY_MS = 600;
+
+/** How long "Stunned" shows over a unit that starts its turn with no AP, before the next turn. */
+export const STUNNED_PAUSE_MS = 900;
+
+/** Each beat of an enemy's first step in its turn (move, show its target, land); its follow-up steps play faster. */
+export const ENEMY_STEP_PAUSE_MS = 1000;
+export const ENEMY_FOLLOWUP_PAUSE_MS = 500;

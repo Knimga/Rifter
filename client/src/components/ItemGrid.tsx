@@ -1,0 +1,50 @@
+// A grid of item slots (the party inventory, a chest's window): each item's icon in a cell, with its rarity
+// glow; hover for its tooltip, right-click for its action (equip it, take it). Items the viewer can't use
+// show faded, their tooltip marked "Not proficient". Empty slots fill out the grid.
+import type { MouseEvent } from 'react';
+import type { Item } from '../data/gear';
+import type { Stats } from '../data/stats';
+import { ItemTooltipContent, Tooltip, type ItemClickAction } from './Tooltip';
+import ItemIcon, { rarityGlow } from './ItemIcon';
+
+export default function ItemGrid({ items, cols, size, canUse, action, onAction, stats, unusableNote }: {
+  items: Item[];
+  cols: number;
+  /** Slots in all: items fill the first ones, the rest show empty. */
+  size: number;
+  /** Whether the viewer can use an item. */
+  canUse: (item: Item) => boolean;
+  /** What right-clicking the item at this slot does, if anything (shown in its tooltip). */
+  action: (item: Item, idx: number) => ItemClickAction | null;
+  /** Right-click on an item that has an action. */
+  onAction: (idx: number) => void;
+  /** The viewer's stats, for the tooltip (e.g. a weapon's damage with them). */
+  stats?: Stats;
+  /** Screen-reader note on an item the viewer can't use, e.g. ', not proficient'. */
+  unusableNote: string;
+}) {
+  return (
+    <div className="grid gap-1" style={{ gridTemplateColumns: `repeat(${cols}, 46px)` }}>
+      {Array.from({ length: size }).map((_, i) => {
+        const item = items[i];
+        if (!item) return <div key={i} className="rf-cell" />;
+        const usable = canUse(item);
+        const act = action(item, i);
+        const glow = rarityGlow(item);
+        const rightClick = (e: MouseEvent) => {
+          e.preventDefault(); // never the browser's menu over an item
+          if (act) onAction(i);
+        };
+        return (
+          // Keyed by slot, not item: when an item leaves and the next one moves into this slot, the tooltip
+          // under the cursor stays open and shows it (a new Tooltip would wait for the mouse to enter again)
+          <Tooltip key={i} gap={10} content={<ItemTooltipContent item={item} stats={stats} proficient={usable} clickAction={act ?? undefined} />}>
+            <div className={`rf-cell is-filled ${glow.className}`} style={glow.style} aria-label={`${item.name}${usable ? '' : unusableNote}`} onContextMenu={rightClick}>
+              <ItemIcon item={item} className={`w-[30px] h-[30px] ${usable ? '' : 'opacity-50'}`} />
+            </div>
+          </Tooltip>
+        );
+      })}
+    </div>
+  );
+}

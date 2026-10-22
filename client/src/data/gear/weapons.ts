@@ -10,28 +10,38 @@ export interface WeaponSeries {
   id: string;
   name: string;             // prefix applied to the weapon name: 'Plain Gladius' (see weaponName)
   requiredLevel: number;
-  damageMultiplier: number; // scales base weapon damage relative to tier 1 (Iron = 1.0)
+  damageMultiplier: number; // scales the type's base damage (WEAPON_TYPE_DATA); starting gear is 1.0
   // Each named weapon of the series; `model` is its forge design: how it is drawn (icon and loot).
   weapons: Partial<Record<WeaponType, { name: string; model: ModelLink }>>
 }
 
-export const WEAPON_SERIES: WeaponSeries[] = [
-  {
-    id: 'plain', name: 'Plain', requiredLevel: 1, damageMultiplier: 1.0,
-    weapons: {
-      '1h Swords': { name: 'Gladius',       model: 'weapon.plain-gladius' },
-      '2h Swords': { name: 'Bastard Sword', model: 'weapon.plain-bastard-sword' },
-      '1h Maces':  { name: 'Mace',          model: 'weapon.plain-mace' },
-      '2h Maces':  { name: 'Maul',          model: 'weapon.plain-maul' },
-      '1h Axes':   { name: 'Hatchet',       model: 'weapon.plain-hatchet' },
-      '2h Axes':   { name: 'Battleaxe',     model: 'weapon.plain-battleaxe' },
-      'Daggers':   { name: 'Dirk',          model: 'weapon.plain-dirk' },
-      'Bows':      { name: 'Shortbow',      model: 'weapon.plain-shortbow' },
-      'Crossbows': { name: 'Crossbow',      model: 'weapon.plain-crossbow' },
-      'Staves':    { name: 'Staff',         model: 'weapon.plain-staff' },
-      'Wands':     { name: 'Wand',          model: 'weapon.plain-wand' },
-    }
+/** The first tier that drops: a step up from starting gear (STARTER_WEAPON_SERIES). */
+const PLAIN: WeaponSeries = {
+  id: 'plain', name: 'Plain', requiredLevel: 1, damageMultiplier: 1.2,
+  weapons: {
+    '1h Swords': { name: 'Gladius',       model: 'weapon.plain-gladius' },
+    '2h Swords': { name: 'Bastard Sword', model: 'weapon.plain-bastard-sword' },
+    '1h Maces':  { name: 'Mace',          model: 'weapon.plain-mace' },
+    '2h Maces':  { name: 'Maul',          model: 'weapon.plain-maul' },
+    '1h Axes':   { name: 'Hatchet',       model: 'weapon.plain-hatchet' },
+    '2h Axes':   { name: 'Battleaxe',     model: 'weapon.plain-battleaxe' },
+    'Daggers':   { name: 'Dirk',          model: 'weapon.plain-dirk' },
+    'Bows':      { name: 'Shortbow',      model: 'weapon.plain-shortbow' },
+    'Crossbows': { name: 'Crossbow',      model: 'weapon.plain-crossbow' },
+    'Staves':    { name: 'Staff',         model: 'weapon.plain-staff' },
+    'Wands':     { name: 'Wand',          model: 'weapon.plain-wand' },
   }
+};
+
+/** Weapons that drop as loot, by tier. */
+export const WEAPON_SERIES: WeaponSeries[] = [PLAIN];
+
+/**
+ * Starting gear only: never drops, so even a common first drop is an upgrade. Worn versions of the Plain
+ * weapons (weaker, drawn with Plain's models: they have no designs of their own).
+ */
+export const STARTER_WEAPON_SERIES: WeaponSeries[] = [
+  { id: 'worn', name: 'Worn', requiredLevel: 1, damageMultiplier: 1.0, weapons: PLAIN.weapons },
 ];
 
 /** Display name of a weapon: series name + the series' name for the type, e.g. Plain + '1h Swords' -> 'Plain Gladius'. */
@@ -42,19 +52,22 @@ export function weaponName(series: WeaponSeries, weaponType: WeaponType): string
 export interface WeaponTypeData {
   baseDamage: { min: number; max: number; };
   range: number;
+  /** AP its plain weapon attack costs (2h and ranged two-handers cost more). */
+  attackAp: number;
   defaultAttackCategory: AttackCategory;
   defaultDamageElement?: DamageElement;
-  implicits?: ImplicitDef;
+  implicit?: ImplicitDef;
   invalidAffixes: BuffableStat[];
 }
 
-export const WEAPON_TYPE_DATA: Partial<Record<WeaponType, WeaponTypeData>> = {
+export const WEAPON_TYPE_DATA: Record<WeaponType, WeaponTypeData> = {
   'Daggers': {
     baseDamage: { min: 4, max: 7 },
     range: 1,
+    attackAp: 1,
     defaultAttackCategory: 'melee',
     defaultDamageElement: 'piercing',
-    implicits: { statKey: 'meleeCrit', baseValue: 5, growthPerLevel: 0.5 },
+    implicit: { stat: 'meleeCrit', baseValue: 5, growthPerLevel: 0.5 },
     invalidAffixes: [
       'threatMultiplier', 'healing', 'glancingBlow', 'devotion', 'redoubt',
       ...rangedStats, ...nonWeaponAffixes
@@ -63,9 +76,10 @@ export const WEAPON_TYPE_DATA: Partial<Record<WeaponType, WeaponTypeData>> = {
   '1h Swords': {
     baseDamage: { min: 5, max: 9 },
     range: 1,
+    attackAp: 1,
     defaultAttackCategory: 'melee',
     defaultDamageElement: 'slashing',
-    implicits: { statKey: 'meleeHit', baseValue: 2, growthPerLevel: 0.3 },
+    implicit: { stat: 'meleeHit', baseValue: 2, growthPerLevel: 0.3 },
     invalidAffixes: [
        ...rangedStats, ...nonWeaponAffixes
     ],
@@ -73,9 +87,10 @@ export const WEAPON_TYPE_DATA: Partial<Record<WeaponType, WeaponTypeData>> = {
   '2h Swords': {
     baseDamage: { min: 8, max: 14 },
     range: 1,
+    attackAp: 2,
     defaultAttackCategory: 'melee',
     defaultDamageElement: 'slashing',
-    implicits: { statKey: 'meleeHit', baseValue: 3, growthPerLevel: 0.5 },
+    implicit: { stat: 'meleeHit', baseValue: 3, growthPerLevel: 0.5 },
     invalidAffixes: [
       'spirit', 'finesse', 'glancingBlow', 'stealth', 'perception',
       ...rangedStats, ...nonWeaponAffixes
@@ -84,9 +99,10 @@ export const WEAPON_TYPE_DATA: Partial<Record<WeaponType, WeaponTypeData>> = {
   '1h Maces': {
     baseDamage: { min: 6, max: 9 },
     range: 1,
+    attackAp: 1,
     defaultAttackCategory: 'melee',
     defaultDamageElement: 'bludgeoning',
-    implicits: { statKey: 'armor', baseValue: 4, growthPerLevel: 0.2 },
+    implicit: { stat: 'armor', baseValue: 4, growthPerLevel: 0.2 },
     invalidAffixes: [
       'finesse', 'meleeCrit', 'dodge', 'initiative', 'stealth', 'perception',
       ...rangedStats, ...nonWeaponAffixes
@@ -95,9 +111,10 @@ export const WEAPON_TYPE_DATA: Partial<Record<WeaponType, WeaponTypeData>> = {
   '2h Maces': {
     baseDamage: { min: 9, max: 15 },
     range: 1,
+    attackAp: 2,
     defaultAttackCategory: 'melee',
     defaultDamageElement: 'bludgeoning',
-    implicits: { statKey: 'armor', baseValue: 6, growthPerLevel: 0.4 },
+    implicit: { stat: 'armor', baseValue: 6, growthPerLevel: 0.4 },
     invalidAffixes: [
       'finesse', 'mind', 'spirit',  'meleeCrit', 'initiative', 'stealth', 'perception',
       ...rangedStats, ...nonWeaponAffixes, 'magicHit', 'magicCrit'
@@ -106,9 +123,10 @@ export const WEAPON_TYPE_DATA: Partial<Record<WeaponType, WeaponTypeData>> = {
   '1h Axes': {
     baseDamage: { min: 4, max: 10 },
     range: 1,
+    attackAp: 1,
     defaultAttackCategory: 'melee',
     defaultDamageElement: 'slashing',
-    implicits: { statKey: 'meleeDamage', baseValue: 2, growthPerLevel: 0.4 },
+    implicit: { stat: 'meleeDamage', baseValue: 2, growthPerLevel: 0.4 },
     invalidAffixes: [
       'mind', 'spirit', 'healing', 'stealth', 'perception', 'spellcraft', 'devotion',
       ...rangedStats, ...magicStats, ...nonWeaponAffixes
@@ -117,9 +135,10 @@ export const WEAPON_TYPE_DATA: Partial<Record<WeaponType, WeaponTypeData>> = {
   '2h Axes': {
     baseDamage: { min: 7, max: 16 },
     range: 1,
+    attackAp: 2,
     defaultAttackCategory: 'melee',
     defaultDamageElement: 'slashing',
-    implicits: { statKey: 'meleeDamage', baseValue: 4, growthPerLevel: 0.7 },
+    implicit: { stat: 'meleeDamage', baseValue: 4, growthPerLevel: 0.7 },
     invalidAffixes: [
       'mind', 'spirit', 'healing', 'stealth', 'perception', 'spellcraft', 'devotion',
       ...rangedStats, ...magicStats, ...nonWeaponAffixes
@@ -128,9 +147,10 @@ export const WEAPON_TYPE_DATA: Partial<Record<WeaponType, WeaponTypeData>> = {
   'Bows': {
     baseDamage: { min: 6, max: 9 },
     range: 5,
+    attackAp: 2,
     defaultAttackCategory: 'ranged',
     defaultDamageElement: 'piercing',
-    implicits: { statKey: 'rangedCrit', baseValue: 3, growthPerLevel: 0.4 },
+    implicit: { stat: 'rangedCrit', baseValue: 3, growthPerLevel: 0.4 },
     invalidAffixes: [
       'strength', 'healing', 'parry', 'glancingBlow', 'threatMultiplier',
       'redoubt', 'devotion', 'magicHit', 'magicCrit',
@@ -140,9 +160,10 @@ export const WEAPON_TYPE_DATA: Partial<Record<WeaponType, WeaponTypeData>> = {
   'Crossbows': {
     baseDamage: { min: 6, max: 11 },
     range: 4,
+    attackAp: 2,
     defaultAttackCategory: 'ranged',
     defaultDamageElement: 'piercing',
-    implicits: { statKey: 'piercingDamage', baseValue: 2, growthPerLevel: 0.5 },
+    implicit: { stat: 'piercingDamage', baseValue: 2, growthPerLevel: 0.5 },
     invalidAffixes: [
       'strength', 'healing', 'parry', 'glancingBlow', 'threatMultiplier',
       'redoubt', 'devotion', 'magicHit', 'magicCrit',
@@ -150,10 +171,11 @@ export const WEAPON_TYPE_DATA: Partial<Record<WeaponType, WeaponTypeData>> = {
     ],
   },
   'Staves': {
-    baseDamage: { min: 3, max: 10 },
+    baseDamage: { min: 6, max: 10 },
     range: 4,
+    attackAp: 2,
     defaultAttackCategory: 'magic',
-    implicits: { statKey: 'magicDamage', baseValue: 2, growthPerLevel: 0.5 },
+    implicit: { stat: 'magicDamage', baseValue: 2, growthPerLevel: 0.5 },
     invalidAffixes: [
       'strength', 'finesse', 'parry', 'glancingBlow', 'dodge', 
       'evasion', 'redoubt', 'expertise', 'stealth',
@@ -164,8 +186,9 @@ export const WEAPON_TYPE_DATA: Partial<Record<WeaponType, WeaponTypeData>> = {
   'Wands': {
     baseDamage: { min: 3, max: 7 },
     range: 3,
+    attackAp: 1,
     defaultAttackCategory: 'magic',
-    implicits: { statKey: 'magicCrit', baseValue: 3, growthPerLevel: 0.4 },
+    implicit: { stat: 'magicCrit', baseValue: 3, growthPerLevel: 0.4 },
     invalidAffixes: [
       'strength', 'finesse', 'parry', 'glancingBlow', 'dodge', 
       'evasion', 'redoubt', 'expertise', 'stealth',
@@ -173,11 +196,4 @@ export const WEAPON_TYPE_DATA: Partial<Record<WeaponType, WeaponTypeData>> = {
       ...meleeStats, ...rangedStats
     ],
   },
-  /*
-  'Unarmed': {
-    baseDamage: { min: 1, max: 3 },    
-    defaultDamageElement: 'bludgeoning',
-    invalidAffixes: [],
-  },
-  */
 };

@@ -255,6 +255,6 @@ export function buildPreview(design: Design, seed: number, designs: Record<strin
   const kit = CLASSES[cls].startingGear;
   const type = weaponType ?? kit.weapon;
   const weaponLink = sampleWeaponLink(type);
-  const shieldLink = HOLD_FOR[type] === 'oneHand' && kit.shield ? SHIELDS.find((s) => s.type === kit.shield)?.model : undefined;
+  const shieldLink = HOLD_FOR[type] === 'oneHand' && kit.shield ? SHIELDS.find((s) => s.armorType === kit.shield)?.model : undefined;
   return buildCharacter(designs, design, seed, weaponLink ? { link: weaponLink, weaponType: type } : undefined, shieldLink);
 }

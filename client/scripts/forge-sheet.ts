@@ -10,6 +10,7 @@
 //   --elev <deg>        camera elevation (default GAME_CAMERA)   --cols <n> (default 6)   --cell <px> (default 200)
 //   --weapon "<type>"   class designs: hold this weapon type (posed for its hold), e.g. "Crossbows";
 //                       default = the class's starting gear
+//   --anim <name>       designs with that one-time animation (PartAnimation): drawn at its end pose
 import { writeFileSync } from 'node:fs';
 import { ITEM_GROUND_PITCH, SHEET_SHADING, itemRestLift, keyLightDir, layItem, lootYaw } from '../src/forge/core/stage-config';
 import { GAME_CAMERA, viewProject, type ViewAngles } from '../src/viewEngine/camera';
@@ -20,6 +21,7 @@ import { loadDesigns } from './load-designs';
 import { buildPreview } from '../src/forge/equip';
 import type { WeaponType } from '../src/data/gear/types';
 import { encodePNG } from './png';
+import { posedPositions } from '../src/forge/core/animate';
 
 const args = process.argv.slice(2);
 const flag = (n: string) => args.includes(`--${n}`);
@@ -107,7 +109,10 @@ function renderCell(model: Model, design: Design, yaw: number): Uint8Array {
 
   const L = keyLightDir(VIEW);
   const Ln = Math.hypot(...L);
-  const { positions, colors, emissive, alpha, triCount } = model.mesh;
+  const { colors, emissive, alpha, triCount } = model.mesh;
+  // --anim: its animated parts at the end pose
+  const anim = opt('anim', '');
+  const positions = anim ? posedPositions(model, { [anim]: 1 }) : model.mesh.positions;
   const opaque: number[] = [], clear: number[] = [];
   for (let t = 0; t < triCount; t++) (alpha[t] < 0.99 ? clear : opaque).push(t);
 

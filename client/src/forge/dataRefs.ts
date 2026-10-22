@@ -4,9 +4,9 @@
 import type { DataRef, Design, ModelLink } from './core/types';
 import { slug } from './core/slug';
 import { ENEMY_CLASSES, BOSS_CLASSES } from '../data/enemies';
-import { WEAPON_SERIES, weaponName } from '../data/gear/weapons';
-import { ARMOR_SERIES, armorName } from '../data/gear/armor';
-import { SHIELDS } from '../data/gear/offhands';
+import { STARTER_WEAPON_SERIES, WEAPON_SERIES, weaponName } from '../data/gear/weapons';
+import { ARMOR_SERIES, STARTER_ARMOR_SERIES, armorName } from '../data/gear/armor';
+import { SHIELDS, STARTER_SHIELDS } from '../data/gear/offhands';
 import { CLASSES, type ClassKey } from '../data/classes';
 import { GAME_OBJECTS } from '../data/gameObjects';
 import { ARMOR_SLOTS, type WeaponType } from '../data/gear/types';
@@ -102,5 +102,20 @@ export function checkDataRefs(list: { design: Design; stem: string }[]): string[
     if (!d) problems.push(`${entry.path}: links ${entry.link}, which has no design file (approved or draft)`);
     else if (refKey(d.source) !== refKey(entry.ref)) problems.push(`${entry.path}: links ${d.id}, but that design is for ${refKey(d.source)}`);
   }
+  // The one exception: starting gear (the Worn series) has no designs of its own and borrows the models of
+  // the tier it is a worn version of. Each borrowed link must be one a real data entry uses.
+  const entryLinks = new Set(allDataEntries().map((e) => e.link));
+  for (const { path, link } of starterLinks()) {
+    if (!entryLinks.has(link)) problems.push(`${path}: borrows ${link}, which is not the model of any game data entry`);
+  }
   return problems;
+}
+
+/** Model links of the starting gear (STARTER_* series), which borrow the designs of the gear they are worn versions of. */
+function starterLinks(): { path: string; link: ModelLink }[] {
+  return [
+    ...STARTER_WEAPON_SERIES.flatMap((s) => Object.entries(s.weapons).map(([type, w]) => ({ path: `data/gear/weapons.ts › STARTER_WEAPON_SERIES ${s.id} › ${type}`, link: w!.model }))),
+    ...STARTER_ARMOR_SERIES.flatMap((s) => ARMOR_SLOTS.map((slot) => ({ path: `data/gear/armor.ts › STARTER_ARMOR_SERIES ${s.id} › ${slot}`, link: s.models[slot] }))),
+    ...STARTER_SHIELDS.map((s) => ({ path: `data/gear/offhands.ts › STARTER_SHIELDS ${s.id}`, link: s.model })),
+  ];
 }

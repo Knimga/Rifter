@@ -26,6 +26,8 @@ export interface MapObject {
   link: ModelLink;
   pos: Pos;
   facing: number;
+  /** Its model's animations its state calls for, e.g. ['open'] for a looted chest (see MapUnit.played). */
+  played?: string[];
 }
 
 /** A party member drawn as their class model, holding their equipped weapon and shield. */
@@ -108,13 +110,13 @@ export default function ModelLayer({ board, party = [], enemies = [], loot = [],
   }, [enemyKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const lootKey = loot.map((l) => `${l.id}:${l.pos.x},${l.pos.y}`).join('|');
-  const objectKey = objects.map((o) => `${o.id}:${o.link}:${o.pos.x},${o.pos.y}:${o.facing}`).join('|');
+  const objectKey = objects.map((o) => `${o.id}:${o.link}:${o.pos.x},${o.pos.y}:${o.facing}:${o.played?.join('+') ?? ''}`).join('|');
   const aimKey = Object.entries(aims).map(([id, a]) => `${id}:${a.seq}`).join('|');
   const units: MapUnit[] = useMemo(() => {
     const out = [...partyUnits, ...enemyUnits].map((u) => (aims[u.id] ? { ...u, aim: aims[u.id] } : u));
     for (const o of objects) {
       const design = linkedDesign(designs, o.link);
-      if (design) out.push({ id: o.id, model: cached(o.id, o.link, [design], () => buildInstance(design, o.id)), pos: o.pos, facing: o.facing });
+      if (design) out.push({ id: o.id, model: cached(o.id, o.link, [design], () => buildInstance(design, o.id)), pos: o.pos, facing: o.facing, played: o.played });
     }
     for (const l of loot) {
       const design = linkedDesign(designs, l.link);

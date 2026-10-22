@@ -1,6 +1,7 @@
 import type { Ability, Effect } from './classes';
 import type { ActiveBuff, ActiveDot, ActiveHot, BuffableStat, Stats } from './stats';
 import type { DamageElement, WeaponItem } from './gear';
+import { WEAPON_TYPE_DATA } from './gear/weapons';
 import { COMBAT_TEXT_COLOR, DAMAGE_ELEMENT_COLOR } from './constants';
 import { applyDR, getOffense, rollDamage, rollHit, type HitOutcome, type Offense } from './attackResolution';
 import { randInt } from './random';
@@ -113,12 +114,18 @@ export function toAction(content: Ability | 'weapon-attack', weapon: WeaponItem 
   if (!weapon) return null;
   const weaponHit = weaponDamageEffect(weapon);
   if (content === 'weapon-attack') {
-    return { name: 'Attack', mpCost: 0, range: weapon.range, target: 'enemy', attackCategory: weapon.attackCategory, effects: [weaponHit] };
+    return {
+      name: 'Attack', mpCost: 0, apCost: WEAPON_TYPE_DATA[weapon.weaponType].attackAp, range: weapon.range, target: 'enemy',
+      attackCategory: weapon.attackCategory, effects: [weaponHit],
+    };
   }
   return { ...content, useWeapon: false, attackCategory: weapon.attackCategory, effects: [weaponHit, ...content.effects] };
 }
 
 // ─── Execution ────────────────────────────────────────────────────────────────
+
+/** Log every combat roll to the console: dev builds only (`env` is missing outside Vite, e.g. in scripts). */
+const COMBAT_LOG = !!import.meta.env?.DEV;
 
 const STOPPED_TEXT: Record<Exclude<HitOutcome, 'hit'>, string> = {
   miss: 'Missed!', dodge: 'Dodged!', parry: 'Parried!', block: 'Blocked!',
@@ -142,7 +149,8 @@ export function executeAction(caster: CombatUnit, action: Ability, targets: Comb
     return c;
   };
   const float = (u: CombatUnit, text: string, color: string) => floats.push({ pos: u.pos, text, color });
-  const log = (target: CombatUnit, msg: string) => console.log(`[Combat] ${caster.name} → ${target.name}: ${msg}`);
+  // Every roll, to the browser console, in dev builds only (for balancing; players never see it)
+  const log = (target: CombatUnit, msg: string) => { if (COMBAT_LOG) console.log(`[Combat] ${caster.name} → ${target.name}: ${msg}`); };
 
   changeFor(caster).mpSpent = action.mpCost;
   const targetEffects = action.effects.filter(e => e.appliesTo === 'target');

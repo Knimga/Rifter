@@ -99,7 +99,7 @@ export interface BodyBuild {
 export type Hold = 'oneHand' | 'staff' | 'shoulderCarry' | 'bow' | 'crossbow';
 
 export const HOLD_FOR: Record<WeaponType, Hold> = {
-  '1h Swords': 'oneHand', '1h Maces': 'oneHand', '1h Axes': 'oneHand', 'Daggers': 'oneHand', 'Wands': 'oneHand', 'Unarmed': 'oneHand',
+  '1h Swords': 'oneHand', '1h Maces': 'oneHand', '1h Axes': 'oneHand', 'Daggers': 'oneHand', 'Wands': 'oneHand',
   'Staves': 'staff',
   '2h Swords': 'shoulderCarry', '2h Maces': 'shoulderCarry', '2h Axes': 'shoulderCarry',
   'Bows': 'bow',
@@ -449,6 +449,87 @@ export function hoodDown(m: Mesh, look: HoodLook): void {
   for (let i = 0; i < 8; i++) m.tri(apex, r1[i], r1[(i + 1) % 8], look.cloth, mid);
   // Trim along the upper edge of the opening (the ring's top half)
   for (let i = 0; i < 4; i++) frustum(m, r0[i], r0[i + 1], 0.013, 0.013, 4, look.trim);
+}
+
+/**
+ * A hood up over the head, flowing down into the shawl at the neck: cloth, not a ball. It's built around
+ * the face: rings of points step outward from the face opening (an oval framing the face, a little taller
+ * than wide, tipped slightly down) over the crown and sides to a point at the back of the head. The shell
+ * stands off the head, peaks a little up and back like a real hood, and below the jaw drops to the collar
+ * and widens into the shawl's neck. A rolled lip runs around the opening, standing a little forward of the
+ * face, and a dark lining just inside it hides the gap between hood and head. `look.trim` colors the lip.
+ */
+export function hoodUp(m: Mesh, look: HoodLook): void {
+  m.part('hood', HEAD.center);
+  const { center: h, rx, ry, rz } = HEAD;
+  const N = 14, K = 5; // points around each ring; rings from the opening to the back
+  // The face axis (straight out of the face, tipped a little down) and the two directions across it
+  const F = norm([0, -0.15, 1]);
+  const V: Vec3 = [1, 0, 0];
+  const U = norm(cross(F, V));
+  // The opening's edge: how far (radians from the face axis) it reaches, in each direction around it
+  const HALF_W = 0.78, HALF_H = 0.98;
+  const openAt = (t: number) => 1 / Math.hypot(Math.cos(t) / HALF_W, Math.sin(t) / HALF_H);
+  const smooth = (e0: number, e1: number, x: number) => { const k = Math.min(1, Math.max(0, (x - e0) / (e1 - e0))); return k * k * (3 - 2 * k); };
+
+  /** The hood's surface in direction `dir` from the head's center. */
+  const surface = (dir: Vec3): Vec3 => {
+    // Standing off the head (cloth with room inside)
+    let p: Vec3 = add(h, [dir[0] * rx * 1.3, dir[1] * ry * 1.2, dir[2] * rz * 1.28]);
+    // A soft peak up and back
+    const peak = Math.max(0, dir[1]) * Math.max(0, -dir[2]);
+    p = add(p, [0, peak * 0.035, -peak * 0.045]);
+    // Below the jaw: dropping to the collar and widening into the shawl's neck
+    const drape = smooth(-0.35, -0.9, dir[1]);
+    if (drape > 0) {
+      p = [p[0] * (1 + 0.3 * drape), p[1] + (TORSO.collar + 0.03 - p[1]) * drape, h[2] + (p[2] - h[2]) * (1 + 0.15 * drape)];
+    }
+    return p;
+  };
+  const dirAt = (rho: number, t: number): Vec3 =>
+    norm(add(mul(F, Math.cos(rho)), add(mul(V, Math.sin(rho) * Math.cos(t)), mul(U, Math.sin(rho) * Math.sin(t)))));
+
+  // Rings from the opening's edge (k = 0) back to near the back of the head
+  const rings: Vec3[][] = [];
+  for (let k = 0; k <= K; k++) {
+    rings.push(Array.from({ length: N }, (_, i) => {
+      const t = (i / N) * Math.PI * 2, r0 = openAt(t);
+      return surface(dirAt(r0 + (Math.PI * 0.94 - r0) * (k / K), t));
+    }));
+  }
+  loft(m, rings, look.cloth, { caps: false });
+  // Close the back with a fan to its center point
+  const back = surface(mul(F, -1));
+  const last = rings[K];
+  for (let i = 0; i < N; i++) m.tri(back, last[i], last[(i + 1) % N], look.cloth, h);
+
+  // The lining just inside the opening (facing in, toward the face), two bands deep, so neither the edge nor
+  // the head's corners ever show through
+  const inner = (p: Vec3, s: number): Vec3 => add(h, mul(sub(p, h), s));
+  for (let k = 0; k < 2; k++) {
+    for (let i = 0; i < N; i++) {
+      const j = (i + 1) % N;
+      const a = rings[k][i], b = rings[k][j], c = rings[k + 1][j], d = rings[k + 1][i];
+      const quad = [inner(a, 0.97), inner(b, 0.97), inner(c, 0.97), inner(d, 0.97)];
+      const mid = mul(add(add(quad[0], quad[1]), add(quad[2], quad[3])), 0.25);
+      const outside = add(h, mul(sub(mid, h), 3)); // oriented away from a point outside: the faces look inward
+      m.quad(quad[0], quad[1], quad[2], quad[3], look.lining, outside);
+    }
+  }
+
+  // The rolled lip around the opening, standing a little forward of the face: one seamless tube (rings of 4
+  // around its path, joined all the way round), so no gaps open at its corners
+  const lip = rings[0].map((p) => add(inner(p, 1.03), mul(F, 0.012)));
+  const tube: Vec3[][] = lip.map((p, i) => {
+    const along = norm(sub(lip[(i + 1) % N], lip[(i - 1 + N) % N]));
+    const a = norm(cross(along, F)), b = norm(cross(along, a));
+    return [0, 1, 2, 3].map((q) => add(p, add(mul(a, Math.cos((q * Math.PI) / 2) * 0.02), mul(b, Math.sin((q * Math.PI) / 2) * 0.02))));
+  });
+  for (let i = 0; i < N; i++) {
+    const r0 = tube[i], r1 = tube[(i + 1) % N];
+    const ctr = mul(add(lip[i], lip[(i + 1) % N]), 0.5);
+    for (let q = 0; q < 4; q++) m.quad(r0[q], r0[(q + 1) % 4], r1[(q + 1) % 4], r1[q], look.trim, ctr);
+  }
 }
 
 // ─── Outfits ──────────────────────────────────────────────────────────────────

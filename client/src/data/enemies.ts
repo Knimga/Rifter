@@ -39,6 +39,7 @@ export interface EnemyClassData {
   scalingPassives?: ScalingPassive[];
 
   dropChance?: number;  // probability of dropping an item on death (default: LOOT_DROP_CHANCE)
+  xpMultiplier: number; // XP worth relative to a standard enemy of its level (data/xp.ts killXp): tougher = more, bosses ~6
 
   // Forge design this enemy renders as; each enemy instance gets its own look (seeded from its id)
   model: ModelLink;
@@ -182,14 +183,16 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
       {
         name: 'Rusted Sword',
         mpCost: 0,
+        apCost: 1,
         range: 1,
         target: 'enemy',
         attackCategory: 'melee',
         displayElement: 'slashing',
-        effects: [{ type: 'damage', appliesTo: 'target', damageElement: 'slashing', minDamage: 5, maxDamage: 8 }],
+        effects: [{ type: 'damage', appliesTo: 'target', damageElement: 'slashing', minDamage: 5, maxDamage: 7 }],
       },
     ],
     dropChance: 0.4,
+    xpMultiplier: 0.8,
     model: 'creature.skeleton',
   },
   {
@@ -199,21 +202,23 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
     highAttributes: ['toughness', 'strength'],
     lowAttributes: ['finesse', 'mind'],
     baseHp: 20,
-    baseArmor: 2,
+    baseArmor: 5,
     armorPerLevel: 4,
     abilities: [
       {
         name: 'Bite',
         mpCost: 0,
+        apCost: 1,
         range: 1,
         target: 'enemy',
         attackCategory: 'melee',
         displayElement: 'bludgeoning',
-        effects: [{ type: 'damage', appliesTo: 'target', damageElement: 'bludgeoning', minDamage: 4, maxDamage: 9 }],
+        effects: [{ type: 'damage', appliesTo: 'target', damageElement: 'bludgeoning', minDamage: 4, maxDamage: 8 }],
       },
       {
         name: 'Fetid Breath',
         mpCost: 6,
+        apCost: 2,
         range: 1,
         target: 'enemy',
         attackCategory: 'melee',
@@ -225,6 +230,7 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
       }
     ],
     dropChance: 0.4,
+    xpMultiplier: 1,
     model: 'creature.zombie',
   },
   {
@@ -245,17 +251,19 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
       {
         name: 'Lava Lick',
         mpCost: 0,
+        apCost: 1,
         range: 1,
         target: 'enemy',
         attackCategory: 'melee',
         displayElement: 'fire',
         effects: [
-          { type: 'damage', appliesTo: 'target', damageElement: 'fire', minDamage: 5, maxDamage: 7 }
+          { type: 'damage', appliesTo: 'target', damageElement: 'fire', minDamage: 1, maxDamage: 3 }
         ],
       },
       {
         name: 'Flame Belch',
         mpCost: 10,
+        apCost: 2,
         range: 0,
         area: 'blast1',
         target: 'enemy',
@@ -268,6 +276,7 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
       }
     ],
     dropChance: 0.3,
+    xpMultiplier: 1.2,
     model: 'creature.lava-slime',
   },
   {
@@ -287,17 +296,19 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
       {
         name: 'Burning Bite',
         mpCost: 0,
+        apCost: 1,
         range: 1,
         target: 'enemy',
         attackCategory: 'melee',
         displayElement: 'fire',
         effects: [
-          { type: 'damage', appliesTo: 'target', damageElement: 'piercing', minDamage: 3, maxDamage: 4 },
-          { type: 'damage', appliesTo: 'target', damageElement: 'fire', minDamage: 3, maxDamage: 4 }
+          { type: 'damage', appliesTo: 'target', damageElement: 'piercing', minDamage: 1, maxDamage: 1 },
+          { type: 'damage', appliesTo: 'target', damageElement: 'fire', minDamage: 2, maxDamage: 2 }
         ]
       }
     ],
     dropChance: 0.3,
+    xpMultiplier: 0.9,
     model: 'creature.hellhound'
   },
   {
@@ -317,6 +328,7 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
       {
         name: 'Slam',
         mpCost: 0,
+        apCost: 2,
         range: 1,
         target: 'enemy',
         attackCategory: 'melee',
@@ -328,6 +340,7 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
       }
     ],
     dropChance: 0.5,
+    xpMultiplier: 2,
     model: 'creature.flame-golem'
   }
 ];
@@ -339,13 +352,17 @@ export const BOSS_CLASSES: EnemyClassData[] = [
     attributes: { toughness: 8, mind: 8 },
     highAttributes: ['mind', 'toughness'],
     lowAttributes: ['spirit'],
-    baseHp: 20,
+    baseHp: 30,
     baseArmor: 20,
     armorPerLevel: 1,
+    passives: {
+      shadowResistance: { name: 'Death-touched', flat: 20 }
+    },
     abilities: [
       {
         name: 'Mighty Scythe',
         mpCost: 0,
+        apCost: 2,
         range: 1,
         target: 'enemy',
         attackCategory: 'melee',
@@ -357,6 +374,7 @@ export const BOSS_CLASSES: EnemyClassData[] = [
       {
         name: 'Necrotic Bolt',
         mpCost: 8,
+        apCost: 2,
         range: 5,
         target: 'enemy',
         attackCategory: 'magic',
@@ -367,9 +385,9 @@ export const BOSS_CLASSES: EnemyClassData[] = [
       },
       {
         name: 'Wither',
-        mpCost: 12,
+        mpCost: 10,
+        apCost: 1,
         range: 4,
-        area: 'blast2',
         target: 'enemy',
         attackCategory: 'magic',
         displayElement: 'shadow',
@@ -379,6 +397,7 @@ export const BOSS_CLASSES: EnemyClassData[] = [
       }
     ],
     dropChance: 1,
+    xpMultiplier: 6,
     model: 'creature.necromancer',
   },
   {
@@ -397,18 +416,20 @@ export const BOSS_CLASSES: EnemyClassData[] = [
       {
         name: 'Conflagrate',
         mpCost: 20,
+        apCost: 3,
         range: 5,
         target: 'enemy',
         area: 'blast2',
         attackCategory: 'magic',
         displayElement: 'fire',
         effects: [
-          { type: 'dot', appliesTo: 'target', damageElement: 'fire', damagePerRound: 5, rounds: 3 }
+          { type: 'dot', appliesTo: 'target', damageElement: 'fire', damagePerRound: 6, rounds: 3 }
         ]
       },
       {
         name: 'Firebolt',
-        mpCost: 6,
+        mpCost: 8,
+        apCost: 2,
         range: 5,
         target: 'enemy',
         attackCategory: 'magic',
@@ -419,6 +440,7 @@ export const BOSS_CLASSES: EnemyClassData[] = [
       }
     ],
     dropChance: 1,
+    xpMultiplier: 6,
     model: 'creature.burning-spirit',
   }
 ];

@@ -6,7 +6,9 @@ Every design is the model for exactly **one** entry in the game data, and is nam
 - `label` is exactly the entry's display name ("Skeleton", "Plain Gladius").
 - The file is that name slugged: `skeleton.ts`, `plain-gladius.ts`, `plain-bastard-sword.ts`; the id is `${category}.${slug}`.
 
-`npm run forge:lint` fails if any of this drifts, if two designs claim the same entry, or if a `model` link in the game data points at a design that doesn't exist or is for a different entry (rules in `client/src/forge/dataRefs.ts`). Shapes shared by a family live in helper files (`designs/_sword.ts`, `_axe.ts`, `_staff.ts`); an entry's design file just calls them, e.g. `export default swordDesign('plain', '1h Swords')`, and takes its name and id from the data.
+`npm run forge:lint` fails if any of this drifts, if two designs claim the same entry, or if a `model` link in the game data points at a design that doesn't exist or is for a different entry (rules in `client/src/forge/dataRefs.ts`).
+
+**The one exception: starting gear.** The Worn series (`STARTER_WEAPON_SERIES`, `STARTER_ARMOR_SERIES`, `STARTER_SHIELDS`) never drops and has no designs of its own: each Worn item borrows the design of the item it is a worn version of ("Worn Gladius" is drawn with `weapon.plain-gladius`). The lint checks every borrowed link is a model some real entry uses. Shapes shared by a family live in helper files (`designs/_sword.ts`, `_axe.ts`, `_staff.ts`); an entry's design file just calls them, e.g. `export default swordDesign('plain', '1h Swords')`, and takes its name and id from the data.
 
 ## The design object
 A design is one file in `client/src/forge/designs/` (or `client/src/forge/drafts/`) with a default export:
@@ -42,6 +44,9 @@ One design per class (`source: { table: 'classes', key }`), built on `designs/_c
 
 ## Moving parts
 Models are static, except parts a design lists in `motion` (`PartSpin`): each spins about an axis through its part's pivot, forever, while it is on screen (view state, like facing; the game and the forge both animate it). `frame` lets an oval part be built round and squashed, so its pattern turns while the outline stays put (the Portal's swirl). Use it sparingly: something on the map that is magic or alive, never loot.
+
+## Animations
+A design can list one-time `animations` (`PartAnimation`): each has a `name` ('open'), a length in `ms`, and `turns`: parts that turn `angleDeg` about an axis through their pivot (`m.part(name, pivot)`), eased, then hold the end pose. Everything that should move together goes in the animated part (a chest's lid carries its straps and hasp; the padlock stays on the body). The game plays an animation when an object's state calls for it (`MapUnit.played` / `MapObject.played`, e.g. `['open']` for a looted chest): one newly listed plays, one already listed when the object appears shows its end pose. In `/dev/forge`, a radio row (Model, then each animation) plays one on a loop in every cell; `forge:sheet --anim <name>` draws its end pose. The math is shared (`core/animate.ts`; three.js poses it in `animateParts`). Like `motion`, animations are never for loot.
 
 ## Game objects (category `object`, forge section "Game Objects")
 Interactable things on the map that aren't units or loot: doors, portals, later chests and craftbenches. Their data entries are `GAME_OBJECTS` in `data/gameObjects.ts` (`source: { table: 'gameObjects', key }`; identity from `objectEntry` in `designs/_object.ts`). They stand on a tile (`fit.kind: 'standing'`), built facing +z; on the map they face their open side (`facingOpenSide`: a door in a wall faces the floor it opens onto). Maps choose which objects they place by id (`DungeonConfig.doorObject` / `portalObject`, `SANCTUM.portalObject`); where a portal leads belongs to the map, not the object. Variants share a family helper, one entry and design each (portals: `designs/_portal.ts`, e.g. Necrotic Portal; another color is a new entry plus a one-line design).

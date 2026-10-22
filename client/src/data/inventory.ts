@@ -1,6 +1,6 @@
 import type { GearSlot, GearSlots, Item } from './gear';
 import { isWeaponItem, isShieldItem, isArmorItem } from './gear';
-import type { ClassData } from './classes';
+import { CLASSES, type ClassData, type ClassKey } from './classes';
 
 export const INVENTORY_COLS = 12;
 export const INVENTORY_ROWS = 5;
@@ -20,12 +20,25 @@ export function removeItem(inventory: Inventory, idx: number): Inventory {
   return inventory.filter((_, i) => i !== idx);
 }
 
+/**
+ * Put `items` into the inventory, in order, as many as it has room for (picking up a loot pile, taking
+ * from a chest): the new inventory, how many were taken, and the ones left over.
+ */
+export function takeIntoInventory(inventory: Inventory, items: Item[]): { inventory: Inventory; taken: number; left: Item[] } {
+  const taken = Math.max(0, Math.min(items.length, INVENTORY_SIZE - inventory.length));
+  return { inventory: [...inventory, ...items.slice(0, taken)], taken, left: items.slice(taken) };
+}
+
 export function isProficient(classData: ClassData, item: Item): boolean {
   if (isWeaponItem(item)) return (classData.weaponProficiencies as string[]).includes(item.weaponType);
   if (isShieldItem(item)) return classData.weaponProficiencies.includes('Shields');
   if (isArmorItem(item)) return classData.armorProficiencies.includes(item.armorType);
   return false;
 }
+
+/** Whether someone in the party (their classes) can use the item: loot favours such items, and windows fade the rest. */
+export const partyCanUseItem = (party: { selectedClass: ClassKey }[], item: Item): boolean =>
+  party.some((m) => isProficient(CLASSES[m.selectedClass], item));
 
 // ─── Equip / unequip ──────────────────────────────────────────────────────────
 

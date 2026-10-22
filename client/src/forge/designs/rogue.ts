@@ -1,12 +1,12 @@
 // Model for Rogue (data/classes.ts › rogue). Holds the member's weapon (src/forge/equip.ts).
-// Same body and pose as the Knight, but no armor: a slim dark gray jerkin, dark trousers and boots,
-// and a near-black shawl wrapped around the shoulders and neck, pulled up over the mouth. Short spiky
-// black hair, slightly darker skin.
+// Same body and pose as the Knight, but no armor: a slim dark gray jerkin, dark trousers and boots, and a
+// near-black shawl wrapped around the shoulders and neck, pulled up over the mouth, with its black hood up
+// over the head (a lip framing the face). Slightly darker skin.
 import type { Design } from '../core/types';
 import { box } from '../core/primitives';
 import { add, mulC, rotZ, type RGB, type Vec3 } from '../core/vec';
 import { CHARACTER_HEIGHT } from '../core/stage-config';
-import { TORSO, buildBody, classEntry, classHold, fittedJerkin, shawl, spikyHair } from '../designs/_character';
+import { TORSO, buildBody, classEntry, classHold, fittedJerkin, hoodUp, shawl } from '../designs/_character';
 
 const JERKIN: RGB = [72, 74, 80]; // dark gray, sleeves to match
 const SHAWL: RGB = [32, 32, 36];
@@ -28,7 +28,6 @@ const design: Design = {
       sleeves: mulC(JERKIN, 0.9),
       gloves: [40, 34, 30],
     }, { hold: classHold(c, 'rogue') });
-    spikyHair(m, [26, 24, 24], c.rf); // black
 
     fittedJerkin(m, JERKIN, [40, 32, 28], BUCKLE);
 
@@ -38,6 +37,9 @@ const design: Design = {
     box(m, [0, -0.13, 0], [0.075, 0.26, 0.022], SHAWL, 0.15);
     const tail: Vec3 = [0.12, TORSO.shoulder - 0.02, 0.13];
     m.xf(s0, (p) => add(rotZ(p, 0.15), tail)); // hanging end, angled slightly
+
+    // The shawl's black hood, up over the head (it hides the hair): a lip around the face, lined inside
+    hoodUp(m, { cloth: [24, 24, 28], lining: [12, 12, 14], trim: [30, 30, 34] });
     return label;
   },
 };

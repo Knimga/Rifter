@@ -5,7 +5,7 @@ import { lootYaw } from '../../forge/core/stage-config';
 import { GAME_CAMERA } from '../camera';
 import type { BoardLayout } from '../board';
 import { addForgeLights, frameBoard, makeGameCamera, layItemOnGround } from './stage';
-import { animateParts, disposeObject, isAnimated, toThree } from './toThree';
+import { animateParts, disposeObject, hasAnimations, hasSpinningParts, toThree, type AnimationProgress } from './toThree';
 
 type Pos = { x: number; y: number };
 
@@ -30,6 +30,11 @@ export interface MapUnit {
    * next moves or aims).
    */
   aim?: { x: number; y: number; seq: number };
+  /**
+   * The model's one-time animations (PartAnimation) the unit's state has called for, e.g. ['open'] for a
+   * looted chest. One newly listed plays; one already listed when the unit appears shows its end pose.
+   */
+  played?: string[];
 }
 
 interface Entry {
@@ -46,6 +51,25 @@ interface Entry {
   move?: { from: Pos; to: Pos; ms: number; t: number };
   /** Facing to turn to once the glide ends (an ability aimed mid-glide). */
   afterMoveYaw?: number;
+  /** Its played animations: time into each (ms) and its length; done when t >= ms. */
+  anims: Record<string, { t: number; ms: number }>;
+}
+
+/** Each played animation's progress (0..1), for animateParts. */
+const progressOf = (e: Entry): AnimationProgress =>
+  Object.fromEntries(Object.entries(e.anims).map(([name, a]) => [name, a.ms > 0 ? Math.min(1, a.t / a.ms) : 1]));
+
+/** Bring an entry's played animations in line with the unit's `played`: new ones start (or, `snap`, end) now. */
+function syncAnimations(e: Entry, played: string[] = [], snap: boolean): boolean {
+  let changed = false;
+  for (const name of played) {
+    if (e.anims[name]) continue;
+    const ms = e.model.animations?.find((a) => a.name === name)?.ms ?? 0;
+    e.anims[name] = { t: snap ? ms : 0, ms };
+    changed = true;
+  }
+  for (const name of Object.keys(e.anims)) if (!played.includes(name)) { delete e.anims[name]; changed = true; }
+  return changed;
 }
 
 /** A unit's scene object, standing upright or (loot) laid flat on the floor. */
@@ -65,8 +89,9 @@ const easeInOut = (t: number) => (t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 
  * Facing and motion are view state kept here, never in the game. When a unit's position changes, it turns
  * toward the move, then glides there (at most MAX_MOVE_MS in all); when it aims an ability (a new `aim`),
  * it turns toward the aimed tile. `onPlace` reports every change of a unit's drawn position, so DOM
- * overlays (HP bars, floor glow) can follow it. Rendering is on demand; the animation loop only runs
- * while a unit is turning or moving, or while a model with moving parts (PartSpin) is on the map.
+ * overlays (HP bars, floor glow) can follow it. A unit's one-time animations (`played`, e.g. a chest
+ * opening) play when its state calls for them. Rendering is on demand; the animation loop only runs while a
+ * unit is turning, moving or animating, or while a model with spinning parts (PartSpin) is on the map.
  */
 export class MapModelRenderer {
   readonly canvas: HTMLCanvasElement;
@@ -111,15 +136,19 @@ export class MapModelRenderer {
         e = { ...e, model: u.model, obj: makeObject(u) };
         this.scene.add(e.obj);
         this.entries.set(u.id, e);
+        animateParts(e.obj, 0, progressOf(e));
         changed = true;
       }
       if (!e) {
         // A new unit adopts any existing aim without turning to it (a remount never replays an old attack)
         const yaw = u.lying ? lootYaw() : (u.facing ?? 0);
-        e = { model: u.model, obj: makeObject(u), pos: u.pos, at: { ...u.pos }, yaw, targetYaw: yaw, aimSeq: u.aim?.seq };
+        e = { model: u.model, obj: makeObject(u), pos: u.pos, at: { ...u.pos }, yaw, targetYaw: yaw, aimSeq: u.aim?.seq, anims: {} };
         this.scene.add(e.obj);
         this.entries.set(u.id, e);
         this.place(u.id, e);
+        // A unit that appears in an animated state (a chest already looted) shows it done, not replayed
+        syncAnimations(e, u.played, true);
+        animateParts(e.obj, 0, progressOf(e));
         changed = true;
       } else if (u.pos.x !== e.pos.x || u.pos.y !== e.pos.y) {
         // Turn toward the new tile (from where the model is drawn now, which matters mid-glide), then glide
@@ -132,6 +161,8 @@ export class MapModelRenderer {
         e.pos = u.pos;
         changed = true;
       }
+      // A newly called-for animation plays from now (a new unit has already taken its state, as done)
+      if (syncAnimations(e, u.played, false)) changed = true;
       // A new ability aim: turn toward the aimed tile (from wherever the unit now stands)
       if (u.aim && u.aim.seq !== e.aimSeq) {
         e.aimSeq = u.aim.seq;
@@ -170,8 +201,11 @@ export class MapModelRenderer {
     let animating = false;
     for (const [id, e] of this.entries) {
       // Moving parts (e.g. a portal's swirl) keep the loop running while the unit is on the map
-      if (isAnimated(e.obj)) {
-        animateParts(e.obj, now / 1000);
+      // Spinning parts keep the loop running while the unit is on the map; a one-time animation while it plays
+      const playing = Object.values(e.anims).some((a) => a.t < a.ms);
+      for (const a of Object.values(e.anims)) a.t = Math.min(a.ms, a.t + dt);
+      if (hasSpinningParts(e.obj) || (playing && hasAnimations(e.obj))) {
+        animateParts(e.obj, now / 1000, progressOf(e));
         animating = true;
       }
       if (e.yaw !== e.targetYaw) {

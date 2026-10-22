@@ -6,7 +6,7 @@ import { lootYaw } from '../core/stage-config';
 import { GAME_CAMERA } from '../../viewEngine/camera';
 import { TILE_SIZE } from '../../viewEngine/board';
 import { addForgeLights, aimKeyLight, fitIconCamera, fitViewCamera, layItemOnGround, makeGameCamera } from '../../viewEngine/three/stage';
-import { animateParts, disposeObject, sharedMaterials, toThree } from '../../viewEngine/three/toThree';
+import { animateParts, disposeObject, sharedMaterials, toThree, type AnimationProgress } from '../../viewEngine/three/toThree';
 
 export type CameraPreset = 'game' | 'icon' | 'top' | 'side';
 
@@ -15,6 +15,8 @@ export interface Cell {
   yaw: number;
   /** CSS px, relative to the canvas. */
   rect: { x: number; y: number; w: number; h: number };
+  /** How far along each of its one-time animations is (PartAnimation; none = the rest pose). */
+  progress?: AnimationProgress;
 }
 
 export interface ViewOptions {
@@ -64,7 +66,7 @@ export class ForgeView {
   }
 
   /**
-   * Draw all cells, moving parts posed at `sec` (see animateParts). Objects not used by this call are
+   * Draw all cells, spinning parts posed at `sec` and animated parts at each cell's `progress` (see animateParts). Objects not used by this call are
    * disposed.
    */
   render(cells: Cell[], opts: ViewOptions, size: { w: number; h: number }, sec = 0): void {
@@ -89,7 +91,7 @@ export class ForgeView {
         this.scene.add(obj);
       }
       obj.visible = true;
-      animateParts(obj, sec);
+      animateParts(obj, sec, cell.progress);
 
       const { min, max } = cell.model.mesh.bounds;
       const isItem = cell.model.mesh.anchors.center !== undefined;

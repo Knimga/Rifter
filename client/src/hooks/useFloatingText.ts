@@ -23,3 +23,6 @@ export function useFloatingText() {
 
   return { floatingTexts, spawnFloat, removeFloat, clearFloats };
 }
+
+/** Show floating text over a tile (useFloatingText's spawnFloat), for the hooks that take it. */
+export type SpawnFloat = ReturnType<typeof useFloatingText>['spawnFloat'];

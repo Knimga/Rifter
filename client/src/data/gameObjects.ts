@@ -19,6 +19,9 @@ function gameObject(id: string): GameObjectData {
 /** The model of a game object, by id (maps name the objects they place by id: see DungeonConfig, SANCTUM). */
 export const gameObjectModel = (id: string): ModelLink => gameObject(id).model;
 
+/** A game object's display name, by id (e.g. a chest window's heading). */
+export const gameObjectName = (id: string): string => gameObject(id).name;
+
 /** The glow on a game object's tile while it can be used (see GameObjectData.glow). */
 export const gameObjectGlow = (id: string): string => gameObject(id).glow ?? 'var(--glow)';
 
@@ -30,4 +33,6 @@ export const GAME_OBJECTS: GameObjectData[] = [
   // map that places it, not here.
   { id: 'necrotic-portal', name: 'Necrotic Portal', model: 'object.necrotic-portal', glow: 'var(--rift-portal-necrotic)' },
   { id: 'fire-portal', name: 'Fire Portal', model: 'object.fire-portal', glow: 'var(--rift-portal-fire)' },
+  // A plain wooden chest bound in iron, locked; stands on a floor tile, its lock facing the open side
+  { id: 'basic-treasure-chest', name: 'Basic Treasure Chest', model: 'object.basic-treasure-chest' },
 ];

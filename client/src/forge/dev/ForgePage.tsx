@@ -77,6 +77,8 @@ export default function ForgePage() {
   const [motion, setMotion] = useState<'none' | 'turntable' | 'walk'>('none');
   const [wireframe, setWireframe] = useState(false);
   const [ground, setGround] = useState(true);
+  // Which of the design's one-time animations (PartAnimation) plays on a loop in every cell; null = the model at rest
+  const [animation, setAnimation] = useState<string | null>(null);
   const [status, setStatus] = useState('');
 
   const entry = entries.find((e) => e.id === selectedId) ?? entries[0];
@@ -107,6 +109,11 @@ export default function ForgePage() {
         ...(entry.approved ? holdBlocks(entry.approved, 'Current') : []),
         ...(entry.draft ? holdBlocks(entry.draft, entry.approved ? 'Draft' : 'Draft (new)') : []),
       ];
+  // The design's one-time animations (approved and draft together), by name: the radio row picks one to watch
+  const animationNames = entry
+    ? [...new Set([...(entry.approved?.animations ?? []), ...(entry.draft?.animations ?? [])].map((a) => a.name))]
+    : [];
+  const playing = animation && animationNames.includes(animation) ? animation : null;
   const shown = focusSeed === null
     ? blocks
     : blocks.map((b) => ({ ...b, cells: b.cells.filter((c) => c.seed === focusSeed).slice(0, 1) })).filter((b) => b.cells.length);
@@ -147,6 +154,7 @@ export default function ForgePage() {
   const viewRef = useRef<ForgeView | null>(null);
   const hostRef = useRef<HTMLDivElement>(null);
   const yawRef = useRef(0);
+  const loopRef = useRef<{ name: string | null; start: number }>({ name: null, start: 0 });
   useEffect(() => {
     const view = new ForgeView();
     viewRef.current = view;
@@ -163,17 +171,25 @@ export default function ForgePage() {
     if (!view) return;
     view.canvas.style.width = `${width}px`;
     view.canvas.style.height = `${height}px`;
+    // The loop restarts only when another animation is picked, not on every render
+    if (loopRef.current.name !== playing) loopRef.current = { name: playing, start: performance.now() };
+    const loopStart = loopRef.current.start;
     const draw = (yaw: number) => {
+      const now = performance.now();
       const cells: Cell[] = [];
       built.forEach((block, b) =>
         block.forEach(({ model }, i) => {
-          if (model) cells.push({ model, yaw, rect: rectOf(b, i) });
+          if (!model) return;
+          // The chosen animation plays on a loop: rest, play, hold the end pose, back to rest
+          const anim = playing ? model.animations?.find((a) => a.name === playing) : undefined;
+          const progress = anim ? { [anim.name]: animationLoop(now - loopStart, anim.ms) } : undefined;
+          cells.push({ model, yaw, rect: rectOf(b, i), progress });
         }),
       );
-      view.render(cells, { camera, wireframe, ground }, { w: width, h: height }, performance.now() / 1000);
+      view.render(cells, { camera, wireframe, ground }, { w: width, h: height }, now / 1000);
     };
-    // Models with moving parts (a portal's swirl) animate even when the view is static
-    const hasMovingParts = built.some((block) => block.some(({ model }) => !!model?.motion?.length));
+    // Models with moving parts (a portal's swirl), or an animation being watched, animate even when the view is static
+    const hasMovingParts = !!playing || built.some((block) => block.some(({ model }) => !!model?.motion?.length));
     if (motion === 'none' && !hasMovingParts) {
       yawRef.current = (yawDeg * Math.PI) / 180;
       draw(yawRef.current);
@@ -306,6 +322,18 @@ export default function ForgePage() {
             <option value="none">static</option><option value="turntable">turntable</option><option value="walk">walk test</option>
           </select>
           <label className="flex items-center gap-1">Yaw <input type="range" min={-180} max={180} value={yawDeg} disabled={motion !== 'none'} onChange={(e) => setYawDeg(Number(e.target.value))} /> {yawDeg}°</label>
+          {animationNames.length > 0 && (
+            <div role="radiogroup" aria-label="Model or animation" className="flex rounded border border-gray-700 overflow-hidden text-xs"
+              title="The model at rest, or one of its animations playing on a loop">
+              {[null, ...animationNames].map((name) => (
+                <button key={name ?? '-'} type="button" role="radio" aria-checked={playing === name}
+                  onClick={() => setAnimation(name)}
+                  className={`px-2.5 py-1 ${playing === name ? 'bg-blue-700 text-white' : 'bg-gray-900 text-gray-400 hover:bg-gray-700'}`}>
+                  {name ?? 'Model'}
+                </button>
+              ))}
+            </div>
+          )}
           <Toggle on={wireframe} onClick={() => setWireframe(!wireframe)}>Wireframe</Toggle>
           <Toggle on={ground} onClick={() => setGround(!ground)}>Tile</Toggle>
           <button className={BTN + ' bg-blue-800 hover:bg-blue-700'} onClick={refreshDesigns} title="Load the latest design code without reloading the page">↻ Refresh designs</button>
@@ -364,6 +392,17 @@ export default function ForgePage() {
       </aside>
     </div>
   );
+}
+
+// ─── Animation preview ────────────────────────────────────────────────────────
+
+/** Watching an animation: at rest for a moment, then it plays, holds its end pose, and starts over. */
+const LOOP_REST_MS = 600, LOOP_HOLD_MS = 1400;
+
+/** An animation's progress (0..1) `t` ms into the preview loop. */
+function animationLoop(t: number, ms: number): number {
+  const at = t % (LOOP_REST_MS + ms + LOOP_HOLD_MS);
+  return at < LOOP_REST_MS ? 0 : Math.min(1, (at - LOOP_REST_MS) / Math.max(1, ms));
 }
 
 // ─── Pieces ───────────────────────────────────────────────────────────────────

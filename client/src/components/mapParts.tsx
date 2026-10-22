@@ -1,4 +1,5 @@
-import { useMemo, useState, type ReactNode } from 'react';
+import { Children, memo, useCallback, useMemo, useState, type ReactNode } from 'react';
+import { useLatest } from '../hooks/useLatest';
 import { TILE_SIZE, boardLayout, type BoardLayout } from '../viewEngine/board';
 import { yawFromGridMove } from '../forge/core/facing';
 import type { ClassKey } from '../data/classes';
@@ -131,14 +132,23 @@ export const TILE_BORDER_COLOR = 'rgba(55, 65, 81, 0.3)';
 /** The tile under the pointer, tracked by FloorTile's hover handlers. */
 export function useHoveredTile() {
   const [hovered, setHovered] = useState<Pos | null>(null);
+  // Stable, so tiles (memoized) don't redraw just because the hovered tile changed
+  const enter = useCallback((p: Pos) => setHovered(p), []);
+  const leave = useCallback((p: Pos) => setHovered((prev) => (prev && samePos(prev, p) ? null : prev)), []);
   return {
     hovered,
     isHovered: (p: Pos) => !!hovered && samePos(hovered, p),
-    enter: (p: Pos) => setHovered(p),
-    leave: (p: Pos) => setHovered((prev) => (prev && samePos(prev, p) ? null : prev)),
+    enter,
+    leave,
   };
 }
 export type HoveredTile = ReturnType<typeof useHoveredTile>;
+
+/** A callback that never changes identity but always runs the latest `fn` (for memoized children's handlers). */
+export function useStableHandler<A extends unknown[]>(fn: (...args: A) => void): (...args: A) => void {
+  const latest = useLatest(fn);
+  return useCallback((...args: A) => latest.current(...args), []); // eslint-disable-line react-hooks/exhaustive-deps
+}
 
 /** A map's floor grid: `tile(p)` draws each tile (a FloorTile), row by row. */
 export function FloorGrid({ cols, rows, tile }: { cols: number; rows: number; tile: (p: Pos) => ReactNode }) {
@@ -153,23 +163,29 @@ export function FloorGrid({ cols, rows, tile }: { cols: number; rows: number; ti
   );
 }
 
-/**
- * One floor or wall tile: its color (a move target brightens under the pointer), hover tracking and clicks.
- * Overlays (highlights, glows) go inside as children.
- */
-export function FloorTile({ p, color, brighten = false, hover, onClick, children }: {
+interface FloorTileProps {
   p: Pos;
   /** Floor or wall color (hex). */
   color: string;
   /** Lit as the hovered move target. */
   brighten?: boolean;
   hover: HoveredTile;
-  onClick: () => void;
+  /** Stable across renders (useStableHandler), so the tile's memo holds. */
+  onClick: (p: Pos) => void;
   children?: ReactNode;
-}) {
+}
+
+/**
+ * One floor or wall tile: its color (a move target brightens under the pointer), hover tracking and clicks.
+ * Overlays (highlights, glows) go inside as children.
+ *
+ * Memoized: a map has hundreds of tiles and re-renders on every hovered tile, but only the few tiles whose
+ * look changes need to redraw. A tile with overlays always redraws (its children are new elements).
+ */
+export const FloorTile = memo(function FloorTile({ p, color, brighten = false, hover, onClick, children }: FloorTileProps) {
   return (
     <div
-      onClick={onClick}
+      onClick={() => onClick(p)}
       onMouseEnter={() => hover.enter(p)}
       onMouseLeave={() => hover.leave(p)}
       className="relative shrink-0 border"
@@ -178,7 +194,13 @@ export function FloorTile({ p, color, brighten = false, hover, onClick, children
       {children}
     </div>
   );
-}
+}, (a: FloorTileProps, b: FloorTileProps) =>
+  a.p.x === b.p.x && a.p.y === b.p.y && a.color === b.color && !!a.brighten === !!b.brighten && a.onClick === b.onClick
+  && a.hover.enter === b.hover.enter && a.hover.leave === b.hover.leave
+  && noChildren(a.children) && noChildren(b.children));
+
+/** No overlays: nothing but empty nodes (false, null) from `{cond && <X />}` children. */
+const noChildren = (children: ReactNode) => Children.toArray(children).length === 0;
 
 /**
  * Overlays drawn over a floor tile (on the floor layer, taking no clicks): targeting in the theme's muted
@@ -211,11 +233,10 @@ export function TileHighlight({ kind, className = '' }: { kind: keyof typeof TIL
 // ─── Move line ────────────────────────────────────────────────────────────────
 
 /** Animated line from the active mover to the hovered tile, in tile coordinates. */
-export function MoveLineOverlay({ from, to, cols, rows }: { from: Pos; to: Pos; cols: number; rows: number }) {
+export function MoveLineOverlay({ from, to }: { from: Pos; to: Pos }) {
   const half = TILE_SIZE / 2;
   return (
     <MoveLine
-      svgWidth={cols * TILE_SIZE} svgHeight={rows * TILE_SIZE}
       x1={from.x * TILE_SIZE + half} y1={from.y * TILE_SIZE + half}
       x2={to.x * TILE_SIZE + half} y2={to.y * TILE_SIZE + half}
     />

@@ -1,10 +1,9 @@
 import {
-  GiSwordBrandish, GiHospitalCross, GiSacrificialDagger, GiDrippingBlade, GiWaveStrike, GiSonicShout,
+  GiSwordBrandish, GiHospitalCross, GiSacrificialDagger, GiDrippingBlade, GiWaveStrike, GiEnrage,
   GiFireZone, GiPoison, GiPlantWatering, GiLeafSwirl, GiEvilComet, GiCursedStar,
   GiBroadsword, GiShield, GiHealthNormal, GiCometSpark,
 } from 'react-icons/gi';
 import { FaRegSnowflake } from 'react-icons/fa';
-import { FaBoltLightning } from 'react-icons/fa6';
 import { RiTargetFill } from 'react-icons/ri';
 
 import type { IconType } from 'react-icons';
@@ -32,6 +31,7 @@ export interface Ability {
   name: string;
   icon?: ComponentType<{ className?: string }> | IconType;
   mpCost: number;
+  apCost: number;                  // action points it takes on the turn (moving and abilities share them)
   range: number;
   target: TargetType;
   displayElement?: DamageElement;
@@ -110,9 +110,9 @@ export const CLASSES: Record<ClassKey, ClassData> = {
   knight: {
     name: 'Knight',
     roles: ['tank', 'healer'],
-    baseHp: 30,
+    baseHp: 40,
     description: 'A shield-bearing fighter that protects companions.',
-    attributes: { strength: 3, toughness: 4, finesse: 1, mind: 2, spirit: 4, speed: 0 },
+    attributes: { strength: 4, toughness: 3, finesse: 1, mind: 2, spirit: 4, speed: 0 },
     skills: { redoubt: 4, devotion: 4, expertise: 2, spellcraft: 2 },
     passives: {
       block:   { name: 'Defender',  flat: 5 },
@@ -127,6 +127,7 @@ export const CLASSES: Record<ClassKey, ClassData> = {
         name: 'Taunting Blow',
         icon: GiSwordBrandish,
         mpCost: 8,
+        apCost: 2,
         range: 1,
         target: 'enemy',
         attackCategory: 'melee',
@@ -139,6 +140,7 @@ export const CLASSES: Record<ClassKey, ClassData> = {
         name: 'Holy Light',
         icon: GiHospitalCross,
         mpCost: 10,
+        apCost: 1,
         range: 3,
         target: 'ally',
         displayElement: 'holy',
@@ -153,9 +155,9 @@ export const CLASSES: Record<ClassKey, ClassData> = {
   rogue: {
     name: 'Rogue',
     roles: ['damage'],
-    baseHp: 25,
+    baseHp: 30,
     description: 'A dagger-wielding brigand who fights dirty.',
-    attributes: { strength: 1, toughness: 2, finesse: 6, mind: 1, spirit: 0, speed: 4 },
+    attributes: { strength: 1, toughness: 1, finesse: 7, mind: 1, spirit: 0, speed: 4 },
     skills: { perception: 2, stealth: 4, expertise: 3, evasion: 3 },
     passives: {
       dodge:     { name: 'Slippery',    flat: 5 },
@@ -170,6 +172,7 @@ export const CLASSES: Record<ClassKey, ClassData> = {
         name: 'Backstab',
         icon: GiSacrificialDagger,
         mpCost: 5,
+        apCost: 2,
         range: 1,
         target: 'enemy',
         attackCategory: 'melee',
@@ -181,7 +184,8 @@ export const CLASSES: Record<ClassKey, ClassData> = {
       {
         name: 'Poison Blade',
         icon: GiDrippingBlade,
-        mpCost: 7,
+        mpCost: 5,
+        apCost: 1,
         range: 1,
         target: 'enemy',
         displayElement: 'poison',
@@ -197,7 +201,7 @@ export const CLASSES: Record<ClassKey, ClassData> = {
   brute: {
     name: 'Brute',
     roles: ['damage','tank'],
-    baseHp: 30,
+    baseHp: 40,
     description: 'A powerful warrior who runs in swinging.',
     attributes: { strength: 5, toughness: 5, finesse: 2, mind: 0, spirit: 0, speed: 2 },
     skills: { redoubt: 4, evasion: 4, expertise: 4 },
@@ -213,7 +217,8 @@ export const CLASSES: Record<ClassKey, ClassData> = {
       {
         name: 'Cleave',
         icon: GiWaveStrike,
-        mpCost: 12,
+        mpCost: 15,
+        apCost: 3,
         range: 0,
         target: 'enemy',
         useWeapon: true,
@@ -222,15 +227,14 @@ export const CLASSES: Record<ClassKey, ClassData> = {
         effects: [],
       },
       {
-        name: 'Intimidating Shout',
-        icon: GiSonicShout,
-        mpCost: 12,
+        name: 'Battlerush',
+        icon: GiEnrage,
+        mpCost: 6,
+        apCost: 1,
         range: 0,
-        target: 'enemy',
-        attackCategory: 'melee',
-        area: 'blast2',
+        target: 'self',
         effects: [
-          { type: 'debuff', appliesTo: 'target', stats: { meleeHit: -10, magicHit: -10, rangedHit: -10 }, rounds: 3 },
+          { type: 'buff', appliesTo: 'target', stats: { hpRegen: 3, strength: 6 }, rounds: 3 },
         ],
       },
     ],
@@ -239,7 +243,7 @@ export const CLASSES: Record<ClassKey, ClassData> = {
   arcanist: {
     name: 'Arcanist',
     roles: ['caster'],
-    baseHp: 20,
+    baseHp: 25,
     description: 'A scholarly caster who wields elemental magic.',
     attributes: { strength: 0, toughness: 0, finesse: 2, mind: 7, spirit: 4, speed: 1 },
     skills: { spellcraft: 5, devotion: 3, perception: 4 },
@@ -256,19 +260,20 @@ export const CLASSES: Record<ClassKey, ClassData> = {
         name: 'Fireball',
         icon: GiFireZone,
         mpCost: 14,
+        apCost: 2,
         range: 5,
         target: 'enemy',
         displayElement: 'fire',
         attackCategory: 'magic',
         effects: [
-          { type: 'damage', appliesTo: 'target', damageElement: 'fire', minDamage: 7, maxDamage: 12 },
-          { type: 'dot', appliesTo: 'target', damageElement: 'fire', damagePerRound: 4, rounds: 1 },
+          { type: 'damage', appliesTo: 'target', damageElement: 'fire', minDamage: 8, maxDamage: 12 }
         ],
       },
       {
         name: 'Icebolt',
         icon: FaRegSnowflake,
         mpCost: 8,
+        apCost: 2,
         range: 4,
         target: 'enemy',
         displayElement: 'ice',
@@ -277,20 +282,7 @@ export const CLASSES: Record<ClassKey, ClassData> = {
           { type: 'damage', appliesTo: 'target', damageElement: 'ice', minDamage: 9, maxDamage: 9 },
           { type: 'debuff', appliesTo: 'target', stats: { movement: -3, dodge: -5 }, rounds: 3 },
         ],
-      },
-      {
-        name: 'Shock',
-        icon: FaBoltLightning,
-        mpCost: 10,
-        range: 3,
-        target: 'enemy',
-        displayElement: 'lightning',
-        attackCategory: 'magic',
-        effects: [
-          { type: 'damage', appliesTo: 'target', damageElement: 'lightning', minDamage: 8, maxDamage: 10 },
-          { type: 'dot', appliesTo: 'target', damageElement: 'lightning', damagesMP: true, damagePerRound: 3, rounds: 3 },
-        ],
-      },
+      }
     ],
   },
 
@@ -314,6 +306,7 @@ export const CLASSES: Record<ClassKey, ClassData> = {
         name: 'Aimed Shot',
         icon: RiTargetFill,
         mpCost: 7,
+        apCost: 3,
         range: 5,
         target: 'enemy',
         displayElement: 'piercing',
@@ -327,6 +320,7 @@ export const CLASSES: Record<ClassKey, ClassData> = {
         name: 'Poison Arrow',
         icon: GiPoison,
         mpCost: 8,
+        apCost: 1,
         range: 5,
         target: 'enemy',
         displayElement: 'poison',
@@ -342,9 +336,9 @@ export const CLASSES: Record<ClassKey, ClassData> = {
   primalist: {
     name: 'Primalist',
     roles: ['damage', 'healer', 'caster'],
-    baseHp: 25,
+    baseHp: 30,
     description: 'A nature-attuned wanderer who can take on many roles.',
-    attributes: { strength: 2, toughness: 2, finesse: 1, mind: 4, spirit: 4, speed: 1 },
+    attributes: { strength: 3, toughness: 3, finesse: 1, mind: 3, spirit: 4, speed: 0 },
     skills: { perception: 3, spellcraft: 3, devotion: 3, redoubt: 3 },
     passives: {
       healing:      { name: 'Verdant', flat: 3 },
@@ -352,30 +346,34 @@ export const CLASSES: Record<ClassKey, ClassData> = {
     },
     armorProficiencies: ['Light', 'Medium'],
     weaponProficiencies: ['Daggers', '1h Maces', 'Wands', 'Staves', 'Shields'],
-    startingGear: { chest: 'Medium', boots: 'Medium', weapon: 'Wands', weaponElement: 'nature', shield: 'Medium' },
+    startingGear: { chest: 'Medium', boots: 'Medium', weapon: '1h Maces', shield: 'Medium' },
     model: 'character.primalist',
     abilities: [
       {
-        name: 'Regrow',
+        name: 'Lifeburst',
         icon: GiPlantWatering,
-        mpCost: 10,
+        mpCost: 8,
+        apCost: 1,
         range: 3,
         displayElement: 'nature',
         target: 'ally',
         effects: [
-          { type: 'hot', appliesTo: 'target', damageElement: 'nature', healPerRound: 5, rounds: 3 },
+          { type: 'heal', appliesTo: 'target', damageElement: 'nature', minHeal: 4, maxHeal: 6 },
+          { type: 'hot', appliesTo: 'target', damageElement: 'nature', healPerRound: 4, rounds: 3 },
         ],
       },
       {
         name: 'Earthshock',
         icon: GiLeafSwirl,
-        mpCost: 7,
+        mpCost: 10,
+        apCost: 2,
         range: 3,
         displayElement: 'nature',
         target: 'enemy',
         attackCategory: 'magic',
         effects: [
           { type: 'damage', appliesTo: 'target', damageElement: 'nature', minDamage: 7, maxDamage: 10 },
+          { type: 'debuff', appliesTo: 'target', damageElement: 'nature', stats: { apMax: -2 }, rounds: 2 }
         ],
       },
     ],
@@ -384,7 +382,7 @@ export const CLASSES: Record<ClassKey, ClassData> = {
   occultist: {
     name: 'Occultist',
     roles: ['caster'],
-    baseHp: 20,
+    baseHp: 25,
     description: 'A dark caster of questionable origins.',
     attributes: { strength: 0, toughness: 2, finesse: 1, mind: 8, spirit: 2, speed: 1 },
     skills: { spellcraft: 6, devotion: 2, perception: 2, stealth: 2 },
@@ -401,18 +399,20 @@ export const CLASSES: Record<ClassKey, ClassData> = {
         name: 'Shadow Bolt',
         icon: GiEvilComet,
         mpCost: 10,
+        apCost: 2,
         range: 4,
         target: 'enemy',
         displayElement: 'shadow',
         attackCategory: 'magic',
         effects: [
-          { type: 'damage', appliesTo: 'target', damageElement: 'shadow', minDamage: 9, maxDamage: 12 },
+          { type: 'damage', appliesTo: 'target', damageElement: 'shadow', minDamage: 10, maxDamage: 12 },
         ],
       },
       {
         name: 'Curse',
         icon: GiCursedStar,
         mpCost: 8,
+        apCost: 1,
         range: 4,
         target: 'enemy',
         displayElement: 'shadow',

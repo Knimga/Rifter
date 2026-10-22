@@ -6,7 +6,7 @@ import { yawFromGridMove } from '../forge/core/facing';
 import type { DungeonKey } from '../data/dungeonPresets';
 import { SANCTUM_FLOOR_COLOR, SANCTUM_WALL_COLOR } from '../data/constants';
 import { SANCTUM, isSanctumWall, sanctumPortalAt } from '../data/sanctum';
-import { Board, FloorGrid, FloorTile, MoveLineOverlay, TileHighlight, UsableGlow, toMapMember, useBoard, useHoveredTile, type PartyTokenData } from './mapParts';
+import { Board, FloorGrid, FloorTile, MoveLineOverlay, TileHighlight, UsableGlow, toMapMember, useBoard, useHoveredTile, useStableHandler, type PartyTokenData } from './mapParts';
 
 // 3D party models over the tile grid. Lazy: it pulls in three.js (GameScreen preloads it on mount).
 const ModelLayer = lazy(() => import('./ModelLayer'));
@@ -63,12 +63,15 @@ export default function SanctumMap({ playerPos, activeMoverPos, party, moveTarge
     if (canMoveTo(p)) onMove(p);
   };
 
+  // Stable for the memoized tiles; always runs the latest handleClick
+  const onTileClick = useStableHandler(handleClick);
+
   const tile = (p: Pos) => {
     const isWall = isSanctumWall(p);
     const portal = sanctumPortalAt(p);
     const allyTarget = !isWall && activeTarget === 'ally' && memberByKey.has(posKey(p));
     return (
-      <FloorTile key={posKey(p)} p={p} hover={hover} onClick={() => handleClick(p)}
+      <FloorTile key={posKey(p)} p={p} hover={hover} onClick={onTileClick}
         color={isWall ? SANCTUM_WALL_COLOR : SANCTUM_FLOOR_COLOR}
         brighten={!isWall && !activeTarget && canMoveTo(p) && hover.isHovered(p)}>
         {allyTarget && <TileHighlight kind="ally" />}
@@ -82,7 +85,7 @@ export default function SanctumMap({ playerPos, activeMoverPos, party, moveTarge
     <>
       <FloorGrid cols={SANCTUM.width} rows={SANCTUM.height} tile={tile} />
       {!activeTarget && hover.hovered && canMoveTo(hover.hovered) && (
-        <MoveLineOverlay from={activeMoverPos} to={hover.hovered} cols={SANCTUM.width} rows={SANCTUM.height} />
+        <MoveLineOverlay from={activeMoverPos} to={hover.hovered} />
       )}
     </>
   );

@@ -19,5 +19,6 @@ export function buildModel(design: Design, seed: number, hold?: string): Model {
     mesh: bake(c.mesh),
     groundPitch: design.fit.kind === 'item' ? itemGroundPitch(design.fit) : undefined,
     motion: design.motion,
+    animations: design.animations,
   };
 }

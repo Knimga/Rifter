@@ -15,7 +15,11 @@ const lerp = (p: Vec3, q: Vec3, f: number): Vec3 => [p[0] + (q[0] - p[0]) * f, p
 const BATTLEAXE_REACH = 0.38;
 const BATTLEAXE_EDGE_BOW = 0.45;
 
-export function axeDesign(seriesId: string, weaponType: '1h Axes' | '2h Axes'): Design {
+/**
+ * `bladeLength` scales how far the head runs along the haft (its height), e.g. 0.8 = 20% shorter blades.
+ * The haft, the blades' reach and everything random stay the same.
+ */
+export function axeDesign(seriesId: string, weaponType: '1h Axes' | '2h Axes', { bladeLength = 1 }: { bladeLength?: number } = {}): Design {
   const { id, label, source, palette } = weaponEntry(seriesId, weaponType);
   const twoHanded = weaponType === '2h Axes';
   return {
@@ -44,7 +48,7 @@ export function axeDesign(seriesId: string, weaponType: '1h Axes' | '2h Axes'): 
 
       m.part('head');
       const w = twoHanded ? rf(0.85, 1.1) * BATTLEAXE_REACH : rf(0.6, 0.8);
-      const h = twoHanded ? rf(0.8, 1.0) : rf(0.6, 0.75);
+      const h = (twoHanded ? rf(0.8, 1.0) : rf(0.6, 0.75)) * bladeLength;
       const yb = Hh - h - 0.12, t = rf(0.085, 0.13), cf = rf(0.85, 1.2);
       // Head outline around the haft: the cutting edge (z = 0 points) bows OUTWARD in a convex arc
       // between the two blade tips, bulging furthest at mid-height.

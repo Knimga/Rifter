@@ -20,6 +20,7 @@ export const DUNGEON_PRESETS: Record<string, DungeonConfig> = {
     wallColor: '#202020',
     doorObject: 'heavy-door',
     portalObject: 'necrotic-portal',
+    chestObject: 'basic-treasure-chest',
     zones: [
       {
         minRoomSize: 4,
@@ -58,6 +59,7 @@ export const DUNGEON_PRESETS: Record<string, DungeonConfig> = {
     wallColor: '#3d0f0f',
     doorObject: 'heavy-door',
     portalObject: 'fire-portal',
+    chestObject: 'basic-treasure-chest',
     zones: [
       {
         minRoomSize: 5,
@@ -85,7 +87,7 @@ export const DUNGEON_PRESETS: Record<string, DungeonConfig> = {
     bossZone: {
       roomSize: 12,
       corridorWidth: 2,
-      bossGroup: [BurningSpirit,lavaSlime],
+      bossGroup: [BurningSpirit],
     }
   }
 } satisfies Record<string, DungeonConfig>;

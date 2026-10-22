@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import type { Model, PartSpin } from '../../forge/core/types';
+import type { Model, PartSpin, PartTurn } from '../../forge/core/types';
+import { easeAnimation, type AnimationProgress } from '../../forge/core/animate';
 
 /** How much brighter a glowing face is than its color (fully emissive faces, and the glow part of partly emissive ones). */
 const GLOW_BOOST = 1.12;
@@ -90,58 +91,86 @@ function addMeshes(g: THREE.Object3D, model: Model, tris: number[], origin?: rea
   }
 }
 
-/** A spinning part's scene object, and what animateParts needs to turn it. */
-interface SpinObject {
+/** A moving part's scene object (it spins, PartSpin, or animates, PartAnimation), and what posing it needs. */
+interface PartObject {
   obj: THREE.Object3D;
-  spin: PartSpin;
+  part: string;
   pivot: readonly number[];
+  spin?: PartSpin;
+  /** The animations that turn this part, with its turn in each. */
+  turns: { animation: string; turn: PartTurn }[];
 }
 
 /**
  * Model -> Object3D. Origin/orientation conventions are the model's own (see core/facing.ts):
  * set group.rotation.y = yaw and group.position = (gx + .5, 0, gy + .5) for creatures.
- * Parts in model.motion get their own child group (turned by animateParts); everything else is merged
- * into at most 3 meshes. Dispose with disposeObject() (materials are shared and never disposed).
+ * Parts that move (model.motion, model.animations) get their own child group, posed by animateParts;
+ * everything else is merged into at most 3 meshes. Dispose with disposeObject() (materials are shared and
+ * never disposed).
  */
 export function toThree(model: Model): THREE.Group {
   const { part, partNames, pivots, triCount } = model.mesh;
-  const spins = (model.motion ?? []).filter((s) => partNames.includes(s.part));
-  const owner = (t: number) => spins.findIndex((s) => partNames[part[t]] === s.part);
-  const groups: number[][] = Array.from({ length: spins.length + 1 }, () => []);
+  const moving = [...new Set([
+    ...(model.motion ?? []).map((s) => s.part),
+    ...(model.animations ?? []).flatMap((a) => a.turns.map((t) => t.part)),
+  ])].filter((p) => partNames.includes(p));
+  const owner = (t: number) => moving.indexOf(partNames[part[t]]);
+  const groups: number[][] = Array.from({ length: moving.length + 1 }, () => []);
   for (let t = 0; t < triCount; t++) groups[owner(t) + 1].push(t);
 
   const g = new THREE.Group();
   g.name = model.name;
   g.userData.model = { designId: model.designId, seed: model.seed, anchors: model.mesh.anchors, partNames, pivots };
   addMeshes(g, model, groups[0]);
-  const moving: SpinObject[] = spins.map((spin, k) => {
-    const pivot = pivots[spin.part] ?? [0, 0, 0];
+  const parts: PartObject[] = moving.map((name, k) => {
+    const pivot = pivots[name] ?? [0, 0, 0];
     const obj = new THREE.Group();
     obj.matrixAutoUpdate = false;
     obj.matrix.makeTranslation(pivot[0], pivot[1], pivot[2]);
     addMeshes(obj, model, groups[k + 1], pivot);
     g.add(obj);
-    return { obj, spin, pivot };
+    return {
+      obj, part: name, pivot,
+      spin: model.motion?.find((s) => s.part === name),
+      turns: (model.animations ?? []).flatMap((a) => a.turns.filter((t) => t.part === name).map((turn) => ({ animation: a.name, turn }))),
+    };
   });
-  if (moving.length) g.userData.spins = moving;
+  if (parts.length) g.userData.parts = parts;
   return g;
 }
 
-/** True if the object (from toThree) has moving parts, so its renderer should keep animating. */
-export const isAnimated = (o: THREE.Object3D): boolean => !!(o.userData.spins as SpinObject[] | undefined)?.length;
+const partsOf = (o: THREE.Object3D) => (o.userData.parts as PartObject[] | undefined) ?? [];
+
+/** True if the object (from toThree) has parts that keep moving (PartSpin), so its renderer should keep animating. */
+export const hasSpinningParts = (o: THREE.Object3D): boolean => partsOf(o).some((p) => p.spin);
+
+/** True if the object has parts its one-time animations (PartAnimation) move. */
+export const hasAnimations = (o: THREE.Object3D): boolean => partsOf(o).some((p) => p.turns.length);
+
+export type { AnimationProgress };
 
 const AXES = { x: new THREE.Vector3(1, 0, 0), y: new THREE.Vector3(0, 1, 0), z: new THREE.Vector3(0, 0, 1) };
 const m1 = new THREE.Matrix4(), m2 = new THREE.Matrix4();
 
-/** Pose an object's moving parts (PartSpin) at time `sec`. */
-export function animateParts(o: THREE.Object3D, sec: number): void {
-  for (const { obj, spin, pivot } of (o.userData.spins as SpinObject[] | undefined) ?? []) {
-    const f = spin.frame ?? [1, 1, 1];
-    // pivot · frame · rotation · frame⁻¹: the spin happens in the part's round frame
+/**
+ * Pose an object's moving parts: spinning parts (PartSpin) at time `sec`, and each one-time animation's
+ * parts (PartAnimation) at its `progress`.
+ */
+export function animateParts(o: THREE.Object3D, sec: number, progress: AnimationProgress = {}): void {
+  for (const { obj, pivot, spin, turns } of partsOf(o)) {
     obj.matrix.makeTranslation(pivot[0], pivot[1], pivot[2]);
-    obj.matrix.multiply(m1.makeScale(f[0], f[1], f[2]));
-    obj.matrix.multiply(m2.makeRotationAxis(AXES[spin.axis], 2 * Math.PI * spin.turnsPerSec * sec));
-    obj.matrix.multiply(m1.makeScale(1 / f[0], 1 / f[1], 1 / f[2]));
+    // Animation turns first (about the pivot), then any spin within that
+    for (const { animation, turn } of turns) {
+      const k = easeAnimation(progress[animation] ?? 0);
+      if (k > 0) obj.matrix.multiply(m2.makeRotationAxis(AXES[turn.axis], (turn.angleDeg * Math.PI / 180) * k));
+    }
+    if (spin) {
+      const f = spin.frame ?? [1, 1, 1];
+      // pivot · frame · rotation · frame⁻¹: the spin happens in the part's round frame
+      obj.matrix.multiply(m1.makeScale(f[0], f[1], f[2]));
+      obj.matrix.multiply(m2.makeRotationAxis(AXES[spin.axis], 2 * Math.PI * spin.turnsPerSec * sec));
+      obj.matrix.multiply(m1.makeScale(1 / f[0], 1 / f[1], 1 / f[2]));
+    }
     obj.matrixWorldNeedsUpdate = true;
   }
 }
