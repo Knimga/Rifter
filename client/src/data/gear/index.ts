@@ -1,16 +1,16 @@
-import type { ArmorProficiency } from '../classes';
+import type { ArmorProficiency } from '../units/classes';
 
 export * from './types';
-export type { DamageElement } from '../stats';
-export { DAMAGE_ELEMENTS } from '../stats';
-import { DAMAGE_ELEMENTS } from '../stats';
-import type { DamageElement, ActiveBuff } from '../stats';
+export type { DamageElement } from '../units/stats';
+export { DAMAGE_ELEMENTS } from '../units/stats';
+import { DAMAGE_ELEMENTS } from '../units/stats';
+import type { DamageElement, ActiveBuff } from '../units/stats';
 import type { ArmorSlot, WeaponType, GearSlots, Item, ArmorItem, ShieldItem, WeaponItem, Affix, ImplicitDef, Rarity } from './types';
 import { ARMOR_SLOTS, GEAR_SLOTS, PHYSICAL_ELEMENTS } from './types';
 
 import { ARMOR_TYPE_DATA, BASE_ARMOR_MULTIPLIER, ARMOR_SERIES, STARTER_ARMOR_SERIES, armorName } from './armor';
 import { SHIELD_ARMOR_MULTIPLIER, SHIELDS, STARTER_SHIELDS, SHIELD_IMPLICIT } from './offhands';
-import { STARTER_WEAPON_SERIES, WEAPON_SERIES, WEAPON_TYPE_DATA, weaponName } from './weapons';
+import { STARTER_WEAPON_SERIES, WEAPON_SERIES, WEAPON_TYPE_DATA, weaponInvalidAffixes, weaponName } from './weapons';
 import { AFFIX_SLOTS_PER_GROUP, rollAffixes, starvedAffixGroups } from './affixes';
 import { chance, pick } from '../random';
 
@@ -87,7 +87,7 @@ function resolveImplicit(def: ImplicitDef, level: number): Affix {
 // Every item type must be able to fill both affix groups: warn (once, at load) about any whose excluded
 // affixes leave a group too few stats
 for (const [kind, invalid] of [
-  ...Object.entries(WEAPON_TYPE_DATA).map(([t, d]) => [`weapon type '${t}'`, d.invalidAffixes] as const),
+  ...(Object.keys(WEAPON_TYPE_DATA) as WeaponType[]).map(t => [`weapon type '${t}'`, weaponInvalidAffixes(t)] as const),
   ...Object.entries(ARMOR_TYPE_DATA).map(([t, d]) => [`armor/shield type '${t}'`, d.invalidAffixes] as const),
 ]) {
   const starved = starvedAffixGroups(invalid);
@@ -109,7 +109,7 @@ export function generateWeapon(
   return {
     name: weaponName(series, weaponType),
     slot: 'mainhand',
-    ...rollAffixes(data.invalidAffixes, level, affixes, rarityWeights),
+    ...rollAffixes(weaponInvalidAffixes(weaponType), level, affixes, rarityWeights),
     weaponType,
     attackCategory: data.defaultAttackCategory,
     damageElement: element ?? data.defaultDamageElement ?? pick(MAGIC_ELEMENTS),

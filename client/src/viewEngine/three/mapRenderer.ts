@@ -6,6 +6,7 @@ import { GAME_CAMERA } from '../camera';
 import type { BoardLayout } from '../board';
 import { addForgeLights, frameBoard, makeGameCamera, layItemOnGround } from './stage';
 import { animateParts, disposeObject, hasAnimations, hasSpinningParts, toThree, type AnimationProgress } from './toThree';
+import { FogOfWar, type FogInput } from './fog';
 
 type Pos = { x: number; y: number };
 
@@ -35,6 +36,8 @@ export interface MapUnit {
    * looted chest. One newly listed plays; one already listed when the unit appears shows its end pose.
    */
   played?: string[];
+  /** One the fog is seen from (a party member): the fog's clouds drift only while one of these moves. */
+  viewer?: boolean;
 }
 
 interface Entry {
@@ -53,6 +56,8 @@ interface Entry {
   afterMoveYaw?: number;
   /** Its played animations: time into each (ms) and its length; done when t >= ms. */
   anims: Record<string, { t: number; ms: number }>;
+  /** See MapUnit.viewer. */
+  viewer?: boolean;
 }
 
 /** Each played animation's progress (0..1), for animateParts. */
@@ -72,10 +77,11 @@ function syncAnimations(e: Entry, played: string[] = [], snap: boolean): boolean
   return changed;
 }
 
-/** A unit's scene object, standing upright or (loot) laid flat on the floor. */
-function makeObject(u: MapUnit): THREE.Group {
+/** A unit's scene object, standing upright or (loot) laid flat on the floor, with the fog's materials. */
+function makeObject(u: MapUnit, fog: FogOfWar): THREE.Group {
   const obj = toThree(u.model);
   if (u.lying) layItemOnGround(obj, u.model, lootYaw());
+  fog.apply(obj);
   return obj;
 }
 
@@ -101,13 +107,35 @@ export class MapModelRenderer {
   private entries = new Map<string, Entry>();
   private raf = 0;
   private lastFrame = 0;
+  /** Fog of war over everything on the map (fog.ts). */
+  private fog: FogOfWar;
 
-  constructor(private onPlace?: (id: string, at: Pos) => void) {
+  /** Whether it has drawn a frame yet (onFirstFrame fires once, after it). */
+  private drawn = false;
+
+  /**
+   * `onPlace`: every change of a unit's drawn position (DOM overlays follow it). `onFirstFrame`: once, after the
+   * first frame is drawn (models and fog on screen), so the page can stop hiding the map.
+   */
+  constructor(private onPlace?: (id: string, at: Pos) => void, private onFirstFrame?: () => void) {
     this.r = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     this.r.setPixelRatio(window.devicePixelRatio);
     this.r.setClearColor(0x000000, 0);
     this.canvas = this.r.domElement;
     addForgeLights(this.scene, GAME_CAMERA);
+    // The fog's color: the palette's (index.css --rift-fog)
+    const fogColor = getComputedStyle(document.documentElement).getPropertyValue('--rift-fog').trim() || '#050608';
+    this.fog = new FogOfWar(fogColor);
+    this.scene.add(this.fog.sheet);
+  }
+
+  /**
+   * The fog of war (null: none, e.g. the Sanctum). Tiles that change fade in or out. Its clouds drift only
+   * while a party member (a `viewer` unit) moves; other redraws (an ability, a chest opening) leave them still.
+   */
+  setFog(fog: FogInput | null): void {
+    this.fog.set(fog);
+    this.requestFrame();
   }
 
   /** Size the canvas and camera to a board's box. */
@@ -133,7 +161,7 @@ export class MapModelRenderer {
         // Same unit, rebuilt model (e.g. new gear, or a design update in dev): swap the mesh, keep its state
         this.scene.remove(e.obj);
         disposeObject(e.obj);
-        e = { ...e, model: u.model, obj: makeObject(u) };
+        e = { ...e, model: u.model, obj: makeObject(u, this.fog) };
         this.scene.add(e.obj);
         this.entries.set(u.id, e);
         animateParts(e.obj, 0, progressOf(e));
@@ -142,7 +170,7 @@ export class MapModelRenderer {
       if (!e) {
         // A new unit adopts any existing aim without turning to it (a remount never replays an old attack)
         const yaw = u.lying ? lootYaw() : (u.facing ?? 0);
-        e = { model: u.model, obj: makeObject(u), pos: u.pos, at: { ...u.pos }, yaw, targetYaw: yaw, aimSeq: u.aim?.seq, anims: {} };
+        e = { model: u.model, obj: makeObject(u, this.fog), pos: u.pos, at: { ...u.pos }, yaw, targetYaw: yaw, aimSeq: u.aim?.seq, anims: {}, viewer: u.viewer };
         this.scene.add(e.obj);
         this.entries.set(u.id, e);
         this.place(u.id, e);
@@ -199,7 +227,10 @@ export class MapModelRenderer {
     this.raf = 0;
     const dt = this.lastFrame ? Math.min(now - this.lastFrame, 50) : 16;
     let animating = false;
+    // A viewer (party member) turning toward a move or gliding: the fog's clouds drift with it
+    let viewerMoving = false;
     for (const [id, e] of this.entries) {
+      if (e.viewer && e.move) viewerMoving = true;
       // Moving parts (e.g. a portal's swirl) keep the loop running while the unit is on the map
       // Spinning parts keep the loop running while the unit is on the map; a one-time animation while it plays
       const playing = Object.values(e.anims).some((a) => a.t < a.ms);
@@ -230,7 +261,10 @@ export class MapModelRenderer {
       }
       e.obj.rotation.y = e.yaw;
     }
+    // The fog: tiles still fading in or out, and its drift (only while a party member moves)
+    if (this.fog.step(now, viewerMoving)) animating = true;
     this.r.render(this.scene, this.cam);
+    if (!this.drawn) { this.drawn = true; this.onFirstFrame?.(); }
     if (animating) {
       this.lastFrame = now;
       this.raf = requestAnimationFrame(this.frame);
@@ -241,6 +275,7 @@ export class MapModelRenderer {
 
   dispose(): void {
     cancelAnimationFrame(this.raf);
+    this.fog.dispose();
     for (const e of this.entries.values()) disposeObject(e.obj);
     this.entries.clear();
     this.r.dispose();

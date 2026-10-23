@@ -1,4 +1,4 @@
-import { ENEMY_CLASSES, BOSS_CLASSES } from './enemies';
+import { ENEMY_CLASSES, BOSS_CLASSES } from '../units/enemies';
 import type { DungeonConfig } from './dungeonGen';
 
 const skelly = ENEMY_CLASSES.find(c => c.id === 'skeleton')!;
@@ -28,9 +28,9 @@ export const DUNGEON_PRESETS: Record<string, DungeonConfig> = {
         splitDepth: 3,
         corridorWidth: 2,
         enemyGroups: [
-          [skelly, zombie],
+          [skelly, skelly, zombie],
           [skelly, skelly, skelly],
-          [zombie, zombie],
+          [zombie, zombie, skelly],
         ],
       },
       {

@@ -1,10 +1,10 @@
-// Model for Occultist (data/classes.ts › occultist). Holds the member's weapon (src/forge/equip.ts): a
+// Model for Occultist (data/units/classes.ts › occultist). Holds the member's weapon (src/forge/equip.ts): a
 // wand, held in the standard pose like the Knight's sword.
 // Identical to the Arcanist (robes fitted at the waist, bell sleeves, hood pushed back, spiky hair) except:
 // black hair, tawny skin, and a muted dark purple robe.
 import type { Design } from '../core/types';
 import { CHARACTER_HEIGHT } from '../core/stage-config';
-import { casterRobe, classEntry, classHold } from '../designs/_character';
+import { casterRobe, classEntry, classHold } from './_character';
 
 const { id, label, source } = classEntry('occultist');
 

@@ -1,6 +1,6 @@
 // Offhand data: shields (one per armor type, from that type's armor data: ARMOR_TYPE_DATA). Later: foci for
 // casters, quivers for archers.
-import type { ArmorProficiency } from '../classes';
+import type { ArmorProficiency } from '../units/classes';
 import type { ModelLink } from '../../forge/core/types';
 import type { ImplicitDef } from './types';
 

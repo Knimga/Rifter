@@ -1,12 +1,12 @@
-// Experience: one pool for the whole party. Every enemy that dies (from a hit, a DoT tick, anything) gives
+// Experience: one pool for the whole party. Every enemy that dies (from a hit, a DoT tick, anything: useEnemyDeaths) gives
 // everyone its XP, once, whoever is alive. Each level gained gives every member points to spend. The XP strip
 // shows each award as "+N XP"; awards while the last one is still showing add up into it (and restart its fade).
-import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react';
+import { useCallback, useRef, useState, type MutableRefObject } from 'react';
 import { COMBAT_TEXT_COLOR } from '../data/constants';
-import type { Pos } from '../data/dungeonHelpers';
-import type { EnemyInstance } from '../data/enemies';
-import { withLevelUps, type PartyMemberConfig } from '../data/party';
-import { gainXp, killXp, type PartyProgress } from '../data/xp';
+import type { Pos } from '../data/world/grid';
+import type { EnemyInstance } from '../data/units/enemies';
+import { withLevelUps, type PartyMemberConfig } from '../data/units/party';
+import { gainXp, killXp, type PartyProgress } from '../data/units/xp';
 import type { XpGain } from '../components/hud/XpBar';
 import type { SpawnFloat } from './useFloatingText';
 import { useLatest } from './useLatest';
@@ -14,9 +14,7 @@ import { useLatest } from './useLatest';
 /** How long an XP award stays on the strip; another award within it adds up into the same "+N XP". */
 const XP_GAIN_SHOWN_MS = 6000;
 
-export function useExperience({ enemies, progress, setProgress, party, setParty, spawnFloat, leaderPosRef }: {
-  /** Every enemy (all zones): a dead one gives its XP, once. */
-  enemies: EnemyInstance[];
+export function useExperience({ progress, setProgress, party, setParty, spawnFloat, leaderPosRef }: {
   progress: PartyProgress;
   setProgress: (progress: PartyProgress) => void;
   party: PartyMemberConfig[];
@@ -26,8 +24,6 @@ export function useExperience({ enemies, progress, setProgress, party, setParty,
   leaderPosRef: MutableRefObject<Pos | undefined>;
 }) {
   const [xpGain, setXpGain] = useState<(XpGain & { at: number }) | null>(null);
-  // Enemies that have given their XP (cleared with resetAwarded: enemy ids repeat between dungeons)
-  const awarded = useRef(new Set<string>());
   // Updated at once by addXp, so two awards in one render add up
   const progressRef = useRef(progress);
   progressRef.current = progress;
@@ -49,19 +45,11 @@ export function useExperience({ enemies, progress, setProgress, party, setParty,
     }
   }, [setProgress, setParty, spawnFloat, partyRef, leaderPosRef]);
 
-  // Each enemy that has died gives its XP, once
-  useEffect(() => {
-    let gained = 0;
-    for (const e of enemies) {
-      if (e.currentHp > 0 || awarded.current.has(e.id)) continue;
-      awarded.current.add(e.id);
-      gained += killXp(e.level, e.classData.xpMultiplier, progressRef.current.level);
-    }
+  /** The XP for enemies just killed (useEnemyDeaths hands each one over once). */
+  const awardKills = useCallback((dead: EnemyInstance[]) => {
+    const gained = dead.reduce((sum, e) => sum + killXp(e.level, e.classData.xpMultiplier ?? 0, progressRef.current.level), 0);
     if (gained > 0) addXp(gained);
-  }, [enemies, addXp]);
+  }, [addXp]);
 
-  /** A new dungeon: its enemies have given nothing yet (ids repeat between dungeons). */
-  const resetAwarded = useCallback(() => awarded.current.clear(), []);
-
-  return { xpGain, addXp, resetAwarded };
+  return { xpGain, addXp, awardKills };
 }

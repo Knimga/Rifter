@@ -1,18 +1,20 @@
-import type { Ability, Passive, ScalingPassive } from './classes';
+import { warnIgnoredEffects, type Ability } from '../combat/abilities';
+import type { Passive, ScalingPassive } from './classes';
 import type { AttributeKey, SkillKey, ActiveBuff, ActiveHot, ActiveDot } from './stats';
 import { ATTRIBUTE_KEYS, ATTRIBUTE_POINTS_PER_LEVEL, calculateStats, recomputeStats } from './stats';
 import type { Stats } from './stats';
-import type { ModelLink } from '../forge/core/types';
-import type { Pos } from './dungeonHelpers';
+import type { ModelLink } from '../../forge/core/types';
+import type { Pos } from '../world/grid';
+import { pickWeighted } from '../random';
 
-// ─── Enemy Class Definition ───────────────────────────────────────────────────
+// ─── Creature Class Definition ────────────────────────────────────────────────
 //
-// Enemy classes work like player classes but are not selectable at character select.
-// They define a name, a model, innate attribute bonuses, armor scaling,
-// high/low attribute preferences for auto point-buy, and abilities.
+// Creature classes (enemies, and allies summoned by the party: data/units/summons.ts) work like player classes
+// but are not selectable at character select. They define a name, a model, innate attribute bonuses,
+// armor scaling, high/low attribute preferences for auto point-buy, and abilities.
 // All attacks are mpCost:0 abilities — no separate weapon field.
 
-export interface EnemyClassData {
+export interface CreatureClassData {
   id: string;
   name: string;
 
@@ -38,18 +40,36 @@ export interface EnemyClassData {
   passives?: Record<string, Passive>;
   scalingPassives?: ScalingPassive[];
 
-  dropChance?: number;  // probability of dropping an item on death (default: LOOT_DROP_CHANCE)
-  xpMultiplier: number; // XP worth relative to a standard enemy of its level (data/xp.ts killXp): tougher = more, bosses ~6
-
-  // Forge design this enemy renders as; each enemy instance gets its own look (seeded from its id)
+  // Forge design this creature renders as; each instance gets its own look (seeded from its id)
   model: ModelLink;
+
+  // Hostile creatures only (EnemyClassData); a summon drops nothing and is worth no XP
+  dropChance?: number;   // probability of dropping an item on death (default: LOOT_DROP_CHANCE)
+  xpMultiplier?: number; // XP worth relative to a standard enemy of its level (data/units/xp.ts killXp): tougher = more, bosses ~6
+}
+
+/** A hostile creature's class: one the party fights (and that drops loot and gives XP). */
+export interface EnemyClassData extends CreatureClassData {
+  xpMultiplier: number;
 }
 
 // ─── Enemy Instance ───────────────────────────────────────────────────────────
 
+/** A summoned creature fighting on the party's side (absent on hostile enemies). */
+export interface AllyInfo {
+  ownerIdx: number;   // the party member who summoned it
+  ability: string;    // the ability that summoned it (casting it again replaces it)
+  roundsLeft: number; // it vanishes when this runs out (counted down at the top of each round)
+}
+
+/**
+ * A creature on the map: a hostile enemy, or (with `ally`) a creature summoned by the party. Both share
+ * stats, ticks, the turn order, drawing and the AI (enemyAI.ts); `isHostile` tells them apart.
+ */
 export interface EnemyInstance {
   id: string;
-  classData: EnemyClassData;        // template — name, model, abilities
+  classData: CreatureClassData;     // template — name, model, abilities
+  ally?: AllyInfo;
   level: number;                    // the level this enemy was generated at
   pointsSpent: Record<AttributeKey, number>;  // auto-generated, stored for buff recompute
   buffs: ActiveBuff[];
@@ -84,15 +104,7 @@ function generateEnemyAttributePoints(
 
   // Weighted random allocation
   const weight = (a: AttributeKey) => highAttributes.includes(a) ? 3 : lowAttributes.includes(a) ? 0.5 : 1;
-  const totalWeight = ATTRIBUTE_KEYS.reduce((sum, a) => sum + weight(a), 0);
-
-  for (let i = 0; i < total; i++) {
-    let r = Math.random() * totalWeight;
-    for (const attr of ATTRIBUTE_KEYS) {
-      r -= weight(attr);
-      if (r <= 0) { alloc[attr]++; break; }
-    }
-  }
+  for (let i = 0; i < total; i++) alloc[pickWeighted(ATTRIBUTE_KEYS, weight)]++;
 
   // Fix constraint violations: enforce min(high) > max(neutral) > max(low)
   let changed = true;
@@ -131,7 +143,7 @@ function generateEnemyAttributePoints(
  * Called by spawnDungeonEnemies in dungeonGen.ts.
  */
 export function generateEnemyInstance(
-  classData: EnemyClassData,
+  classData: CreatureClassData,
   level: number,
   id: string,
   pos: Pos,
@@ -158,6 +170,12 @@ export function generateEnemyInstance(
     dots: [],
   };
 }
+
+/** A creature the party fights (not one it summoned). */
+export const isHostile = (e: EnemyInstance) => !e.ally;
+
+/** A creature summoned by the party. */
+export const isSummon = (e: EnemyInstance): e is EnemyInstance & { ally: AllyInfo } => !!e.ally;
 
 // ─── Buff Helpers ─────────────────────────────────────────────────────────────
 
@@ -243,7 +261,7 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
     baseArmor: 0,
     armorPerLevel: 4,
     passives: {
-      fireResistance: { name: "Flameborn", flat: 20 },
+      fireResistance: { name: "Flameborn", flat: 30 },
       piercingResistance: { name: "Slime Body", flat: 20 },
       slashingResistance: { name: "Slime Body", flat: 20 }
     },
@@ -289,7 +307,7 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
     baseArmor: 10,
     armorPerLevel: 4,
     passives: {
-      fireResistance: { name: 'Flameborn', flat: 20 },
+      fireResistance: { name: 'Flameborn', flat: 30 },
       glancingBlow: { name: 'Tough Hide', flat: 5 }
     },
     abilities: [
@@ -308,7 +326,7 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
       }
     ],
     dropChance: 0.3,
-    xpMultiplier: 0.9,
+    xpMultiplier: 1,
     model: 'creature.hellhound'
   },
   {
@@ -321,7 +339,7 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
     baseArmor: 20,
     armorPerLevel: 4,
     passives: {
-      fireResistance: { name: 'Flameborn', flat: 20 },
+      fireResistance: { name: 'Flameborn', flat: 30 },
       meleeHit: { name: 'Clumsy', flat: -10 }
     },
     abilities: [
@@ -403,7 +421,7 @@ export const BOSS_CLASSES: EnemyClassData[] = [
   {
     id: 'burning-spirit',
     name: 'Burning Spirit',
-    attributes: { mind: 6, spirit: 6 },
+    attributes: { toughness: 4, mind: 6, spirit: 6 },
     highAttributes: ['mind', 'spirit'],
     lowAttributes: ['speed', 'finesse'],
     baseHp: 25,
@@ -444,4 +462,7 @@ export const BOSS_CLASSES: EnemyClassData[] = [
     model: 'creature.burning-spirit',
   }
 ];
+
+// Effects an ability would silently ignore: warned at load
+for (const c of [...ENEMY_CLASSES, ...BOSS_CLASSES]) warnIgnoredEffects(`enemies › ${c.id}`, c.abilities);
 

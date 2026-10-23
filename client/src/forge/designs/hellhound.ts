@@ -9,7 +9,7 @@ import { hslRGB, mixC, mulC, type RGB, type Vec3 } from '../core/vec';
 // Seeds vary the coat, the spots, the build and the bristles' heights and colors.
 const design: Design = {
   id: 'creature.hellhound',
-  source: { table: 'enemies', key: 'hellhound' }, // data/enemies.ts › hellhound
+  source: { table: 'enemies', key: 'hellhound' }, // data/units/enemies.ts › hellhound
   category: 'creature',
   label: 'Hellhound',
   fit: { kind: 'standing', height: 1.0, maxRadius: 0.62 }, // long body: the radius is the limiting fit

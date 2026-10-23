@@ -1,14 +1,17 @@
 import { useMemo, lazy, Suspense } from 'react';
-import type { AreaType, TargetType } from '../data/classes';
-import type { ActiveBuff, ActiveHot, ActiveDot } from '../data/stats';
-import type { EnemyInstance } from '../data/enemies';
-import type { DungeonChest, ZoneData } from '../data/dungeonGen';
+import type { AreaType, TargetType } from '../data/combat/abilities';
+import type { ActiveBuff, ActiveHot, ActiveDot } from '../data/units/stats';
+import type { EnemyInstance } from '../data/units/enemies';
+import type { DungeonChest, ZoneData } from '../data/world/dungeonGen';
+import type { FogState } from '../hooks/useFogOfWar';
 import { yawFromGridMove } from '../forge/core/facing';
-import { affectedKeys, chebyshev, hasLineOfSight, isAdjacent, isArea, posKey, samePos, type Pos } from '../data/dungeonHelpers';
+import { affectedKeys, isArea } from '../data/combat/areas';
+import { chebyshev, hasLineOfSight, isAdjacent, posKey, samePos, type Pos } from '../data/world/grid';
 import type { Item } from '../data/gear';
+import { unitKey } from '../data/combat/abilityExecution';
 import FloatingCombatText, { type FloatingText } from './FloatingCombatText';
 import { MoveCostPips } from './MoveLine';
-import { gameObjectGlow, gameObjectModel } from '../data/gameObjects';
+import { gameObjectGlow, gameObjectModel } from '../data/world/gameObjects';
 import { Board, FloorGrid, FloorTile, MoveLineOverlay, TileHighlight, UprightAt, UsableGlow, facingOpenSide, toMapMember, useBoard, useHoveredTile, useStableHandler, type PartyTokenData, TILE_HIGHLIGHT } from './mapParts';
 import UnitStatus, { statusMarkers } from './hud/UnitStatus';
 import type { MapLoot, MapObject, UnitAim } from './ModelLayer';
@@ -40,8 +43,11 @@ interface Props {
   onOpenChest: (chestId: string) => void;
   activeTarget: TargetType | null;  // target type of the selected ability (null = none selected)
   activeAbilityArea?: AreaType;
-  /** Whether the selected ability's area helps (heals, buffs) or harms: its tiles show green or red. */
-  areaTone: 'help' | 'harm';
+  /**
+   * Whether the selected ability's area helps (heals, buffs) or harms: its tiles show green or red. 'mixed'
+   * (it harms enemies and helps allies): tiles with an enemy on them red, the rest green.
+   */
+  areaTone: 'help' | 'harm' | 'mixed';
   actionRange: number;
   onAbilityUse: (pos: Pos) => void;
   onAbilityDeselect: () => void;
@@ -63,20 +69,33 @@ interface Props {
   doorObject: string;
   portalObject: string;
   enemyAoePreviewTiles?: Set<string>;
-  enemyTargetPartyIdx: number | null;
+  /** The unit (unitKey: a party member or summoned ally) a creature is about to hit; null when none. */
+  enemyTargetKey: string | null;
+  /** Tiles the selected 'tile' ability can be aimed at (GameScreen tileTargets); null when it isn't one. */
+  tileTargets?: Set<string> | null;
   droppedItems?: Record<string, Item[]>;
   onLootClick?: (pos: Pos) => void;
   /** Where each unit last aimed an ability; its model turns to face it. */
   aims?: Record<string, UnitAim>;
+  /** The 3D layer has drawn its first frame (ModelLayer onReady): the page stops hiding the map. */
+  onReady?: () => void;
   /** Combatant id ('player-N' or an enemy id) whose tile to highlight (a hovered turn-order pill). */
   highlightUnitId?: string | null;
+  /**
+   * Fog of war (null: none). The 3D layer draws it over the floor and every model; the map's own HTML (loot
+   * glows, pile counts, floating text) shows only on tiles the party knows. `enemies` are already only those in sight.
+   */
+  fog: FogState | null;
 }
 
-export default function DungeonMap({ playerPos, activeMoverPos, party, moveTargets, moveApCost, onMove, onLocationChange, onDoorClick, chests, emptiedChests, onOpenChest, activeTarget, activeAbilityArea, areaTone, actionRange, onAbilityUse, onAbilityDeselect, onMemberSelect, enemies, inCombat, isPlayerTurn, activeCombatantId, floatingTexts, onFloatingTextComplete, zone, portalPos, partyBuffs, partyHots, partyDots, floorColor, wallColor, doorObject, portalObject, enemyAoePreviewTiles, enemyTargetPartyIdx, droppedItems = {}, onLootClick, aims, highlightUnitId = null }: Props) {
+export default function DungeonMap({ playerPos, activeMoverPos, party, moveTargets, moveApCost, onMove, onLocationChange, onDoorClick, chests, emptiedChests, onOpenChest, activeTarget, activeAbilityArea, areaTone, actionRange, onAbilityUse, onAbilityDeselect, onMemberSelect, enemies, inCombat, isPlayerTurn, activeCombatantId, floatingTexts, onFloatingTextComplete, zone, portalPos, partyBuffs, partyHots, partyDots, floorColor, wallColor, doorObject, portalObject, enemyAoePreviewTiles, enemyTargetKey, tileTargets = null, droppedItems = {}, onLootClick, aims, highlightUnitId = null, fog, onReady }: Props) {
   const { width, height, floors, doors } = zone;
   const hover = useHoveredTile();
   const hoveredTile = hover.hovered;
   const board = useBoard(width, height);
+  // Fog of war: tiles the party has seen at all (now or before), and tiles it sees now (no fog: everything)
+  const isKnown = (key: string) => !fog || fog.visible.has(key) || fog.explored.has(key);
+  const isSeenNow = (key: string) => !fog || fog.visible.has(key);
 
   const isAoE = isArea({ area: activeAbilityArea });
   const canAct = !inCombat || isPlayerTurn;
@@ -149,14 +168,18 @@ export default function DungeonMap({ playerPos, activeMoverPos, party, moveTarge
 
     // With ability active: route to attack handler
     if (activeTarget) {
-      if (activeTarget === 'self') onAbilityUse(p);               // fires only on own tile; handler deselects elsewhere
-      else if (activeTarget === 'ally') member ? onAbilityUse(p) : onAbilityDeselect();
-      else if (isAoE || enemy) onAbilityUse(p);
+      // Fires on a valid target for the ability's kind, else deselects ('self' fires only on the mover's own
+      // tile: the handler deselects elsewhere)
+      const valid = activeTarget === 'self' ? true
+        : activeTarget === 'ally' ? !!member || !!enemy?.ally
+        : activeTarget === 'tile' ? !!tileTargets?.has(key)
+        : isAoE || (!!enemy && !enemy.ally);
+      if (valid) onAbilityUse(p);
       else onAbilityDeselect();
       return;
     }
 
-    if (enemy) return; // can't walk onto enemies
+    if (enemy) return; // can't walk onto enemies (or stop on a summoned ally)
 
     // Loot pickup: click adjacent dropped item out of combat
     if (!inCombat && droppedItems[key]?.length && isAdjacent(playerPos, p)) {
@@ -184,22 +207,28 @@ export default function DungeonMap({ playerPos, activeMoverPos, party, moveTarge
     const member = memberByKey.get(key);
     const enemy = floor && !member ? enemyByKey.get(key) : undefined;
     const door = doorByKey.get(key);
-    const targetable = enemy && activeTarget === 'enemy' && !isAoE && inCombat && isPlayerTurn && inRangeWithLOS(enemy.pos);
+    const targetable = enemy && !enemy.ally && activeTarget === 'enemy' && !isAoE && inCombat && isPlayerTurn && inRangeWithLOS(enemy.pos);
+    // A summoned ally takes the party's helpful abilities
+    const isAllyUnit = !!member || !!enemy?.ally;
     const isMoverTile = samePos(p, activeMoverPos);
     const isSelfTile = activeTarget === 'self' && inCombat && isPlayerTurn && isMoverTile;
     const isDoorAdjacent = !!door && isAdjacent(playerPos, p);
     const chest = chestByKey.get(key);
     const isChestUsable = !!chest && !inCombat && !emptiedChests.has(chest.id) && isAdjacent(playerPos, p);
-    const tileItems = floor ? droppedItems[key] : undefined;
+    const tileItems = floor && isKnown(key) ? droppedItems[key] : undefined;
     const isLootAdjacent = !inCombat && !!tileItems?.length && isAdjacent(playerPos, p);
-    const isEnemyTargeted = enemyTargetPartyIdx !== null && member?.partyIndex === enemyTargetPartyIdx;
+    const unitOnTile = member ? unitKey({ side: 'party', idx: member.partyIndex }) : enemy?.id;
+    const isEnemyTargeted = enemyTargetKey !== null && unitOnTile === enemyTargetKey;
+    // A 'tile' ability: every tile it can be aimed at, softly; the hovered one as the target
+    const isTileTarget = activeTarget === 'tile' && isPlayerTurn && !!tileTargets?.has(key);
 
     // Overlay on the tile (the floor stays visible under its muted tint)
     const highlight: keyof typeof TILE_HIGHLIGHT | null =
       enemy && enemy.id === activeCombatantId ? 'acting'
-      : isSelfTile || (activeTarget === 'ally' && member) ? 'ally'
+      : isSelfTile || (activeTarget === 'ally' && isAllyUnit) || (isTileTarget && hover.isHovered(p)) ? 'ally'
       : targetable || isEnemyTargeted ? 'enemy'
-      : aoeTiles.has(key) ? (areaTone === 'help' ? 'areaHelp' : 'areaHarm')
+      : isTileTarget ? 'areaHelp'
+      : aoeTiles.has(key) ? (areaTone === 'help' || (areaTone === 'mixed' && !(enemy && !enemy.ally)) ? 'areaHelp' : 'areaHarm')
       : inCombat && isPlayerTurn && isMoverTile ? 'mover'
       : null;
     const isHighlightedUnit = !!highlightUnitId && (enemy?.id === highlightUnitId || (!!member && `player-${member.partyIndex}` === highlightUnitId));
@@ -243,7 +272,7 @@ export default function DungeonMap({ playerPos, activeMoverPos, party, moveTarge
     <Board board={board} floor={floor}>
       <Suspense fallback={null}>
         {/* Keyed by zone: entering another zone places every model fresh instead of gliding it across */}
-        <ModelLayer key={zone.id} board={board} party={modelParty} enemies={modelEnemies} loot={modelLoot} objects={mapObjects} renderEnemyOverlay={enemyOverlay} aims={aims} />
+        <ModelLayer key={zone.id} board={board} party={modelParty} enemies={modelEnemies} loot={modelLoot} objects={mapObjects} renderEnemyOverlay={enemyOverlay} aims={aims} fog={fog} onReady={onReady} />
       </Suspense>
 
       {/* The AP the hovered move costs, where its move line ends */}
@@ -254,7 +283,7 @@ export default function DungeonMap({ playerPos, activeMoverPos, party, moveTarge
       )}
 
       {/* How many items a pile holds, when more than one */}
-      {Object.entries(droppedItems).filter(([, items]) => items.length > 1).map(([key, items]) => {
+      {Object.entries(droppedItems).filter(([key, items]) => items.length > 1 && isKnown(key)).map(([key, items]) => {
         const [x, y] = key.split(',').map(Number);
         return (
           <UprightAt key={key} board={board} x={x} y={y} height={0.2} className="z-10">
@@ -266,7 +295,7 @@ export default function DungeonMap({ playerPos, activeMoverPos, party, moveTarge
       })}
 
       {/* Floating combat text */}
-      {floatingTexts.map(ft => (
+      {floatingTexts.filter(ft => isSeenNow(posKey({ x: ft.gridX, y: ft.gridY }))).map(ft => (
         <FloatingCombatText key={ft.id} ft={ft} at={board.toScreen(ft.gridX + 0.5, ft.gridY + 0.5, 0.5)} onComplete={onFloatingTextComplete} />
       ))}
     </Board>

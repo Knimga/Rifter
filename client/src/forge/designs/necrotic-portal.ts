@@ -1,5 +1,5 @@
-// Model for Necrotic Portal (data/gameObjects.ts › necrotic-portal).
-import { portalDesign } from '../designs/_portal';
+// Model for Necrotic Portal (data/world/gameObjects.ts › necrotic-portal).
+import { portalDesign } from './_portal';
 
 // Pale, ghostly necrotic green (washed toward white-grey rather than saturated)
 export default portalDesign('necrotic-portal', {

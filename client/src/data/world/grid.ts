@@ -1,6 +1,5 @@
-import type { AreaType } from './classes';
-
-// ─── Shared grid geometry utilities ───────────────────────────────────────────
+// Grid geometry, shared by everything on a map: tiles (Pos), distance, line of sight, and walking (one set of
+// step rules for party members and creatures alike).
 
 export type Pos = { x: number; y: number };
 
@@ -8,15 +7,6 @@ export type Pos = { x: number; y: number };
 export const posKey = (p: Pos) => `${p.x},${p.y}`;
 
 export const samePos = (a: Pos, b: Pos) => a.x === b.x && a.y === b.y;
-
-/** Scale each RGB channel of a hex color by `factor` (e.g. 1.4 to brighten). */
-export function brightenHex(hex: string, factor: number): string {
-  const n = parseInt(hex.slice(1), 16);
-  const r = Math.min(255, Math.round(((n >> 16) & 0xff) * factor));
-  const g = Math.min(255, Math.round(((n >> 8) & 0xff) * factor));
-  const b = Math.min(255, Math.round((n & 0xff) * factor));
-  return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
-}
 
 export function chebyshev(a: Pos, b: Pos): number {
   return Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y));
@@ -26,7 +16,7 @@ export function chebyshev(a: Pos, b: Pos): number {
 export const isAdjacent = (a: Pos, b: Pos) => chebyshev(a, b) === 1;
 
 /** Bresenham line from `a` to `b`, excluding `a`, including `b`. */
-function bresenham(a: Pos, b: Pos): Pos[] {
+export function bresenham(a: Pos, b: Pos): Pos[] {
   const tiles: Pos[] = [];
   let { x, y } = a;
   const dx = Math.abs(b.x - x);
@@ -83,6 +73,15 @@ export function canStep(from: Pos, dx: number, dy: number, isWalkable: (p: Pos) 
 export interface Reach {
   pos: Pos;
   steps: number;
+  /** The tile it is stepped onto from, on a shortest path (none for the start). */
+  prev?: Pos;
+}
+
+/** The walk to `to` (start tile first, `to` last) found by reachableTiles; empty if it wasn't reached. */
+export function pathTo(reach: Map<string, Reach>, to: Pos): Pos[] {
+  const path: Pos[] = [];
+  for (let r = reach.get(posKey(to)); r; r = r.prev && reach.get(posKey(r.prev))) path.push(r.pos);
+  return path.reverse();
 }
 
 /**
@@ -100,73 +99,10 @@ export function reachableTiles(from: Pos, maxSteps: number, isWalkable: (p: Pos)
       const next = { x: cur.pos.x + dx, y: cur.pos.y + dy };
       const key = posKey(next);
       if (reach.has(key) || isBlocked(next) || !canStep(cur.pos, dx, dy, isWalkable)) continue;
-      const r = { pos: next, steps: cur.steps + 1 };
+      const r = { pos: next, steps: cur.steps + 1, prev: cur.pos };
       reach.set(key, r);
       queue.push(r);
     }
   }
   return reach;
 }
-
-/**
- * Where a party member may move this turn: tile key -> steps it costs. Unwalkable tiles (walls, and
- * tiles a game object stands on, like the portal: see isWalkable) and enemies block the way; the mover
- * may pass other party members but can't stop on anyone.
- */
-export function partyMoveTargets(
-  from: Pos,
-  movement: number,
-  isWalkable: (p: Pos) => boolean,
-  isEnemy: (p: Pos) => boolean,
-  isOccupied: (p: Pos) => boolean,
-): Map<string, number> {
-  const out = new Map<string, number>();
-  for (const [key, r] of reachableTiles(from, movement, isWalkable, isEnemy)) {
-    if (r.steps > 0 && !isOccupied(r.pos)) out.set(key, r.steps);
-  }
-  return out;
-}
-
-// ─── Area-of-effect tile computation ──────────────────────────────────────────
-
-/** Whether an ability hits an area (blast, line) rather than one unit. */
-export const isArea = (a: { area?: AreaType }): boolean => !!a.area && a.area !== 'single';
-
-/**
- * A burst from self: an area ability with range 0, so it can only be aimed at the caster's own tile and hits
- * the area around it (e.g. Cleave, Flame Belch: everything adjacent).
- */
-export const isSelfBurst = (a: { area?: AreaType; range: number }): boolean => isArea(a) && a.range === 0;
-
-/** Returns the floor tiles affected by an area ability aimed at `target`. */
-export function getAffectedTiles(
-  caster: Pos,
-  target: Pos,
-  area: AreaType | undefined,
-  floors: Set<string>,
-): Pos[] {
-  if (area === 'blast1' || area === 'blast2') {
-    const radius = area === 'blast1' ? 1 : 2;
-    const tiles: Pos[] = [];
-    for (let dx = -radius; dx <= radius; dx++) {
-      for (let dy = -radius; dy <= radius; dy++) {
-        const p = { x: target.x + dx, y: target.y + dy };
-        if (floors.has(posKey(p))) tiles.push(p);
-      }
-    }
-    return tiles;
-  }
-
-  if (area === 'line') {
-    // Line from the caster toward the target; a wall stops it
-    const line = bresenham(caster, target);
-    const firstWall = line.findIndex(p => !floors.has(posKey(p)));
-    return firstWall === -1 ? line : line.slice(0, firstWall);
-  }
-
-  return [target];
-}
-
-/** Keys of the tiles an ability aimed at `target` affects — for "which units are hit" lookups. */
-export const affectedKeys = (caster: Pos, target: Pos, area: AreaType | undefined, floors: Set<string>) =>
-  new Set(getAffectedTiles(caster, target, area, floors).map(posKey));

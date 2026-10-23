@@ -1,10 +1,10 @@
-import type { EnemyInstance } from './enemies';
-import { withEnemyBuffs } from './enemies';
-import type { ActiveDot, ActiveHot, Stats } from './stats';
-import type { Pos } from './dungeonHelpers';
+import type { EnemyInstance } from '../units/enemies';
+import { withEnemyBuffs } from '../units/enemies';
+import type { ActiveDot, ActiveHot, Stats } from '../units/stats';
+import type { Pos } from '../world/grid';
 import { tickDots, tickDurations, tickHots, type ActionOutcome } from './abilityExecution';
-import { COMBAT_TEXT_COLOR } from './constants';
-import { randInt } from './random';
+import { COMBAT_TEXT_COLOR } from '../constants';
+import { randInt } from '../random';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -14,6 +14,7 @@ export interface Combatant {
   initiativeRoll: number;
   isPlayer: boolean;
   partyIndex?: number;  // 0|1|2 for party members; absent for enemies
+  isAlly?: boolean;     // a creature summoned by the party (not a player: the AI runs it)
 }
 
 export interface CombatState {
@@ -25,7 +26,8 @@ export interface CombatState {
   apSpent: number;
   /** Tiles the current combatant has paid for (1 AP buys `movement` of them) and not walked yet this turn. */
   paidTiles: number;
-  partyThreat: number[];  // indexed by partyIndex; resets to 0 each combat
+  /** Threat of each party-side unit (party members, summoned allies), by threatKey; none = 0. Resets each combat. */
+  threat: Record<string, number>;
 }
 
 // ─── Functions ───────────────────────────────────────────────────────────────
@@ -66,7 +68,7 @@ export function startCombat(
     round: 1,
     apSpent: 0,
     paidTiles: 0,
-    partyThreat: partyMembers.map(() => 0),
+    threat: {},
   };
 }
 
@@ -78,14 +80,18 @@ export function startCombat(
 
 /** A unit that starts its turn with no AP (stunned) loses it: this shows over it (for STUNNED_PAUSE_MS) before the next turn. */
 export const stunnedOutcome = (pos: Pos): ActionOutcome => ({
-  changes: [], threat: 0, floats: [{ pos, text: 'Stunned', color: COMBAT_TEXT_COLOR.stopped }],
+  changes: [], threat: { gain: 0 }, floats: [{ pos, text: 'Stunned', color: COMBAT_TEXT_COLOR.stopped }],
 });
 
 /** AP left this turn for a unit with `apMax`. */
 export const apLeft = (apMax: number, state: Pick<CombatState, 'apSpent'>) => Math.max(0, apMax - state.apSpent);
 
-/** Farthest a unit can move this turn (steps): the tiles already paid for, plus `movement` per AP left. */
-export const moveBudget = (paidTiles: number, ap: number, movement: number) => paidTiles + ap * movement;
+/**
+ * Farthest a unit can move this turn (steps): the tiles already paid for, plus `movement` per AP left. None
+ * while it is rooted (Stats.rooted).
+ */
+export const moveBudget = (paidTiles: number, ap: number, stats: Pick<Stats, 'movement' | 'rooted'>) =>
+  stats.rooted ? 0 : paidTiles + ap * stats.movement;
 
 /** What a move of `steps` costs: the AP to pay (only once the paid tiles run out) and the paid tiles left after. */
 export function moveCost(steps: number, paidTiles: number, movement: number): { apSpent: number; tilesLeft: number } {
@@ -93,7 +99,7 @@ export function moveCost(steps: number, paidTiles: number, movement: number): { 
   return { apSpent, tilesLeft: paidTiles + apSpent * movement - steps };
 }
 
-/** Insert newly-aggroed enemies into an ongoing combat's turn order. */
+/** Insert creatures into an ongoing combat's turn order: newly-aggroed enemies, or newly summoned allies. */
 export function joinCombat(state: CombatState, newEnemies: EnemyInstance[]): CombatState {
   if (newEnemies.length === 0) return state;
 
@@ -102,6 +108,7 @@ export function joinCombat(state: CombatState, newEnemies: EnemyInstance[]): Com
     name: e.classData.name,
     initiativeRoll: d20() + e.stats.initiative,
     isPlayer: false,
+    ...(e.ally ? { isAlly: true } : {}),
   }));
 
   // Build new turn order: merge existing + new, sorted by initiative
@@ -166,7 +173,7 @@ export interface RoundTick {
   heal: number;                     // HoT healing this round
   dotDamage: number;                // DoT damage to HP this round
   mpDotDamage: number;              // DoT damage to MP this round (damagesMP DoTs)
-  dotSources: Map<number, number>;  // partyIdx → threat from the DoTs they applied
+  dotSources: Map<string, number>;  // threatKey → threat from the DoTs that unit applied
 }
 
 export function tickRound(stats: Stats, hp: number, mp: number, hots: ActiveHot[], dots: ActiveDot[]): RoundTick {
@@ -196,13 +203,21 @@ export interface EnemyTickEvent {
   tick: RoundTick;
 }
 
-/** Apply all top-of-round effects to enemies: buff expiry, regen, HoT and DoT ticks. */
-export function applyTopOfRound(enemies: EnemyInstance[]): { enemies: EnemyInstance[]; events: EnemyTickEvent[] } {
+/**
+ * Apply all top-of-round effects to creatures: buff expiry, regen, HoT and DoT ticks. A summoned ally's time
+ * runs down too: one whose rounds run out vanishes (removed, listed in `vanished`).
+ */
+export function applyTopOfRound(enemies: EnemyInstance[]): { enemies: EnemyInstance[]; events: EnemyTickEvent[]; vanished: EnemyInstance[] } {
   const events: EnemyTickEvent[] = [];
+  const vanished = enemies.filter(e => e.ally && e.currentHp > 0 && e.ally.roundsLeft <= 1);
 
-  let changed = false;
-  const updated = enemies.map(e => {
+  let changed = vanished.length > 0;
+  const updated = enemies.filter(e => !vanished.includes(e)).map(e => {
     if (e.currentHp <= 0) return e;
+    if (e.ally) {
+      changed = true;
+      e = { ...e, ally: { ...e.ally, roundsLeft: e.ally.roundsLeft - 1 } };
+    }
 
     // Buff expiry first so regen/DR use the post-expiry stats
     const buffs = tickDurations(e.buffs);
@@ -216,7 +231,7 @@ export function applyTopOfRound(enemies: EnemyInstance[]): { enemies: EnemyInsta
   });
 
   // Nothing ticked: the same array, so the caller's state doesn't change
-  return { enemies: changed ? updated : enemies, events };
+  return { enemies: changed ? updated : enemies, events, vanished };
 }
 
 export function getCurrentCombatant(state: CombatState): Combatant | null {

@@ -10,7 +10,7 @@ import { hslRGB, mixC, mulC, type RGB, type Vec3 } from '../core/vec';
 // Seeds vary the rock's tone, the lava's glow, the spikes and the build.
 const design: Design = {
   id: 'creature.flame-golem',
-  source: { table: 'enemies', key: 'flame-golem' }, // data/enemies.ts › flame-golem
+  source: { table: 'enemies', key: 'flame-golem' }, // data/units/enemies.ts › flame-golem
   category: 'creature',
   label: 'Flame Golem',
   fit: { kind: 'standing', height: 1.45, maxRadius: 0.62 }, // tall; the long arms set the width

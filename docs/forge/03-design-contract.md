@@ -2,7 +2,7 @@
 
 ## One design per data entry
 Every design is the model for exactly **one** entry in the game data, and is named exactly like it:
-- `source` names the entry: `{ table: 'enemies', key: 'skeleton' }`, `{ table: 'weapons', key: 'plain/1h Swords' }`, `{ table: 'armor', key: 'apprentice/helm' }` or `{ table: 'offhands', key: 'buckler' }` (category `offhand`: shields now, focuses and trinkets later).
+- `source` names the entry: `{ table: 'enemies', key: 'skeleton' }`, `{ table: 'summons', key: 'void-wisp' }` (category `summon`: creatures the party summons, forge section "Summons"), `{ table: 'weapons', key: 'plain/1h Swords' }`, `{ table: 'armor', key: 'apprentice/helm' }` or `{ table: 'offhands', key: 'buckler' }` (category `offhand`: shields now, focuses and trinkets later).
 - `label` is exactly the entry's display name ("Skeleton", "Plain Gladius").
 - The file is that name slugged: `skeleton.ts`, `plain-gladius.ts`, `plain-bastard-sword.ts`; the id is `${category}.${slug}`.
 
@@ -17,7 +17,7 @@ A design is one file in `client/src/forge/designs/` (or `client/src/forge/drafts
 const design: Design = {
   id: 'creature.skeleton',       // `${category}.${fileStem}`, lint enforces
   source: { table: 'enemies', key: 'skeleton' },   // the one data entry this is the model for
-  category: 'creature',          // creature | character | weapon | armor | offhand
+  category: 'creature',          // creature | summon | character | weapon | armor | offhand | object
   label: 'Skeleton',             // the entry's display name exactly
   fit: { kind: 'standing', height: 1.12, maxRadius: 0.54 },   // or { kind: 'item', size: 0.8 }
   budget: 900,                   // max triangles
@@ -49,7 +49,7 @@ Models are static, except parts a design lists in `motion` (`PartSpin`): each sp
 A design can list one-time `animations` (`PartAnimation`): each has a `name` ('open'), a length in `ms`, and `turns`: parts that turn `angleDeg` about an axis through their pivot (`m.part(name, pivot)`), eased, then hold the end pose. Everything that should move together goes in the animated part (a chest's lid carries its straps and hasp; the padlock stays on the body). The game plays an animation when an object's state calls for it (`MapUnit.played` / `MapObject.played`, e.g. `['open']` for a looted chest): one newly listed plays, one already listed when the object appears shows its end pose. In `/dev/forge`, a radio row (Model, then each animation) plays one on a loop in every cell; `forge:sheet --anim <name>` draws its end pose. The math is shared (`core/animate.ts`; three.js poses it in `animateParts`). Like `motion`, animations are never for loot.
 
 ## Game objects (category `object`, forge section "Game Objects")
-Interactable things on the map that aren't units or loot: doors, portals, later chests and craftbenches. Their data entries are `GAME_OBJECTS` in `data/gameObjects.ts` (`source: { table: 'gameObjects', key }`; identity from `objectEntry` in `designs/_object.ts`). They stand on a tile (`fit.kind: 'standing'`), built facing +z; on the map they face their open side (`facingOpenSide`: a door in a wall faces the floor it opens onto). Maps choose which objects they place by id (`DungeonConfig.doorObject` / `portalObject`, `SANCTUM.portalObject`); where a portal leads belongs to the map, not the object. Variants share a family helper, one entry and design each (portals: `designs/_portal.ts`, e.g. Necrotic Portal; another color is a new entry plus a one-line design).
+Interactable things on the map that aren't units or loot: doors, portals, later chests and craftbenches. Their data entries are `GAME_OBJECTS` in `data/world/gameObjects.ts` (`source: { table: 'gameObjects', key }`; identity from `objectEntry` in `designs/_object.ts`). They stand on a tile (`fit.kind: 'standing'`), built facing +z; on the map they face their open side (`facingOpenSide`: a door in a wall faces the floor it opens onto). Maps choose which objects they place by id (`DungeonConfig.doorObject` / `portalObject`, `SANCTUM.portalObject`); where a portal leads belongs to the map, not the object. Variants share a family helper, one entry and design each (portals: `designs/_portal.ts`, e.g. Necrotic Portal; another color is a new entry plus a one-line design).
 
 ## Names
 `build` returns a display name (the forge shows it on hover): normally the label, or a variant name for a creature ("Frost-Eyed Skeleton").

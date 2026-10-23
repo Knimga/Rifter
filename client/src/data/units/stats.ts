@@ -1,5 +1,5 @@
 import { CLASSES } from './classes';
-import { capitalize } from './detailStrings';
+import { capitalize } from '../detailStrings';
 import type { ClassKey, ClassData, Passive, ScalingPassive } from './classes';
 
 //
@@ -80,6 +80,8 @@ export interface Stats {
   magic:           AttackCategoryStats;
   threatMultiplier: number;
   elementalStats:  Partial<Record<DamageElement, ElementStats>>;
+  /** Rooted in place (a root on it: ActiveBuff.roots): in combat it can't move at all (moveBudget). */
+  rooted:          boolean;
 }
 
 export interface ActiveBuff {
@@ -90,6 +92,8 @@ export interface ActiveBuff {
   amount: number;          // flat delta — positive = buff, negative = debuff (0 if percent-only)
   percent?: number;        // percentage delta applied after flats — e.g. 10 = +10%, -20 = -20%
   roundsRemaining: number;
+  /** A root (Effect 'root'): while it lasts the unit can't move (Stats.rooted). Its stat change is none. */
+  roots?: boolean;
 }
 
 export interface ActiveHot {
@@ -104,7 +108,7 @@ export interface ActiveDot {
   damageElement: DamageElement;
   damagePerRound: number;
   roundsRemaining: number;
-  sourcePartyIdx?: number;    // party member who applied this DoT (for threat attribution)
+  sourceKey?: string;         // threat key of the party-side unit that applied it (party member or summon: threatKey)
   penetration?: number;       // % points reducing armor/MR DR on each tick
   elementPenetration?: number; // % points reducing element resistance on each tick
   damagesMP?: boolean;        // ticks drain MP instead of HP
@@ -145,13 +149,27 @@ export const ATTRIBUTE_POINTS_PER_LEVEL = 3;
 export const SKILL_POINTS_PER_LEVEL = 3;
 
 const fl = (n: number) => Math.floor(n);
-const ATTRIBUTE_KEYS_SET = new Set<string>(ATTRIBUTE_KEYS);
+
+/**
+ * Attributes and skills: the base stats every other stat is derived from. Bonuses to them (buffs, gear,
+ * class passives) go into the base calculation (calculateStats `baseBonuses`), so what derives from them
+ * (HP from toughness, crit from expertise...) follows. Every other stat goes through STAT_ACCESSORS.
+ */
+export type BaseStatKey = AttributeKey | SkillKey;
+const BASE_STAT_KEYS = new Set<string>([...ATTRIBUTE_KEYS, ...SKILL_KEYS]);
+const isBaseStat = (key: string): key is BaseStatKey => BASE_STAT_KEYS.has(key);
+
+/** Bonuses to base stats, flat and percent (applied after the flats): from buffs and gear. */
+export type BaseStatBonuses = Partial<Record<BaseStatKey, { flat: number; percent: number }>>;
 
 // ─── Stat Accessors ───────────────────────────────────────────────────────────
 //
 // Every numeric stat that passives, scaling passives, and buffs can modify, keyed by its
 // passive / BuffableStat key. The modifier phases iterate this table instead of listing
 // each stat by hand.
+
+/** The least threatMultiplier can be (high stealth, buffs): threat is always gained, never lost. */
+export const MIN_THREAT_MULTIPLIER = 0.1;
 
 type ScalarStatKey = 'hp' | 'mp' | 'hpRegen' | 'mpRegen' | 'initiative' | 'movement' | 'apMax' | 'armor' | 'dodge'
   | 'parry' | 'block' | 'glancingBlow' | 'magicResistance' | 'healing' | 'threatMultiplier';
@@ -161,7 +179,9 @@ interface StatAccessor {
   get: (s: Stats) => number;
   set: (s: Stats, v: number) => void;
   noFloor?: boolean;  // real-valued stat — percent modifiers are not floored
-  min?: number;       // lower clamp when buffs modify the stat (default 0)
+  // Its floor. Buffs never take a stat below it (default 0); passives never take one that declares it below
+  // it (applyStatMinimums), so e.g. movement is always at least 1.
+  min?: number;
 }
 
 const EMPTY_ELEMENT_STATS: ElementStats = { hit: 0, crit: 0, damage: 0, resistance: 0, penetration: 0 };
@@ -182,7 +202,7 @@ const STAT_ACCESSORS: StatAccessor[] = [
     .map(k => scalar(k)),
   scalar('movement', { min: 1 }),
   scalar('apMax'), // a stun can take it to 0: the unit skips its turn
-  scalar('threatMultiplier', { noFloor: true, min: 0.1 }),
+  scalar('threatMultiplier', { noFloor: true, min: MIN_THREAT_MULTIPLIER }),
   ...(['melee', 'ranged', 'magic'] as const).flatMap(cat =>
     (['hit', 'damage', 'crit', 'penetration'] as const).map((f): StatAccessor => ({
       key: `${cat}${capitalize(f)}`,
@@ -245,7 +265,8 @@ export type PlayerStatInput = {
   /** Attribute and skill points the member has spent (level-ups). */
   pointsSpent?: Partial<Record<AttributeKey, number>>;
   skillPointsSpent?: Partial<Record<SkillKey, number>>;
-  attrBuffs?: Partial<Record<AttributeKey, number>>;
+  /** Buffs and gear on attributes and skills (recomputeStats collects them). */
+  baseBonuses?: BaseStatBonuses;
 };
 
 export type EnemyStatInput = {
@@ -254,7 +275,8 @@ export type EnemyStatInput = {
   /** Auto-allocated attribute points (generateEnemyAttributePoints). */
   pointsSpent: Record<AttributeKey, number>;
   level: number;
-  attrBuffs?: Partial<Record<AttributeKey, number>>;
+  /** Buffs on attributes and skills (recomputeStats collects them). */
+  baseBonuses?: BaseStatBonuses;
 };
 
 // ─── Stat Calculation ─────────────────────────────────────────────────────────
@@ -311,8 +333,9 @@ function buildRawStats(
       crit:        5 + (mnd / 2) + (spellcraft / 3) + (stealth / 5),
       penetration: spellcraft / 3,
     },
-    threatMultiplier: 1 - (stealth * 0.02),
+    threatMultiplier: 1 - (stealth * 0.05), // floored at MIN_THREAT_MULTIPLIER (applyStatMinimums)
     elementalStats:  {},
+    rooted:          false,
   };
 }
 
@@ -362,41 +385,67 @@ export function calculateStats(input: PlayerStatInput | EnemyStatInput): Stats {
   const apMax = input.mode === 'player' ? PLAYER_AP_MAX : ENEMY_AP_MAX;
   const skillPointsSpent = input.mode === 'player' ? input.skillPointsSpent : undefined;
 
-  const attrs = Object.fromEntries(ATTRIBUTE_KEYS.map(key => [key, Math.max(0,
-    BASE_ATTRIBUTES + (classData.attributes[key] ?? 0) + (input.pointsSpent?.[key] ?? 0) + (input.attrBuffs?.[key] ?? 0),
-  )])) as Record<AttributeKey, number>;
-  const skills = Object.fromEntries(SKILL_KEYS.map(key => [key, BASE_SKILLS + (classData.skills?.[key] ?? 0) + (skillPointsSpent?.[key] ?? 0)])) as Record<SkillKey, number>;
   const passives = classData.passives ?? {};
   const scalingPassives = classData.scalingPassives ?? [];
+
+  // A base stat: its innate value, plus the flat bonuses on it (class passives, buffs, gear), then the
+  // percent ones; never below 0
+  const base = (key: BaseStatKey, innate: number): number => {
+    const bonus = input.baseBonuses?.[key];
+    const flat = (passives[key]?.flat ?? 0) + (bonus?.flat ?? 0);
+    const percent = (passives[key]?.percent ?? 0) + (bonus?.percent ?? 0);
+    return Math.max(0, fl((innate + flat) * (1 + percent / 100)));
+  };
+  const attrs = Object.fromEntries(ATTRIBUTE_KEYS.map(key => [key,
+    base(key, BASE_ATTRIBUTES + (classData.attributes[key] ?? 0) + (input.pointsSpent?.[key] ?? 0)),
+  ])) as Record<AttributeKey, number>;
+  const skills = Object.fromEntries(SKILL_KEYS.map(key => [key,
+    base(key, BASE_SKILLS + (classData.skills?.[key] ?? 0) + (skillPointsSpent?.[key] ?? 0)),
+  ])) as Record<SkillKey, number>;
 
   let stats = buildRawStats(attrs, skills, level, armorBonus, movement, apMax, classData.baseHp);
   stats = applyFlatPassives(stats, passives);
   stats = applyScalingAndPctPassives(stats, passives, scalingPassives);
-  return stats;
+  return applyStatMinimums(stats);
+}
+
+/**
+ * Hold every stat with a declared floor (StatAccessor.min: movement 1, threatMultiplier, element resistance)
+ * at or above it, whatever passives did. Buffs keep to the same floors (applyStatBuffs). Stats without one
+ * may go negative from passives (e.g. a Clumsy -10 melee hit).
+ */
+function applyStatMinimums(stats: Stats): Stats {
+  const low = STAT_ACCESSORS.filter(a => a.min !== undefined && a.get(stats) < a.min);
+  if (low.length === 0) return stats;
+  const s = cloneStats(stats);
+  for (const a of low) a.set(s, a.min!);
+  return s;
 }
 
 
 
 /**
- * Apply non-attribute buffs/debuffs to a Stats block.
+ * Apply buffs/debuffs on derived stats (everything but attributes and skills) to a Stats block.
  *
  * Order: flat bonuses applied first, then percentages applied to that total.
  * Formula per stat:  result = floor((base + ∑flats) × (1 + ∑percents / 100))
  *
- * Attribute buffs are handled upstream (attrBuffs param in calculateStats)
- * so all derived values are recomputed correctly.
+ * Attribute and skill buffs are handled upstream (calculateStats `baseBonuses`, via recomputeStats) so
+ * every value derived from them is recomputed correctly.
  */
 export function applyStatBuffs(stats: Stats, buffs: ActiveBuff[]): Stats {
   const flatMap = new Map<string, number>();
   const pctMap  = new Map<string, number>();
   for (const buff of buffs) {
-    if (ATTRIBUTE_KEYS_SET.has(buff.stat)) continue;
+    if (isBaseStat(buff.stat)) continue;
     if (buff.amount)  flatMap.set(buff.stat, (flatMap.get(buff.stat) ?? 0) + buff.amount);
     if (buff.percent) pctMap.set(buff.stat,  (pctMap.get(buff.stat)  ?? 0) + buff.percent);
   }
-  if (flatMap.size === 0 && pctMap.size === 0) return stats;
+  const rooted = buffs.some(b => b.roots);
+  if (flatMap.size === 0 && pctMap.size === 0 && rooted === stats.rooted) return stats;
 
   const s = cloneStats(stats);
+  s.rooted = rooted;
   for (const a of STAT_ACCESSORS) {
     const f = flatMap.get(a.key) ?? 0;
     const p = pctMap.get(a.key)  ?? 0;
@@ -408,17 +457,25 @@ export function applyStatBuffs(stats: Stats, buffs: ActiveBuff[]): Stats {
 }
 
 /**
- * Recompute effective stats for any entity given a new buff list.
- * Attribute buffs are extracted and fed into calculateStats so all derived
- * values are re-derived; non-attribute buffs are then applied additively on top.
+ * Recompute effective stats for any entity given a new buff list (buffs, debuffs and gear: getGearBuffs).
+ * Attribute and skill buffs (flat and percent) are fed into calculateStats so every value derived from them
+ * is re-derived; buffs on other stats are then applied on top (applyStatBuffs).
  */
 export function recomputeStats(input: PlayerStatInput | EnemyStatInput, buffs: ActiveBuff[]): Stats {
-  const attrBuffs: Partial<Record<AttributeKey, number>> = {};
+  const baseBonuses: BaseStatBonuses = {};
   for (const buff of buffs) {
-    if (ATTRIBUTE_KEYS_SET.has(buff.stat)) {
-      const k = buff.stat as AttributeKey;
-      attrBuffs[k] = (attrBuffs[k] ?? 0) + buff.amount;
-    }
+    if (!isBaseStat(buff.stat)) continue;
+    const b = baseBonuses[buff.stat] ??= { flat: 0, percent: 0 };
+    b.flat += buff.amount;
+    b.percent += buff.percent ?? 0;
   }
-  return applyStatBuffs(calculateStats({ ...input, attrBuffs }), buffs);
+  return applyStatBuffs(calculateStats({ ...input, baseBonuses }), buffs);
+}
+
+// Every buffable stat must have a way to apply: attributes and skills through the base calculation, the
+// rest through STAT_ACCESSORS. A stat with neither would be silently ignored on gear, buffs and passives.
+{
+  const accessorKeys = new Set(STAT_ACCESSORS.map(a => a.key));
+  const missing = BUFFABLE_STATS.filter(s => !isBaseStat(s) && !accessorKeys.has(s));
+  if (missing.length) throw new Error(`stats.ts: buffable stats with no way to apply: ${missing.join(', ')}`);
 }

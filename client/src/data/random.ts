@@ -5,6 +5,9 @@ export function randInt(min: number, max: number): number {
   return min + Math.floor(Math.random() * (max - min + 1));
 }
 
+/** Random real number in [min, max). */
+export const randFloat = (min: number, max: number): number => min + Math.random() * (max - min);
+
 /** Uniformly random element of a non-empty array. */
 export function pick<T>(items: readonly T[]): T {
   return items[Math.floor(Math.random() * items.length)];

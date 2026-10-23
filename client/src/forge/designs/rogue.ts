@@ -1,4 +1,4 @@
-// Model for Rogue (data/classes.ts › rogue). Holds the member's weapon (src/forge/equip.ts).
+// Model for Rogue (data/units/classes.ts › rogue). Holds the member's weapon (src/forge/equip.ts).
 // Same body and pose as the Knight, but no armor: a slim dark gray jerkin, dark trousers and boots, and a
 // near-black shawl wrapped around the shoulders and neck, pulled up over the mouth, with its black hood up
 // over the head (a lip framing the face). Slightly darker skin.
@@ -6,7 +6,7 @@ import type { Design } from '../core/types';
 import { box } from '../core/primitives';
 import { add, mulC, rotZ, type RGB, type Vec3 } from '../core/vec';
 import { CHARACTER_HEIGHT } from '../core/stage-config';
-import { TORSO, buildBody, classEntry, classHold, fittedJerkin, hoodUp, shawl } from '../designs/_character';
+import { TORSO, buildBody, classEntry, classHold, fittedJerkin, hoodUp, shawl } from './_character';
 
 const JERKIN: RGB = [72, 74, 80]; // dark gray, sleeves to match
 const SHAWL: RGB = [32, 32, 36];

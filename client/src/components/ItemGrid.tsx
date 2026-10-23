@@ -3,7 +3,7 @@
 // show faded, their tooltip marked "Not proficient". Empty slots fill out the grid.
 import type { MouseEvent } from 'react';
 import type { Item } from '../data/gear';
-import type { Stats } from '../data/stats';
+import type { Stats } from '../data/units/stats';
 import { ItemTooltipContent, Tooltip, type ItemClickAction } from './Tooltip';
 import ItemIcon, { rarityGlow } from './ItemIcon';
 

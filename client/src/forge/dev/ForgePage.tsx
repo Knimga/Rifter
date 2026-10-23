@@ -10,7 +10,7 @@ import { dataEntry } from '../dataRefs';
 import { buildPreview, classHolds, classOf } from '../equip';
 import { HOLD_LABEL } from '../designs/_character';
 import type { WeaponType } from '../../data/gear/types';
-import { DUNGEON_PRESETS } from '../../data/dungeonPresets';
+import { DUNGEON_PRESETS } from '../../data/world/dungeonPresets';
 import { TILE_BORDER_COLOR } from '../../components/mapParts';
 import { ForgeView, GAME_VIEW_ANCHOR, type CameraPreset, type Cell } from './forgeView';
 import { floorMatrix } from '../../viewEngine/camera';
@@ -23,7 +23,7 @@ const LABEL_H = 0; // no per-cell text strip; a cell's name and seed show on hov
 const COLS = 6;
 // Left-panel sections, in order. Every Category must be listed (Record keeps that checked).
 const CATEGORY_LABEL: Record<Category, string> = {
-  creature: 'Creatures', character: 'Classes', weapon: 'Weapons', armor: 'Armor', offhand: 'Offhands', object: 'Game Objects',
+  creature: 'Creatures', summon: 'Summons', character: 'Classes', weapon: 'Weapons', armor: 'Armor', offhand: 'Offhands', object: 'Game Objects',
 };
 const CATEGORIES = Object.keys(CATEGORY_LABEL) as Category[];
 const WALK_DIRS = [0, 1, 2, 3, 4, 5, 6, 7].map((i) => (i * Math.PI) / 4);

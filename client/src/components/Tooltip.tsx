@@ -2,11 +2,11 @@ import { useState, useRef, type ReactNode, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import { PiMouseLeftClickFill, PiMouseRightClickFill } from 'react-icons/pi';
 import { isArmorItem, isShieldItem, isWeaponItem, type Item, type WeaponItem, type ArmorItem, type ShieldItem } from '../data/gear';
-import type { Stats } from '../data/stats';
+import type { Stats } from '../data/units/stats';
 import { RARITY_COLOR } from '../data/constants';
 import { describeEffect, formatModifier } from '../data/detailStrings';
-import { getOffense } from '../data/attackResolution';
-import { weaponDamageEffect } from '../data/abilityExecution';
+import { getOffense } from '../data/combat/attackResolution';
+import { weaponDamageEffect } from '../data/combat/abilityExecution';
 import { EffectRow } from './ui/AbilityCard';
 
 // ─── Portal Tooltip wrapper ───────────────────────────────────────────────────

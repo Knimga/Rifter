@@ -4,8 +4,8 @@
 // while their column is hovered or focused, grow when focused, and dim when another class is focused.
 // Lazy-loaded (it pulls in three.js).
 import { useEffect, useMemo, useRef, type RefObject } from 'react';
-import type { ClassKey } from '../data/classes';
-import { startingGear } from '../data/party';
+import type { ClassKey } from '../data/units/classes';
+import { startingGear } from '../data/units/party';
 import { characterModel, heldGear } from './characterModel';
 import { SHOWCASE_REST_YAW, SHOWCASE_SPIN_MS, ShowcaseRenderer } from '../viewEngine/three/showcase';
 import type { Model } from '../forge/core/types';

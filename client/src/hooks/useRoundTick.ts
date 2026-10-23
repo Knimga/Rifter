@@ -2,12 +2,12 @@
 // effect durations running down. In combat at the top of each round; out of combat on a timer.
 import { useCallback, useEffect, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
 import { COMBAT_TEXT_COLOR, OUT_OF_COMBAT_REGEN_INTERVAL_MS } from '../data/constants';
-import { applyTopOfRound, tickChangesNothing, tickRound, type CombatState, type RoundTick } from '../data/combat';
-import { tickDurations } from '../data/abilityExecution';
-import type { Pos } from '../data/dungeonHelpers';
-import type { EnemyInstance } from '../data/enemies';
-import type { MemberState } from '../data/party';
-import type { Stats } from '../data/stats';
+import { applyTopOfRound, tickChangesNothing, tickRound, type CombatState, type RoundTick } from '../data/combat/combat';
+import { applyThreatChange, tickDurations, unitKey } from '../data/combat/abilityExecution';
+import type { Pos } from '../data/world/grid';
+import type { EnemyInstance } from '../data/units/enemies';
+import type { MemberState } from '../data/units/party';
+import type { Stats } from '../data/units/stats';
 import type { SpawnFloat } from './useFloatingText';
 
 export function useRoundTick({ combatActive, round, membersRef, updateMembers, partyStatsRef, partyPosRef, enemiesRef, setEnemies, setCombat, spawnFloat }: {
@@ -24,9 +24,10 @@ export function useRoundTick({ combatActive, round, membersRef, updateMembers, p
   spawnFloat: SpawnFloat;
 }) {
   const applyRoundTick = useCallback(() => {
-    const threatGain = new Map<number, number>();
-    const addThreat = (i: number, raw: number) => {
-      if (raw > 0) threatGain.set(i, (threatGain.get(i) ?? 0) + raw * (partyStatsRef.current[i]?.threatMultiplier ?? 1));
+    // Threat gained this tick, by threatKey (party members and summoned allies)
+    const threatGain = new Map<string, number>();
+    const addThreat = (key: string, raw: number) => {
+      if (raw > 0) threatGain.set(key, (threatGain.get(key) ?? 0) + raw);
     };
     const showTick = (pos: Pos, tick: RoundTick) => {
       if (tick.heal > 0) spawnFloat(pos.x, pos.y, `+${tick.heal}`, COMBAT_TEXT_COLOR.heal);
@@ -40,7 +41,7 @@ export function useRoundTick({ combatActive, round, membersRef, updateMembers, p
       if (m.hp <= 0) return null;
       const tick = tickRound(partyStatsRef.current[i], m.hp, m.mp, m.hots, m.dots);
       showTick(partyPosRef.current[i], tick);
-      addThreat(i, tick.heal * 1.5);
+      addThreat(unitKey({ side: 'party', idx: i }), tick.heal * 1.5);
       return tick;
     });
     updateMembers((m, i) => {
@@ -57,15 +58,28 @@ export function useRoundTick({ combatActive, round, membersRef, updateMembers, p
       };
     });
 
-    // Unchanged enemies come back as the same array, which React ignores
-    const { enemies: updated, events } = applyTopOfRound(enemiesRef.current);
+    // Unchanged enemies come back as the same array, which React ignores. Summoned allies whose time is up vanish.
+    const creatures = enemiesRef.current;
+    const { enemies: updated, events, vanished } = applyTopOfRound(creatures);
     for (const { pos, tick } of events) showTick(pos, tick);
+    for (const e of vanished) spawnFloat(e.pos.x, e.pos.y, 'Vanished', COMBAT_TEXT_COLOR.stopped);
     setEnemies(updated);
 
-    if (threatGain.size > 0) {
-      setCombat(prev => ({ ...prev, partyThreat: prev.partyThreat.map((t, i) => t + (threatGain.get(i) ?? 0)) }));
+    // Threat only counts in a fight (out of combat there is none to keep)
+    if (combatActive && threatGain.size > 0) {
+      // Gains scale by the unit's own threatMultiplier: a party member's, or a summon's (by its threatKey)
+      const multipliers = new Map<string, number>([
+        ...partyStatsRef.current.map((s, i) => [unitKey({ side: 'party', idx: i }), s.threatMultiplier] as const),
+        ...creatures.filter(e => e.ally).map(e => [e.id, e.stats.threatMultiplier] as const),
+      ]);
+      setCombat(prev => {
+        if (!prev.active) return prev;
+        const threat = { ...prev.threat };
+        for (const [key, gain] of threatGain) threat[key] = applyThreatChange(threat[key] ?? 0, { gain }, multipliers.get(key) ?? 1);
+        return { ...prev, threat };
+      });
     }
-  }, [spawnFloat, updateMembers]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [combatActive, spawnFloat, updateMembers]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // In combat: the top of each round after the first
   useEffect(() => {

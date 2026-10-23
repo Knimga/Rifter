@@ -1,5 +1,5 @@
 import { CLASSES, type ClassKey } from './classes';
-import { EMPTY_GEAR, generateArmor, generateShield, generateWeapon, getGearArmorBonus, getGearBuffs, type GearSlots } from './gear';
+import { EMPTY_GEAR, generateArmor, generateShield, generateWeapon, getGearArmorBonus, getGearBuffs, type GearSlots } from '../gear';
 import { ATTRIBUTE_KEYS, ATTRIBUTE_POINTS_PER_LEVEL, SKILL_KEYS, SKILL_POINTS_PER_LEVEL, recomputeStats, type ActiveBuff, type ActiveDot, type ActiveHot, type AttributeKey, type PlayerStatInput, type SkillKey, type Stats } from './stats';
 
 export interface PartyMemberConfig {
@@ -46,6 +46,12 @@ export const memberStats = (m: PartyMemberConfig, level: number, buffs: ActiveBu
   recomputeStats(memberStatInput(m, level), [...buffs, ...getGearBuffs(m.gear)]);
 
 /** A party member's state in play (indexed like the party): HP, MP and the effects on them. */
+/**
+ * Whether party member `idx` stands on the map: the leader always (the party's position), followers only
+ * while alive. A follower who fell is off the map until revived: drawn nowhere, blocking no one.
+ */
+export const isOnMap = (idx: number, hp: number) => idx === 0 || hp > 0;
+
 export interface MemberState {
   hp: number;
   mp: number;
@@ -116,3 +122,10 @@ export function startingGear(classKey: ClassKey): GearSlots {
     offhand:  kit.shield ? generateShield(1, kit.shield, { starter: true, affixes: false }) : null,
   };
 }
+
+// Names the character select's dice button picks from (one not already in the party).
+export const HERO_NAMES: readonly string[] = [
+  'Aldric', 'Alaric', 'Bram', 'Cassian', 'Corwin', 'Darian', 'Dorian', 'Edric', 'Faelan', 'Gareth',
+  'Garrick', 'Halvard', 'Ivor', 'Joren', 'Kael', 'Leoric', 'Lucan', 'Magnus', 'Niall', 'Orin',
+  'Perrin', 'Roderick', 'Rowan', 'Soren', 'Theron', 'Tobias', 'Ulric', 'Valen', 'Wystan', 'Yorick',
+];

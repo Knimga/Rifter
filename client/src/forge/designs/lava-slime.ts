@@ -9,7 +9,7 @@ import { hslRGB, mixC, type RGB, type Vec3 } from '../core/vec';
 // motes, eye, crest).
 const design: Design = {
   id: 'creature.lava-slime',
-  source: { table: 'enemies', key: 'lava-slime' }, // data/enemies.ts › lava-slime
+  source: { table: 'enemies', key: 'lava-slime' }, // data/units/enemies.ts › lava-slime
   category: 'creature',
   label: 'Lava Slime',
   fit: { kind: 'standing', height: 0.81, maxRadius: 0.44 }, // wider than tall: the radius is the limiting fit

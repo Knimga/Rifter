@@ -11,23 +11,31 @@ const GLOW_BOOST = 1.12;
  * back unlit at glow × GLOW_BOOST, so e.g. a 0.3 face keeps some brightness on its shadowed side, like the
  * contact sheet shows (forge:sheet blends emissive the same way).
  */
+export function partialGlowShader(shader: THREE.WebGLProgramParametersWithUniforms): void {
+  shader.vertexShader = shader.vertexShader
+    .replace('#include <color_pars_vertex>', '#include <color_pars_vertex>\nattribute float glow;\nvarying float vGlow;')
+    .replace('#include <color_vertex>', '#include <color_vertex>\n\tvGlow = glow;');
+  shader.fragmentShader = shader.fragmentShader
+    .replace('#include <color_pars_fragment>', '#include <color_pars_fragment>\nvarying float vGlow;')
+    .replace('#include <color_fragment>', '#include <color_fragment>\n\tvec3 glowColor = diffuseColor.rgb;\n\tdiffuseColor.rgb *= 1.0 - vGlow;')
+    .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>\n\ttotalEmissiveRadiance += glowColor * vGlow * ${GLOW_BOOST.toFixed(2)};`);
+}
+
 function withPartialGlow<T extends THREE.Material>(material: T): T {
-  material.onBeforeCompile = (shader) => {
-    shader.vertexShader = shader.vertexShader
-      .replace('#include <color_pars_vertex>', '#include <color_pars_vertex>\nattribute float glow;\nvarying float vGlow;')
-      .replace('#include <color_vertex>', '#include <color_vertex>\n\tvGlow = glow;');
-    shader.fragmentShader = shader.fragmentShader
-      .replace('#include <color_pars_fragment>', '#include <color_pars_fragment>\nvarying float vGlow;')
-      .replace('#include <color_fragment>', '#include <color_fragment>\n\tvec3 glowColor = diffuseColor.rgb;\n\tdiffuseColor.rgb *= 1.0 - vGlow;')
-      .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>\n\ttotalEmissiveRadiance += glowColor * vGlow * ${GLOW_BOOST.toFixed(2)};`);
-  };
+  material.onBeforeCompile = partialGlowShader;
   return material;
 }
 
-// Shared materials: every model reuses these three, so draw calls stay at <= 3 per model.
-const lit = withPartialGlow(new THREE.MeshLambertMaterial({ vertexColors: true }));
-const unlit = new THREE.MeshBasicMaterial({ vertexColors: true });
-const glass = withPartialGlow(new THREE.MeshLambertMaterial({ vertexColors: true, transparent: true, depthWrite: false }));
+/** The three kinds of model material: lit (with partial glow), unlit (full glow), glass (lit, translucent). */
+export const makeLit = () => new THREE.MeshLambertMaterial({ vertexColors: true });
+export const makeUnlit = () => new THREE.MeshBasicMaterial({ vertexColors: true });
+export const makeGlass = () => new THREE.MeshLambertMaterial({ vertexColors: true, transparent: true, depthWrite: false });
+
+// Shared materials: every model reuses these three, so draw calls stay at <= 3 per model. (The map renderer
+// swaps in fogged versions of them: viewEngine/three/fog.ts.)
+const lit = withPartialGlow(makeLit());
+const unlit = makeUnlit();
+const glass = withPartialGlow(makeGlass());
 export const sharedMaterials = { lit, unlit, glass };
 
 const srgbToLinear = (v: number) => (v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);

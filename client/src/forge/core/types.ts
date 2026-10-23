@@ -1,7 +1,7 @@
 import type { Vec3 } from './vec';
 import type { BuildCtx } from './ctx';
 
-export type Category = 'creature' | 'character' | 'weapon' | 'armor' | 'offhand' | 'object';
+export type Category = 'creature' | 'summon' | 'character' | 'weapon' | 'armor' | 'offhand' | 'object';
 
 /**
  * A part that keeps moving while the model is on screen (view state, like facing): it spins about `axis`
@@ -50,16 +50,17 @@ export type FitSpec =
 /**
  * The one game data entry a design is the model for. `key` identifies the entry within its table:
  *  - enemies: the class id ('skeleton')
+ *  - summons: the summoned creature's id ('void-wisp', data/units/summons.ts); category `summon`
  *  - weapons: `${seriesId}/${weaponType}` ('plain/1h Swords')
  *  - armor: `${seriesId}/${slot}` ('apprentice/helm')
  *  - offhands: the offhand's id ('buckler')
  *  - classes: the class key ('knight'); the player character's body (it holds its gear, see equip.ts)
- *  - gameObjects: the object's id ('heavy-door'): interactable things on the map (data/gameObjects.ts)
+ *  - gameObjects: the object's id ('heavy-door'): interactable things on the map (data/world/gameObjects.ts)
  * Lint checks that the entry exists, that the design's label is exactly the entry's display name, and
  * that the file name is that name slugged (see src/forge/dataRefs.ts).
  */
 export interface DataRef {
-  table: 'enemies' | 'weapons' | 'armor' | 'offhands' | 'classes' | 'gameObjects';
+  table: 'enemies' | 'summons' | 'weapons' | 'armor' | 'offhands' | 'classes' | 'gameObjects';
   key: string;
 }
 

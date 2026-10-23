@@ -4,7 +4,7 @@
 // white). An armed ability's cost pulses on the pips it would spend. Hover or focus for the breakdown.
 import { Tooltip } from '../Tooltip';
 import { formatSigned } from '../../data/detailStrings';
-import type { ActiveBuff } from '../../data/stats';
+import type { ActiveBuff } from '../../data/units/stats';
 
 export interface ApState {
   /** AP left this turn. */

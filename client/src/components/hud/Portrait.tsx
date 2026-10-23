@@ -2,7 +2,7 @@
 // shoulders, turned slightly to the right. Rendered once per look by the shared icon renderer (lazy-loaded,
 // it pulls in three.js); the box stays empty until it is ready.
 import { useEffect, useState } from 'react';
-import type { ClassKey } from '../../data/classes';
+import type { ClassKey } from '../../data/units/classes';
 import type { ModelLink } from '../../forge/core/types';
 import type { HeldWeapon } from '../../forge/equip';
 import { characterLookKey, characterModel } from '../characterModel';

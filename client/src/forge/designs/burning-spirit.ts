@@ -1,7 +1,7 @@
 import type { Design } from '../core/types';
 import { blob, frustum, loft } from '../core/primitives';
 import { add, mixC, mul, norm, type RGB, type Vec3 } from '../core/vec';
-import { floorGlow } from '../designs/_glow';
+import { floorGlow } from './_glow';
 
 // Identity: a tall wraith of living fire, floating over a pool of its own light. No legs: a ghostly,
 // see-through body that rises from a flickering point, burning white-hot at its core and yellow through
@@ -17,7 +17,7 @@ const EYE: RGB = [10, 8, 8];
 
 const design: Design = {
   id: 'creature.burning-spirit',
-  source: { table: 'enemies', key: 'burning-spirit' }, // data/enemies.ts › BOSS_CLASSES › burning-spirit
+  source: { table: 'enemies', key: 'burning-spirit' }, // data/units/enemies.ts › BOSS_CLASSES › burning-spirit
   category: 'creature',
   label: 'Burning Spirit',
   fit: { kind: 'standing', height: 1.7, maxRadius: 0.8 }, // a boss: taller than the regular enemies

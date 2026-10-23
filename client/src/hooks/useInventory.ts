@@ -1,11 +1,11 @@
 // The party's shared inventory: taking loot into it (piles, chests) and equipping from it / unequipping to it.
 import { useCallback, useState } from 'react';
-import { CLASSES } from '../data/classes';
+import { CLASSES } from '../data/units/classes';
 import { COMBAT_TEXT_COLOR } from '../data/constants';
-import type { Pos } from '../data/dungeonHelpers';
+import type { Pos } from '../data/world/grid';
 import type { GearSlot, GearSlots, Item } from '../data/gear';
-import { canEquip, canUnequip, equipFromInventory, takeIntoInventory, unequipToInventory, type Inventory } from '../data/inventory';
-import type { PartyMemberConfig } from '../data/party';
+import { canEquip, canUnequip, equipFromInventory, takeIntoInventory, unequipToInventory, type Inventory } from '../data/gear/inventory';
+import type { PartyMemberConfig } from '../data/units/party';
 import type { SpawnFloat } from './useFloatingText';
 
 export function useInventory({ party, setParty, spawnFloat }: {

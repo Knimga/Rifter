@@ -1,4 +1,4 @@
-// Model for Archer (data/classes.ts › archer). Holds the member's bow (src/forge/equip.ts): low in front
+// Model for Archer (data/units/classes.ts › archer). Holds the member's bow (src/forge/equip.ts): low in front
 // of the body in the left hand, its arrow line pointing toward the ground, the right hand at the string.
 // Same body and stance as the Knight (only the arms differ). Brown leather jerkin, dark green trousers,
 // black boots; a dark green shawl over the shoulders (not over the face) with a hood hanging behind; a
@@ -7,7 +7,7 @@ import type { Design } from '../core/types';
 import { box, frustum } from '../core/primitives';
 import { add, mulC, type RGB, type Vec3 } from '../core/vec';
 import { CHARACTER_HEIGHT } from '../core/stage-config';
-import { TORSO, buildBody, classEntry, classHold, fittedJerkin, hoodDown, shawl, spikyHair } from '../designs/_character';
+import { TORSO, buildBody, classEntry, classHold, fittedJerkin, hoodDown, shawl, spikyHair } from './_character';
 
 const LEATHER: RGB = [112, 76, 48];
 const GREEN: RGB = [40, 64, 44];

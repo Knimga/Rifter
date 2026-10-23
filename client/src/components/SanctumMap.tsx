@@ -1,11 +1,11 @@
 import { lazy, Suspense, useMemo } from 'react';
-import type { TargetType } from '../data/classes';
-import { gameObjectGlow, gameObjectModel } from '../data/gameObjects';
-import { isAdjacent, posKey, type Pos } from '../data/dungeonHelpers';
+import type { TargetType } from '../data/combat/abilities';
+import { gameObjectGlow, gameObjectModel } from '../data/world/gameObjects';
+import { isAdjacent, posKey, type Pos } from '../data/world/grid';
 import { yawFromGridMove } from '../forge/core/facing';
-import type { DungeonKey } from '../data/dungeonPresets';
+import type { DungeonKey } from '../data/world/dungeonPresets';
 import { SANCTUM_FLOOR_COLOR, SANCTUM_WALL_COLOR } from '../data/constants';
-import { SANCTUM, isSanctumWall, sanctumPortalAt } from '../data/sanctum';
+import { SANCTUM, isSanctumWall, sanctumPortalAt } from '../data/world/sanctum';
 import { Board, FloorGrid, FloorTile, MoveLineOverlay, TileHighlight, UsableGlow, toMapMember, useBoard, useHoveredTile, useStableHandler, type PartyTokenData } from './mapParts';
 
 // 3D party models over the tile grid. Lazy: it pulls in three.js (GameScreen preloads it on mount).
@@ -32,9 +32,11 @@ interface Props {
   onMemberSelect: (partyIndex: number) => void;
   /** Where each unit last aimed an ability; its model turns to face it. */
   aims?: Record<string, UnitAim>;
+  /** The 3D layer has drawn its first frame (ModelLayer onReady): the page stops hiding the map. */
+  onReady?: () => void;
 }
 
-export default function SanctumMap({ playerPos, activeMoverPos, party, moveTargets, onMove, onEnterDungeon, activeTarget, onAbilityUse, onAbilityDeselect, onMemberSelect, aims }: Props) {
+export default function SanctumMap({ playerPos, activeMoverPos, party, moveTargets, onMove, onEnterDungeon, activeTarget, onAbilityUse, onAbilityDeselect, onMemberSelect, aims, onReady }: Props) {
   const hover = useHoveredTile();
   const board = useBoard(SANCTUM.width, SANCTUM.height);
 
@@ -94,7 +96,7 @@ export default function SanctumMap({ playerPos, activeMoverPos, party, moveTarge
   return (
     <Board board={board} floor={floor}>
       <Suspense fallback={null}>
-        <ModelLayer board={board} party={modelParty} objects={SANCTUM_OBJECTS} aims={aims} />
+        <ModelLayer board={board} party={modelParty} objects={SANCTUM_OBJECTS} aims={aims} onReady={onReady} />
       </Suspense>
     </Board>
   );

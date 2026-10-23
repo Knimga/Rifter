@@ -2,6 +2,12 @@
 
 Turn-based dungeon crawler. App is `client/` (Vite + React 19 + Tailwind + TypeScript); `server/` is an unused stub. Run commands from `client/` unless noted (`npm run dev` at the repo root starts both).
 
+## Code sweeps
+When asked to "do a sweep of the code", "audit the code" or anything like it, do a full review of the whole project (not just recent changes) for redundancies and duplicated logic, bugs, relics (dead code, stale comments, leftover names or files), anti-patterns, and bloat. Fix what is clearly wrong, and report what is a judgment call.
+- Run `npm run lint` (ESLint: chiefly React's hook rules) and `npx tsc -b`, and fix what they report.
+- Also run `npx eslint . --no-inline-config` once to see what the `eslint-disable` comments hide, and check each is still deliberate (a stable ref, a value tracked through a computed key) rather than a stale value.
+- Finish with `npm run build` and `npm run forge:lint -- --drafts`.
+
 ## Procedural models (forge, `client/src/forge`)
 Overview, layout and workflow: `docs/forge/README.md`. Read `docs/forge/03-design-contract.md` and `docs/forge/04-style-guide.md` before writing a design.
 
@@ -11,7 +17,7 @@ Overview, layout and workflow: `docs/forge/README.md`. Read `docs/forge/03-desig
 - Draw randomness with `c.rf/ri/pick/chance`. A look the user wants fixed is written into the design, not exposed as a choice.
 - Before saying a design is done: run `npm run forge:lint -- --drafts`, then `npm run forge:sheet -- --only-drafts --seeds 12 --yaws 0,180 --out forge-sheet.png` and LOOK at the PNG (use Read on it). Fix what you see.
 - Under the top-down camera, lean long parts (weapons, limbs) outward, never toward or away from the camera (see the style guide's "Camera" section).
-- **Linking:** every enemy class, item base (weapon, armor slot, shield) and class has a required `model: '<design id>'` field on its own data entry (e.g. `model: 'creature.zombie'`). A new entry gets its `model` together with its new design (a draft until approved; the game draws nothing until then). There is no separate mapping file. The one exception: starting gear (the Worn `STARTER_*` series, never dropped) has no designs and borrows the models of the items it is worn versions of.
+- **Linking:** every enemy class, summoned creature (`SUMMON_CLASSES`), item base (weapon, armor slot, shield) and class has a required `model: '<design id>'` field on its own data entry (e.g. `model: 'creature.zombie'`). A new entry gets its `model` together with its new design (a draft until approved; the game draws nothing until then). There is no separate mapping file. The one exception: starting gear (the Worn `STARTER_*` series, never dropped) has no designs and borrows the models of the items it is worn versions of.
 - Game logic must not import three.js or read geometry. Facing and motion are view state (`viewEngine/three/mapRenderer.ts`): on a move a model turns toward it, then glides there (at most 1 s); on an ability it turns toward the aimed tile before the ability lands.
 - No rarity/element glow in designs: item rarity glow is renderer-side. Loot never animates.
 - Units: 1 = one tile. Models face +z. Left is +x.

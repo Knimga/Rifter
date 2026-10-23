@@ -14,7 +14,7 @@ const RUST: RGB = [128, 82, 58];
 
 const design: Design = {
   id: 'creature.skeleton',
-  source: { table: 'enemies', key: 'skeleton' }, // data/enemies.ts › skeleton
+  source: { table: 'enemies', key: 'skeleton' }, // data/units/enemies.ts › skeleton
   category: 'creature',
   label: 'Skeleton',
   fit: { kind: 'standing', height: 1.12, maxRadius: 0.54 }, // ~12% bigger (uniform: height is the limiting fit)

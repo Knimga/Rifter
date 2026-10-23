@@ -1,7 +1,7 @@
 // Everything about the extras an item rolls: its rarity (= how many affixes), which stats (AFFIX_ROLLS:
 // weight, value range; affix groups) and rollAffixes, which puts it together. Tune values here.
-import { ATTRIBUTE_KEYS, BUFFABLE_STATS, SKILL_KEYS, DAMAGE_ELEMENTS, type BuffableStat, type ElementStatKey } from '../stats';
-import { pick, pickWeighted } from '../random';
+import { ATTRIBUTE_KEYS, BUFFABLE_STATS, SKILL_KEYS, DAMAGE_ELEMENTS, type BuffableStat, type ElementStatKey } from '../units/stats';
+import { pick, pickWeighted, randFloat } from '../random';
 import type { Affix, Rarity } from './types';
 
 /**
@@ -10,11 +10,13 @@ import type { Affix, Rarity } from './types';
  *   high = lv1[1] + perLevel[1] × (L − 1)
  *   value = an integer from low to high, evenly likely (see rollAffixValue)
  * `weight`: how likely the stat is chosen among an item's possible affixes (1 = normal, 0.5 = half as often).
+ * `minLevel`: the lowest item level it can roll on (default 1: any).
  */
 export interface AffixRoll {
   lv1: [number, number];
   perLevel: [number, number];
   weight?: number;
+  minLevel?: number;
 }
 
 // Growth shapes carried over from the old potency tiers (value = 1..level, divided by 1, 2 or 3, rounded
@@ -37,8 +39,11 @@ const ELEMENT_ROLLS: Record<'Hit' | 'Crit' | 'Damage' | 'Resistance' | 'Penetrat
   Penetration: { lv1: [1, 3], perLevel: [0.1, 0.22], weight: 0.15 },   // %
 };
 
-/** Buffable stats that never roll on gear (only buffs and debuffs change them): +1 AP on an item would be far too strong. */
-export const NON_AFFIX_STATS = ['apMax'] as const satisfies readonly BuffableStat[];
+/**
+ * Buffable stats that never roll on gear (only buffs, debuffs and class passives change them): +1 AP on an item
+ * would be far too strong, and threat is a class's identity (a tank's draw, a rogue's subtlety), not loot's.
+ */
+export const NON_AFFIX_STATS = ['apMax', 'threatMultiplier'] as const satisfies readonly BuffableStat[];
 /** A stat that can roll as an affix. */
 export type AffixStat = Exclude<BuffableStat, typeof NON_AFFIX_STATS[number]>;
 export const AFFIX_STATS = BUFFABLE_STATS.filter((s): s is AffixStat => !(NON_AFFIX_STATS as readonly BuffableStat[]).includes(s));
@@ -53,7 +58,6 @@ export const AFFIX_ROLLS: Record<AffixStat, AffixRoll> = {
   glancingBlow: LOW,
   magicResistance: LOW,
   initiative: LOW,
-  threatMultiplier: LOW,
   meleeDamage: LOW,
   rangedDamage: LOW,
   magicDamage: LOW,
@@ -67,10 +71,10 @@ export const AFFIX_ROLLS: Record<AffixStat, AffixRoll> = {
   magicHit: MEDIUM,
   magicCrit: MEDIUM,
   magicPenetration: MEDIUM,
-  hpRegen: HIGH,
+  hpRegen: { ...HIGH, minLevel: 5 }, // too strong this early
   mpRegen: HIGH,
-  // Always exactly +1, at every item level: a whole extra tile per turn is already a lot
-  movement: { lv1: [1, 1], perLevel: [0, 0] },
+  // Always exactly +1, from item level 5: a whole extra tile per move is already a lot
+  movement: { lv1: [1, 1], perLevel: [0, 0], minLevel: 5 },
   ...Object.fromEntries(DAMAGE_ELEMENTS.flatMap((el) =>
     (Object.entries(ELEMENT_ROLLS) as [keyof typeof ELEMENT_ROLLS, AffixRoll][]).map(([suffix, roll]) => [`${el}${suffix}` as ElementStatKey, roll]))),
 } as Record<AffixStat, AffixRoll>;
@@ -97,7 +101,7 @@ const GROUP_STATS: Record<AffixGroup, AffixStat[]> = {
   2: [
     ...elementStats(['Resistance']),
     'armor', 'dodge', 'parry', 'block', 'glancingBlow',
-    'threatMultiplier', 'hpRegen', 'mpRegen', 'magicResistance', 'healing', 'initiative', 'movement',
+    'hpRegen', 'mpRegen', 'magicResistance', 'healing', 'initiative', 'movement',
     'redoubt', 'devotion', 'evasion', 'perception', 'stealth',
   ],
 };
@@ -126,7 +130,7 @@ export function starvedAffixGroups(invalidAffixes: BuffableStat[]): AffixGroup[]
 export function rollAffixValue(stat: AffixStat, level: number): number {
   const { lv1, perLevel } = AFFIX_ROLLS[stat];
   const low = lv1[0] + perLevel[0] * (level - 1), high = lv1[1] + perLevel[1] * (level - 1);
-  return Math.max(1, Math.floor(low + Math.random() * (high + 1 - low)));
+  return Math.max(1, Math.floor(randFloat(low, high + 1)));
 }
 
 // ─── Rarity ───────────────────────────────────────────────────────────────────
@@ -184,7 +188,8 @@ export function rollAffixes(invalidAffixes: BuffableStat[], level: number, enabl
     while (affixes.length < count) {
       // Each affix: first a group that still has room (equally likely), then a stat within it by weight. So
       // items stay balanced at every rarity, and a full item is 2 + 2.
-      const available = (g: AffixGroup) => AFFIX_STATS.filter(s => AFFIX_GROUP[s] === g && !invalid.has(s) && !used.has(s));
+      const available = (g: AffixGroup) => AFFIX_STATS.filter(s =>
+        AFFIX_GROUP[s] === g && !invalid.has(s) && !used.has(s) && level >= (AFFIX_ROLLS[s].minLevel ?? 1));
       const open = ([1, 2] as const).filter(g => filled[g] < AFFIX_SLOTS_PER_GROUP && available(g).length > 0);
       if (open.length === 0) break;
       const group = pick(open);

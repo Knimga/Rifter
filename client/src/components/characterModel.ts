@@ -1,6 +1,6 @@
 // A party member's character model: their class's body holding their gear, seeded as on the map
 // (classInstanceId), so portraits, character select and the party window show the same character.
-import { CLASSES, type ClassKey } from '../data/classes';
+import { CLASSES, type ClassKey } from '../data/units/classes';
 import { isShieldItem, isWeaponItem, type GearSlots } from '../data/gear';
 import type { Model, ModelLink } from '../forge/core/types';
 import { instanceSeed, linkedDesign } from '../forge/core/link';

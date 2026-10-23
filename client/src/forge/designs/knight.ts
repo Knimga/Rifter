@@ -1,11 +1,11 @@
-// Model for Knight (data/classes.ts › knight). Holds the member's weapon and shield (src/forge/equip.ts).
+// Model for Knight (data/units/classes.ts › knight). Holds the member's weapon and shield (src/forge/equip.ts).
 // Lean and solid: dark gray plate over the chest, small pauldrons and vambraces, dull trousers, dark boots,
 // no helmet, short spiky blonde hair.
 import type { Design } from '../core/types';
 import { blob, frustum } from '../core/primitives';
 import { add, mulC, type RGB } from '../core/vec';
 import { CHARACTER_HEIGHT } from '../core/stage-config';
-import { HEAD, armJoints, buildBody, classEntry, classHold, cuirass, pauldron, spikyHair, type BodyBuild } from '../designs/_character';
+import { HEAD, armJoints, buildBody, classEntry, classHold, cuirass, pauldron, spikyHair, type BodyBuild } from './_character';
 
 const PLATE: RGB = [98, 102, 110];
 const PLATE_EDGE: RGB = [124, 128, 136];

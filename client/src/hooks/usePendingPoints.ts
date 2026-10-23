@@ -1,7 +1,7 @@
 // Level-up points placed in the party window but not yet confirmed, per member. Kept by the game screen (not
 // the window), so closing the window doesn't lose them.
 import { useState } from 'react';
-import { hasPointsToSpend, noPendingPoints, spendPoints, type PartyMemberConfig, type PendingPoints } from '../data/party';
+import { hasPointsToSpend, noPendingPoints, spendPoints, type PartyMemberConfig, type PendingPoints } from '../data/units/party';
 
 export function usePendingPoints(party: PartyMemberConfig[], setParty: (party: PartyMemberConfig[]) => void) {
   const [pendingPoints, setPendingPoints] = useState<PendingPoints[]>(() => party.map(noPendingPoints));

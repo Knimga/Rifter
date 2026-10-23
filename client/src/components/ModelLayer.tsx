@@ -1,14 +1,16 @@
 // Draws party members, enemies and loot as 3D models over a map's tile grid (DungeonMap, SanctumMap).
 // Lazy-loaded (it pulls in three.js), so the menu and builder screens never download it.
 import { useEffect, useMemo, useRef, type ReactNode } from 'react';
-import type { EnemyInstance } from '../data/enemies';
-import { CLASSES, type ClassKey } from '../data/classes';
+import type { EnemyInstance } from '../data/units/enemies';
+import { CLASSES, type ClassKey } from '../data/units/classes';
 import type { Design, Model, ModelLink } from '../forge/core/types';
 import { buildInstance, instanceSeed, linkedDesign } from '../forge/core/link';
 import { TILE_SIZE, type BoardLayout } from '../viewEngine/board';
 import { buildCharacter, classInstanceId, type HeldWeapon } from '../forge/equip';
 import { designs } from '../forge/registry.vite';
 import { MapModelRenderer, type MapUnit } from '../viewEngine/three/mapRenderer';
+import type { FogInput } from '../viewEngine/three/fog';
+import { useLatest } from '../hooks/useLatest';
 import { ActiveGlow } from './mapParts';
 
 type Pos = { x: number; y: number };
@@ -58,6 +60,10 @@ interface Props {
   renderEnemyOverlay?: (enemy: EnemyInstance) => ReactNode;
   /** Unit id ('party-0', an enemy id) → the tile it last aimed an ability at; a new `seq` turns it to face it. */
   aims?: Record<string, UnitAim>;
+  /** Fog of war over the map (null or omitted: none). Drawn by the renderer over the floor and every model. */
+  fog?: FogInput | null;
+  /** Its first frame is drawn (models, fog): the map behind it can be shown. Once per mount. */
+  onReady?: () => void;
 }
 
 /** The tile a unit last aimed an ability at; `seq` increases with every new aim. */
@@ -67,7 +73,8 @@ export interface UnitAim {
   seq: number;
 }
 
-export default function ModelLayer({ board, party = [], enemies = [], loot = [], objects = [], renderEnemyOverlay, aims = {} }: Props) {
+export default function ModelLayer({ board, party = [], enemies = [], loot = [], objects = [], renderEnemyOverlay, aims = {}, fog = null, onReady }: Props) {
+  const onReadyRef = useLatest(onReady);
   const hostRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<MapModelRenderer | null>(null);
   // Built models by cache key (a unit id, or 'item:<design>' for loot, which every item of a design shares).
@@ -93,7 +100,7 @@ export default function ModelLayer({ board, party = [], enemies = [], loot = [],
       const look = `${m.classKey}:${m.weapon?.link ?? '-'}:${m.shield ?? '-'}`;
       // Seeded by class (classInstanceId), so the member looks as it did on character select
       const model = cached(m.id, look, used, () => buildCharacter(designs, body, instanceSeed(body, classInstanceId(m.classKey)), m.weapon, m.shield));
-      out.push({ id: m.id, model, pos: m.pos });
+      out.push({ id: m.id, model, pos: m.pos, viewer: true });
     }
     return out;
   }, [partyKey]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -160,7 +167,7 @@ export default function ModelLayer({ board, party = [], enemies = [], loot = [],
   };
 
   useEffect(() => {
-    const r = new MapModelRenderer((id, at) => placeRef.current(id, at));
+    const r = new MapModelRenderer((id, at) => placeRef.current(id, at), () => onReadyRef.current?.());
     rendererRef.current = r;
     hostRef.current!.appendChild(r.canvas);
     return () => {
@@ -168,10 +175,11 @@ export default function ModelLayer({ board, party = [], enemies = [], loot = [],
       r.canvas.remove();
       rendererRef.current = null;
     };
-  }, []);
+  }, [onReadyRef]); // a stable ref (useLatest): created once
 
   useEffect(() => rendererRef.current?.setBoard(board), [board]);
   useEffect(() => rendererRef.current?.setUnits(units), [units]);
+  useEffect(() => rendererRef.current?.setFog(fog), [fog]);
 
   /** DOM placed just above a model's head (its projected overhead anchor). Positioned by placeOverlays. */
   const overHead = (u: MapUnit, node: ReactNode) => (

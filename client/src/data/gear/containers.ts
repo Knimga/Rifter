@@ -1,8 +1,8 @@
 // What containers on the map (treasure chests) hold: how many items, and how likely each rarity is. Keyed
-// by the container's game object (GAME_OBJECTS id, data/gameObjects.ts). Tune values here.
-import type { Item, Rarity } from './gear';
-import { generateLootItem } from './gear';
-import { randInt } from './random';
+// by the container's game object (GAME_OBJECTS id, data/world/gameObjects.ts). Tune values here.
+import type { Item, Rarity } from './types';
+import { generateLootItem } from '.';
+import { randInt } from '../random';
 
 /** Slots in a container's window (CONTAINER_COLS wide): the most items a container can hold. */
 export const CONTAINER_COLS = 4;
@@ -30,7 +30,7 @@ export const CONTAINER_LOOT: Record<string, ContainerLoot> = {
  */
 export function rollContainerLoot(objectId: string, level: number, usable?: (item: Item) => boolean): Item[] {
   const loot = CONTAINER_LOOT[objectId];
-  if (!loot) throw new Error(`no loot for container '${objectId}' (data/containers.ts)`);
+  if (!loot) throw new Error(`no loot for container '${objectId}' (data/gear/containers.ts)`);
   const count = Math.min(CONTAINER_SIZE, randInt(loot.items[0], loot.items[1]));
   return Array.from({ length: count }, () => generateLootItem(level, { usable, rarityWeights: loot.rarityWeights }));
 }

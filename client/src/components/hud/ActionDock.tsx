@@ -3,11 +3,12 @@
 // right-click to assign) and End Turn. A slot dims when its ability costs more MP or AP than the member
 // has, or the member can't act now.
 import { createElement, useEffect, useRef, useState, type CSSProperties, type MouseEvent } from 'react';
-import { CLASSES, type Ability } from '../../data/classes';
-import type { PartyMemberConfig } from '../../data/party';
-import type { Stats } from '../../data/stats';
+import { CLASSES } from '../../data/units/classes';
+import { type Ability } from '../../data/combat/abilities';
+import type { PartyMemberConfig } from '../../data/units/party';
+import type { Stats } from '../../data/units/stats';
 import { isWeaponItem } from '../../data/gear';
-import { toAction } from '../../data/abilityExecution';
+import { toAction } from '../../data/combat/abilityExecution';
 import { ClickHint, TextTip, Tooltip } from '../Tooltip';
 import ItemIcon from '../ItemIcon';
 import AbilityCard, { ApDots, abilityTint } from '../ui/AbilityCard';

@@ -1,5 +1,5 @@
-import type { ArmorProficiency, WeaponProficiency } from '../classes';
-import type { BuffableStat, DamageElement } from '../stats';
+import type { ArmorProficiency, WeaponProficiency } from '../units/classes';
+import type { BuffableStat, DamageElement } from '../units/stats';
 import type { ModelLink } from '../../forge/core/types';
 
 // ─── Slots ────────────────────────────────────────────────────────────────────

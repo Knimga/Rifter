@@ -1,9 +1,9 @@
 // Armor data: what each armor type gives (ARMOR_TYPE_DATA), how much armor each slot gets (BASE_ARMOR_MULTIPLIER),
 // and the armor series: the named sets of four pieces, one series per type and tier (ARMOR_SERIES).
 // Like weapons, a piece is a type x tier: its type sets its stats, its series its name and model.
-import type { BuffableStat } from '../stats';
+import type { BuffableStat } from '../units/stats';
 import { meleeStats, rangedStats, type ArmorSlot } from './types';
-import type { ArmorProficiency } from '../classes';
+import type { ArmorProficiency } from '../units/classes';
 import type { ModelLink } from '../../forge/core/types';
 
 // ─── Armor Types ──────────────────────────────────────────────────────────────
@@ -49,7 +49,7 @@ export const ARMOR_TYPE_DATA: Record<ArmorProficiency, ArmorTypeData> = {
         gloves: { baseValue: 1, growthPerLevel: 0.10 },
       },
     },
-    invalidAffixes: ['magicHit', 'magicCrit', 'block', 'threatMultiplier'],
+    invalidAffixes: ['magicHit', 'magicCrit', 'block'],
   },
   Medium: {
     baseArmor: 8,

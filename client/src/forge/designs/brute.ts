@@ -1,4 +1,4 @@
-// Model for Brute (data/classes.ts › brute). Holds the member's weapon (src/forge/equip.ts): a two-hander
+// Model for Brute (data/units/classes.ts › brute). Holds the member's weapon (src/forge/equip.ts): a two-hander
 // rests on his right shoulder.
 // A little taller than the Knight and Rogue, broad-shouldered, with thick bare arms; a dark brown leather
 // chestpiece and brown leather pauldrons, beige trousers, thick brown boots; brown hair in a ponytail.
@@ -6,8 +6,8 @@ import type { Design } from '../core/types';
 import { blob, box, loft } from '../core/primitives';
 import { mulC, type RGB } from '../core/vec';
 import { CHARACTER_HEIGHT } from '../core/stage-config';
-import { band, ell } from '../designs/_armor';
-import { TORSO, armJoints, buildBody, classEntry, classHold, ponytailHair, type BodyBuild } from '../designs/_character';
+import { band, ell } from './_armor';
+import { TORSO, armJoints, buildBody, classEntry, classHold, ponytailHair, type BodyBuild } from './_character';
 
 const LEATHER: RGB = [74, 50, 34];
 const PAULDRON: RGB = [112, 76, 50];

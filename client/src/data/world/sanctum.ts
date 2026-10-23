@@ -1,4 +1,4 @@
-import { samePos, type Pos } from './dungeonHelpers';
+import { samePos, type Pos } from './grid';
 import type { DungeonKey } from './dungeonPresets';
 
 // ─── The Sanctum: fixed, hand-authored hub map (never procedurally generated) ──

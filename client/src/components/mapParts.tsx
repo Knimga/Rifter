@@ -2,13 +2,22 @@ import { Children, memo, useCallback, useMemo, useState, type ReactNode } from '
 import { useLatest } from '../hooks/useLatest';
 import { TILE_SIZE, boardLayout, type BoardLayout } from '../viewEngine/board';
 import { yawFromGridMove } from '../forge/core/facing';
-import type { ClassKey } from '../data/classes';
+import type { ClassKey } from '../data/units/classes';
 import type { ModelLink } from '../forge/core/types';
 import type { HeldWeapon } from '../forge/equip';
 import type { MapPartyMember } from './ModelLayer';
-import { brightenHex, samePos, type Pos } from '../data/dungeonHelpers';
+import { samePos, type Pos } from '../data/world/grid';
 import UnitStatus, { type StatusMarker } from './hud/UnitStatus';
 import MoveLine from './MoveLine';
+
+/** Scale each RGB channel of a hex color by `factor` (e.g. 1.4 to brighten). */
+function brightenHex(hex: string, factor: number): string {
+  const n = parseInt(hex.slice(1), 16);
+  const r = Math.min(255, Math.round(((n >> 16) & 0xff) * factor));
+  const g = Math.min(255, Math.round(((n >> 8) & 0xff) * factor));
+  const b = Math.min(255, Math.round((n & 0xff) * factor));
+  return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+}
 
 // ─── Shared pieces of the Sanctum and Dungeon maps ────────────────────────────
 

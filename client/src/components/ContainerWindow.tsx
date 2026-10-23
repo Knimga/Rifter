@@ -3,7 +3,7 @@
 // the rest of the screen stays as it is (not dimmed). GameScreen closes it on Escape, the X, or when the
 // leader moves out of reach.
 import type { Item } from '../data/gear';
-import { CONTAINER_COLS, CONTAINER_SIZE } from '../data/containers';
+import { CONTAINER_COLS, CONTAINER_SIZE } from '../data/gear/containers';
 import ItemGrid from './ItemGrid';
 import { PanelTitle } from './ui/Panel';
 

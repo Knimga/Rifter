@@ -2,12 +2,11 @@
 // them and set their marching order. A focused class shows its dossier: roles, passives, armor and weapon
 // proficiencies, and abilities.
 import { lazy, Suspense, useMemo, useRef, useState, type MouseEvent } from 'react';
-import { CLASSES, ROLE_ICONS, type ClassKey, type ArmorProficiency, type Role } from '../data/classes';
-import { capitalizeWords, formatStatLabel } from '../data/detailStrings';
-import { statSuffix } from '../data/stats';
+import { CLASSES, ROLE_ICONS, type ClassKey, type ArmorProficiency, type Role } from '../data/units/classes';
+import { capitalizeWords, formatPassiveValue, formatStatLabel } from '../data/detailStrings';
 import { isWeaponItem } from '../data/gear';
-import { startingGear } from '../data/party';
-import { HERO_NAMES } from '../data/names';
+import { HERO_NAMES, startingGear } from '../data/units/party';
+import { pick } from '../data/random';
 import Backdrop from '../components/ui/Backdrop';
 import RiftButton from '../components/ui/RiftButton';
 import Panel, { PanelTitle } from '../components/ui/Panel';
@@ -92,13 +91,15 @@ export default function CharacterSelectScreen({ onStart, onBack }: {
   const randomNameAt = (i: number) => update((next) => {
     const used = new Set(next.map((s) => s.name.toLowerCase()));
     const pool = HERO_NAMES.filter((n) => !used.has(n.toLowerCase()));
-    next[i].name = pool[Math.floor(Math.random() * pool.length)] ?? HERO_NAMES[0];
+    next[i].name = pool.length ? pick(pool) : HERO_NAMES[0];
   });
 
   const stepText = filled === 0 ? 'Choose three heroes for your party.'
     : filled < 3 ? `Choose ${3 - filled} more.` : 'Name your heroes and set their marching order.';
   const startHint = filled < 3 ? `${3 - filled} more to choose`
     : named < 3 ? `${3 - named} ${3 - named === 1 ? 'name' : 'names'} missing` : 'Party ready';
+  // A full party with no one who can heal: worth a warning (not a block)
+  const noHealer = filled === 3 && !slots.some((s) => s.classKey && CLASSES[s.classKey].roles.includes('healer'));
 
   const focus = focusKey ? CLASSES[focusKey] : null;
   const focusInParty = focusKey ? placeOf(focusKey) >= 0 : false;
@@ -177,7 +178,7 @@ export default function CharacterSelectScreen({ onStart, onBack }: {
                     <PanelTitle className="mb-3">Passives</PanelTitle>
                     {Object.entries(focus.passives).map(([stat, p]) => (
                       <p key={stat} className="m-0 mb-2 text-[13px] leading-[1.4]">
-                        <span className="font-medium text-rift-ink">{p.flat ? `+${p.flat}${statSuffix(stat)}` : ''}{p.percent ? `${p.flat ? ' / ' : ''}+${p.percent}%` : ''}</span>{' '}
+                        <span className="font-medium text-rift-ink">{formatPassiveValue(stat, p)}</span>{' '}
                         <span className="text-rift-muted">{formatStatLabel(stat)}</span>
                         <span className="block text-[11px] text-rift-label">{p.name}</span>
                       </p>
@@ -265,7 +266,10 @@ export default function CharacterSelectScreen({ onStart, onBack }: {
               ))}
             </div>
             <div className="flex flex-wrap items-center justify-between gap-4">
-              <span className="text-xs tracking-[0.04em] text-rift-muted">{startHint}</span>
+              <span className="flex flex-col gap-1">
+                <span className="text-xs tracking-[0.04em] text-rift-muted">{startHint}</span>
+                {noHealer && <span className="text-xs tracking-[0.04em] text-rift-warn">Healing class recommended!</span>}
+              </span>
               <RiftButton size="lg" className="!min-h-[52px] !px-12" disabled={!ready}
                 onClick={() => onStart(slots.map((s) => ({ classKey: s.classKey!, name: s.name.trim() })))}>
                 Start Game

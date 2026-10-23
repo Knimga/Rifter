@@ -3,12 +3,13 @@
 // and by the builder page. No three.js; reads game data only.
 import type { DataRef, Design, ModelLink } from './core/types';
 import { slug } from './core/slug';
-import { ENEMY_CLASSES, BOSS_CLASSES } from '../data/enemies';
+import { ENEMY_CLASSES, BOSS_CLASSES } from '../data/units/enemies';
+import { SUMMON_CLASSES } from '../data/units/summons';
 import { STARTER_WEAPON_SERIES, WEAPON_SERIES, weaponName } from '../data/gear/weapons';
 import { ARMOR_SERIES, STARTER_ARMOR_SERIES, armorName } from '../data/gear/armor';
 import { SHIELDS, STARTER_SHIELDS } from '../data/gear/offhands';
-import { CLASSES, type ClassKey } from '../data/classes';
-import { GAME_OBJECTS } from '../data/gameObjects';
+import { CLASSES, type ClassKey } from '../data/units/classes';
+import { GAME_OBJECTS } from '../data/world/gameObjects';
 import { ARMOR_SLOTS, type WeaponType } from '../data/gear/types';
 
 export interface DataEntry {
@@ -28,7 +29,13 @@ export function allDataEntries(): DataEntry[] {
   const enemies: DataEntry[] = [...ENEMY_CLASSES, ...BOSS_CLASSES].map((c) => ({
     ref: { table: 'enemies', key: c.id },
     name: c.name,
-    path: `data/enemies.ts › ${c.id}`,
+    path: `data/units/enemies.ts › ${c.id}`,
+    link: c.model,
+  }));
+  const summons: DataEntry[] = SUMMON_CLASSES.map((c) => ({
+    ref: { table: 'summons', key: c.id },
+    name: c.name,
+    path: `data/units/summons.ts › ${c.id}`,
     link: c.model,
   }));
   const weapons: DataEntry[] = WEAPON_SERIES.flatMap((s) =>
@@ -56,16 +63,16 @@ export function allDataEntries(): DataEntry[] {
   const classes: DataEntry[] = (Object.entries(CLASSES) as [ClassKey, (typeof CLASSES)[ClassKey]][]).map(([key, c]) => ({
     ref: { table: 'classes', key },
     name: c.name,
-    path: `data/classes.ts › ${key}`,
+    path: `data/units/classes.ts › ${key}`,
     link: c.model,
   }));
   const objects: DataEntry[] = GAME_OBJECTS.map((o) => ({
     ref: { table: 'gameObjects', key: o.id },
     name: o.name,
-    path: `data/gameObjects.ts › ${o.id}`,
+    path: `data/world/gameObjects.ts › ${o.id}`,
     link: o.model,
   }));
-  return [...enemies, ...weapons, ...armor, ...offhands, ...classes, ...objects];
+  return [...enemies, ...summons, ...weapons, ...armor, ...offhands, ...classes, ...objects];
 }
 
 // Built on first use. Game data is static at runtime (a hot reload re-runs this module).

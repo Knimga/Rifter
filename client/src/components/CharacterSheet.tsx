@@ -6,15 +6,16 @@
 // rows. Placed points stay pending (kept by GameScreen, so closing the window keeps them) until Confirm.
 import { lazy, Suspense, useEffect, useMemo, useState, type ComponentType, type MouseEvent, type ReactNode } from 'react';
 import { Crown, Shirt, Hand, Footprints, Sword, Shield } from 'lucide-react';
-import { CLASSES } from '../data/classes';
+import { CLASSES } from '../data/units/classes';
 import { ATTACK_CATEGORY_COLOR } from '../data/constants';
-import { ATTRIBUTE_KEYS, SKILL_KEYS, recomputeStats, formatStat, type Stats } from '../data/stats';
+import { ATTRIBUTE_KEYS, SKILL_KEYS, recomputeStats, formatStat, type Stats } from '../data/units/stats';
 import { GEAR_SLOTS, getGearBuffs, type GearSlot, type Item } from '../data/gear';
-import { hasPointsToSpend, memberStatInput, noPendingPoints, pointsLeft, type PartyMemberConfig, type PendingPoints } from '../data/party';
-import { xpToNext, type PartyProgress } from '../data/xp';
-import { INVENTORY_COLS, INVENTORY_SIZE, canEquip, canUnequip, isFull, isProficient, type Inventory } from '../data/inventory';
+import { hasPointsToSpend, memberStatInput, noPendingPoints, pointsLeft, type PartyMemberConfig, type PendingPoints } from '../data/units/party';
+import { xpToNext, type PartyProgress } from '../data/units/xp';
+import { INVENTORY_COLS, INVENTORY_SIZE, canEquip, canUnequip, isFull, isProficient, type Inventory } from '../data/gear/inventory';
 import { AttributeTooltips, SkillTooltips, ATTR_LABEL, SLOT_LABEL, capitalize } from '../data/detailStrings';
 import { Tooltip, ItemTooltipContent, TextTip } from './Tooltip';
+import { damageReduction } from '../data/combat/attackResolution';
 import ItemIcon, { rarityGlow } from './ItemIcon';
 import ItemGrid from './ItemGrid';
 import Portrait from './hud/Portrait';
@@ -359,7 +360,7 @@ export default function CharacterSheet({ party, partyHp, partyMp, partyStats, in
                   <StatLine label="MP" delta={stats.mp - baseStats.mp}>{mp} / {stats.mp}</StatLine>
                   <StatLine label="MP Regen" delta={stats.mpRegen - baseStats.mpRegen}>{formatStat('mpRegen', stats.mpRegen)}</StatLine>
                   {STAT_ROWS.map(([label, key]) => (
-                    <StatLine key={key} label={label} delta={stats[key] - baseStats[key]}>{formatStat(key, stats[key])}</StatLine>
+                    <StatLine key={key} label={label} delta={stats[key] - baseStats[key]} tip={statTip(key, stats)}>{formatStat(key, stats[key])}</StatLine>
                   ))}
                 </ul>
               </section>
@@ -387,13 +388,34 @@ export default function CharacterSheet({ party, partyHp, partyMp, partyStats, in
   );
 }
 
-function StatLine({ label, delta, children }: { label: string; delta: number; children: ReactNode }) {
+function StatLine({ label, delta, tip, children }: { label: string; delta: number; tip?: string; children: ReactNode }) {
   return (
     <li className="flex items-center justify-between h-[19px] border-b border-rift-divider">
-      <span className="text-rift-muted">{label}</span>
+      {tip ? (
+        // Hovering or focusing the label explains the value (like the attribute and skill rows)
+        <Tooltip content={<TextTip>{tip}</TextTip>} gap={6}>
+          <span tabIndex={0} className="rf-tiplabel text-rift-muted">{label}</span>
+        </Tooltip>
+      ) : <span className="text-rift-muted">{label}</span>}
       <Val delta={delta} className="gap-[5px]">{children}</Val>
     </li>
   );
+}
+
+/** A DR fraction as a percentage, e.g. 0.173 -> '17.3%'. */
+const drPct = (dr: number) => `${(dr * 100).toFixed(1)}%`;
+
+/** What a defensive stat's value does, as damage reduction (the same formula combat uses: attackResolution). */
+function statTip(key: StatRowKey, stats: Stats): string | undefined {
+  if (key === 'armor') {
+    return `Reduces physical damage taken by ${drPct(damageReduction(stats, true))}. `
+      + 'A quarter of it also counts toward magical defense.';
+  }
+  if (key === 'magicResistance') {
+    return `Reduces magical damage taken by ${drPct(damageReduction(stats, false))} (with a quarter of your armor). `
+      + 'Fire, ice, lightning, shadow, poison, holy and nature.';
+  }
+  return undefined;
 }
 
 function OffenseRow({ row, stats, baseStats }: { row: 'hit' | 'damage' | 'crit'; stats: Stats; baseStats: Stats }) {

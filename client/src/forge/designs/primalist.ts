@@ -1,4 +1,4 @@
-// Model for Primalist (data/classes.ts › primalist). Holds the member's weapon and shield
+// Model for Primalist (data/units/classes.ts › primalist). Holds the member's weapon and shield
 // (src/forge/equip.ts), the same way as the Knight: wand held forward in the right hand, shield strapped
 // to the left forearm.
 // Standard pose. Brown hardened-leather cuirass, a dark green capelet over the shoulders, dark green
@@ -7,8 +7,8 @@ import type { Design } from '../core/types';
 import { blob, loft } from '../core/primitives';
 import { mulC, type RGB, type Vec3 } from '../core/vec';
 import { CHARACTER_HEIGHT } from '../core/stage-config';
-import { ell } from '../designs/_armor';
-import { TORSO, buildBody, classEntry, classHold, cuirass, ponytailHair, type BodyBuild } from '../designs/_character';
+import { ell } from './_armor';
+import { TORSO, buildBody, classEntry, classHold, cuirass, ponytailHair, type BodyBuild } from './_character';
 
 const LEATHER: RGB = [118, 80, 50];
 const DARK_LEATHER: RGB = [70, 48, 34];

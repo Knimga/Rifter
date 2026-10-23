@@ -1,13 +1,15 @@
-import { PHYSICAL_ELEMENTS, type AttackCategory, type DamageElement } from './gear';
-import { ELEMENT_RESISTANCE_FLOOR, type Stats } from './stats';
-import { randInt } from './random';
+import { PHYSICAL_ELEMENTS, type AttackCategory, type DamageElement } from '../gear';
+import { ELEMENT_RESISTANCE_FLOOR, type Stats } from '../units/stats';
+import { randInt } from '../random';
 
 // ─── Tuning Constants ────────────────────────────────────────────────────────
 
 const BASE_HIT_CHANCE = 80;           // base % chance any attack lands
-const DR_DIVISOR = 50;                // higher value = slower scaling of DR
+const DR_DIVISOR = 50;                // at level 1: higher value = slower scaling of DR
+const DR_DIVISOR_PER_LEVEL = 5;       // the divisor grows with the defender's level, so a DR% takes more defense later
+const MAGIC_ARMOR_SHARE = 0.25;       // how much of a unit's armor counts toward its magical defense
 const DR_CAP = 0.75;                  // lower value = more threatening endgame damage
-const CRIT_MULTIPLIER = 2;
+export const CRIT_MULTIPLIER = 2;    // damage and heals
 const GLANCING_MULTIPLIER = 0.7;      // glancing blows deal 30% less damage
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -40,6 +42,9 @@ export interface DamageRoll {
 
 const roll100 = () => randInt(1, 100);
 
+/** Whether a landed hit or a heal crits, by the offense's crit% (category + element). */
+export const rollCrit = (offense: Offense): boolean => roll100() <= offense.crit;
+
 /**
  * Hit/crit come from the attackCategory. Damage/penetration come from the category for physical
  * elements, but from magic for magical elements — and a magic attackCategory routes ALL elements
@@ -60,6 +65,23 @@ export function getOffense(stats: Stats, category: AttackCategory, element: Dama
 
 // ─── Damage Reduction ─────────────────────────────────────────────────────────
 
+/**
+ * A unit's defense against a hit: its armor against physical damage; a quarter of its armor
+ * (MAGIC_ARMOR_SHARE) plus its magic resistance against magical.
+ */
+const defenseAgainst = (target: Pick<Stats, 'armor' | 'magicResistance'>, physical: boolean): number =>
+  physical ? target.armor : target.armor * MAGIC_ARMOR_SHARE + target.magicResistance;
+
+/**
+ * The damage reduction (0..DR_CAP, a fraction) a unit's defense gives against physical or magical hits, before
+ * penetration. Diminishing returns, against a divisor that grows with the unit's level (DR_DIVISOR_PER_LEVEL).
+ */
+export function damageReduction(target: Pick<Stats, 'armor' | 'magicResistance' | 'level'>, physical: boolean): number {
+  const defense = defenseAgainst(target, physical);
+  const divisor = DR_DIVISOR + DR_DIVISOR_PER_LEVEL * Math.max(0, target.level - 1);
+  return (defense / (defense + divisor)) * DR_CAP;
+}
+
 /** Damage after armor/MR DR, then element resistance. Used by attacks and DoT ticks. Min 1. */
 export function applyDR(
   rawDamage: number,
@@ -68,10 +90,7 @@ export function applyDR(
   penetration = 0,          // % points subtracted from armor/MR DR (e.g. 5 reduces 15% DR to 10%)
   elementPenetration = 0,   // % points subtracted from element resistance
 ): number {
-  const defense = PHYSICAL_ELEMENTS.has(element)
-    ? target.armor
-    : target.armor * 0.5 + target.magicResistance;
-  const drPercent = Math.max(0, (defense / (defense + DR_DIVISOR)) * DR_CAP - penetration / 100);
+  const drPercent = Math.max(0, damageReduction(target, PHYSICAL_ELEMENTS.has(element)) - penetration / 100);
   // Rounded to the nearest point (not down), so on average the reduction matches DR% even for small hits
   const afterArmor = Math.max(1, rawDamage - Math.round(rawDamage * drPercent));
   // Negative resistance (a weakness, or penetration past zero) adds damage, down to the floor (-75 = 1.75x)
@@ -95,7 +114,7 @@ export function rollHit(offense: Offense, category: AttackCategory, target: Stat
   return {
     outcome: 'hit',
     glancing: roll100() <= target.glancingBlow,
-    crit: roll100() <= offense.crit,
+    crit: rollCrit(offense),
   };
 }
 

@@ -1,5 +1,5 @@
-import { statSuffix, type AttributeKey, type BuffableStat, type DamageElement, type SkillKey } from "./stats";
-import type { Effect } from "./classes";
+import { statSuffix, type AttributeKey, type BuffableStat, type DamageElement, type SkillKey } from "./units/stats";
+import type { Effect } from "./combat/abilities";
 import type { GearSlot } from "./gear";
 
 export const AttributeTooltips: Record<AttributeKey, string> = {
@@ -49,7 +49,19 @@ export function capitalizeWords(s: string): string {
 export function formatStatLabel(key: string): string {
     return key.replace('Bonus', '').replace(/([A-Z])/g, ' $1').trim()
         .replace(/^\w/, c => c.toUpperCase())
-        .replace(/^Hp\b/, 'HP').replace(/^Mp\b/, 'MP').replace(/^Ap Max$/, 'Max AP');
+        .replace(/^Hp\b/, 'HP').replace(/^Mp\b/, 'MP').replace(/^Ap Max$/, 'Max AP')
+        .replace(/^Threat Multiplier$/, 'Threat');
+}
+
+/**
+ * A class passive's value, signed: '+5', '−15%', or both ('+3 / +10%'). Its stat's label goes beside it
+ * (formatStatLabel): '−15% Threat'.
+ */
+export function formatPassiveValue(stat: string, p: { flat?: number; percent?: number }): string {
+    return [
+        p.flat ? `${formatSigned(p.flat)}${statSuffix(stat)}` : '',
+        p.percent ? `${formatSigned(p.percent)}%` : '',
+    ].filter(Boolean).join(' / ');
 }
 
 /** Signed stat modifier, e.g. '+5 Armor', '−4 Movement', '+10% Dodge'. */
@@ -92,7 +104,8 @@ export interface EffectLine {
  * for this effect's element) adds a scaled "Damage" line under the base damage.
  */
 export function describeEffect(eff: Effect, damageBonus = 0): EffectLine[] {
-    const self = eff.appliesTo === 'caster' ? ' (self)' : '';
+    // Who it lands on, when not the ability's target(s): the caster, or the caster's allies in the area
+    const self = eff.appliesTo === 'caster' ? ' (self)' : eff.appliesTo === 'allies' ? ' (allies)' : '';
     const modifiers = (stats: Partial<Record<BuffableStat, number>>, percent: Partial<Record<BuffableStat, number>> = {}, negate: boolean) => [
         ...Object.entries(stats).map(([s, v]) => formatModifier(s, negate ? -Math.abs(v) : v)),
         ...Object.entries(percent).map(([s, v]) => formatModifier(s, negate ? -Math.abs(v) : v, true)),
@@ -116,6 +129,16 @@ export function describeEffect(eff: Effect, damageBonus = 0): EffectLine[] {
         case 'debuff':
             return [{ label: `Debuff${self}`, value: `${modifiers(eff.stats, eff.statsPercent, true)} × ${eff.rounds}r`, tone: 'debuff' }];
         case 'threat':
-            return [{ label: 'Threat', value: `+${eff.amount}`, tone: 'threat' }];
+        {
+            // '+10', '-50%', or both: '+10, -50%'
+            const signed = (v: number, unit = '') => `${v > 0 ? '+' : '-'}${Math.abs(v)}${unit}`;
+            const parts = [eff.amount ? signed(eff.amount) : '', eff.percent ? signed(eff.percent, '%') : ''].filter(Boolean);
+            return [{ label: 'Threat', value: parts.join(', '), tone: 'threat' }];
+        }
+        case 'root':
+            return [{ label: `Root${self}`, value: `Can't move × ${eff.rounds}r`, tone: 'debuff' }];
+        case 'summon':
+            // The creature's id, which is its name (data/units/summons.ts; not imported here: it imports this module's)
+            return [{ label: 'Summon', value: `${capitalize(eff.creature)} × ${eff.rounds}r`, tone: 'buff' }];
     }
 }

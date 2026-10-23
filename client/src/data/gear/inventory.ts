@@ -1,6 +1,6 @@
-import type { GearSlot, GearSlots, Item } from './gear';
-import { isWeaponItem, isShieldItem, isArmorItem } from './gear';
-import { CLASSES, type ClassData, type ClassKey } from './classes';
+import type { GearSlot, GearSlots, Item } from './types';
+import { isWeaponItem, isShieldItem, isArmorItem } from '.';
+import { CLASSES, type ClassData, type ClassKey } from '../units/classes';
 
 export const INVENTORY_COLS = 12;
 export const INVENTORY_ROWS = 5;

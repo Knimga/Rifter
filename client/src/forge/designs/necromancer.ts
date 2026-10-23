@@ -10,7 +10,7 @@ const ROBE_HUE = 250;
 
 const design: Design = {
   id: 'creature.necromancer',
-  source: { table: 'enemies', key: 'necromancer' }, // data/enemies.ts › necromancer
+  source: { table: 'enemies', key: 'necromancer' }, // data/units/enemies.ts › necromancer
   category: 'creature',
   label: 'Necromancer',
   fit: { kind: 'standing', height: 1.6, maxRadius: 0.75 },

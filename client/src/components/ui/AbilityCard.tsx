@@ -1,17 +1,17 @@
 // An ability, shown in the UI theme's tooltip style (UI handoff, game screen ability tooltip): name, a
 // small-caps line (category · MP · target · range), then its effects. Used as a card in the character
 // select dossier; the game's ability tooltips will use it too.
-import type { Ability } from '../../data/classes';
+import type { Ability } from '../../data/combat/abilities';
 import { PHYSICAL_ELEMENTS, type DamageElement, type WeaponItem } from '../../data/gear';
-import { toAction } from '../../data/abilityExecution';
-import { isArea } from '../../data/dungeonHelpers';
+import { toAction } from '../../data/combat/abilityExecution';
+import { isArea } from '../../data/combat/areas';
 import { AREA_LABEL, EFFECT_TONE_COLOR, describeEffect, type EffectTone } from '../../data/detailStrings';
 import { DAMAGE_ELEMENT_COLOR } from '../../data/constants';
 
 /** Wash for physical abilities: a light grey that, mixed in like an element color, just lifts the card off the panel. */
 const PHYSICAL_TINT = 'var(--el-physical-wash)';
 
-const TARGET_LABEL: Record<Ability['target'], string> = { enemy: 'Enemy', ally: 'Ally', self: 'Self' };
+const TARGET_LABEL: Record<Ability['target'], string> = { enemy: 'Enemy', ally: 'Ally', self: 'Self', tile: 'Tile' };
 
 /**
  * The ability's wash color: its element's, a light grey for physical damage, none without an element.

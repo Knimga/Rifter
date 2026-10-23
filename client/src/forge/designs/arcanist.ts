@@ -1,11 +1,11 @@
-// Model for Arcanist (data/classes.ts › arcanist). Holds the member's weapon (src/forge/equip.ts): a staff
+// Model for Arcanist (data/units/classes.ts › arcanist). Holds the member's weapon (src/forge/equip.ts): a staff
 // is held like a walking stick, its foot planted on the ground.
 // Same body and pose as the Knight. Gentle blue robes fitted at the waist, flaring to the ankles, with
 // bell sleeves widening toward the hands and linen edging; short spiky gray hair; the Knight's skin.
 // His hood is pushed back, hanging behind the neck.
 import type { Design } from '../core/types';
 import { CHARACTER_HEIGHT } from '../core/stage-config';
-import { casterRobe, classEntry, classHold } from '../designs/_character';
+import { casterRobe, classEntry, classHold } from './_character';
 
 const { id, label, source } = classEntry('arcanist');
 

@@ -1,5 +1,5 @@
 // Static weapon data for the weapon drop generator.
-import type { BuffableStat, DamageElement } from '../stats';
+import { DAMAGE_ELEMENTS, type BuffableStat, type DamageElement } from '../units/stats';
 import type { AttackCategory, ImplicitDef, WeaponType } from './types';
 import type { ModelLink } from '../../forge/core/types';
 import { nonWeaponAffixes, meleeStats, rangedStats, magicStats } from './types';
@@ -60,6 +60,12 @@ export interface WeaponTypeData {
   invalidAffixes: BuffableStat[];
 }
 
+/** Affixes no weapon rolls, whatever its type: element resistances (fire, shadow...). Magic resistance still can. */
+const NO_WEAPON_AFFIXES: BuffableStat[] = DAMAGE_ELEMENTS.map((el) => `${el}Resistance` as const);
+
+/** Every affix a weapon of this type never rolls: its type's own list (invalidAffixes), and those no weapon rolls. */
+export const weaponInvalidAffixes = (type: WeaponType): BuffableStat[] => [...WEAPON_TYPE_DATA[type].invalidAffixes, ...NO_WEAPON_AFFIXES];
+
 export const WEAPON_TYPE_DATA: Record<WeaponType, WeaponTypeData> = {
   'Daggers': {
     baseDamage: { min: 4, max: 7 },
@@ -69,7 +75,7 @@ export const WEAPON_TYPE_DATA: Record<WeaponType, WeaponTypeData> = {
     defaultDamageElement: 'piercing',
     implicit: { stat: 'meleeCrit', baseValue: 5, growthPerLevel: 0.5 },
     invalidAffixes: [
-      'threatMultiplier', 'healing', 'glancingBlow', 'devotion', 'redoubt',
+      'healing', 'glancingBlow', 'devotion', 'redoubt',
       ...rangedStats, ...nonWeaponAffixes
     ],
   },
@@ -152,7 +158,7 @@ export const WEAPON_TYPE_DATA: Record<WeaponType, WeaponTypeData> = {
     defaultDamageElement: 'piercing',
     implicit: { stat: 'rangedCrit', baseValue: 3, growthPerLevel: 0.4 },
     invalidAffixes: [
-      'strength', 'healing', 'parry', 'glancingBlow', 'threatMultiplier',
+      'strength', 'healing', 'parry', 'glancingBlow',
       'redoubt', 'devotion', 'magicHit', 'magicCrit',
       ...meleeStats, ...nonWeaponAffixes
     ],
@@ -165,7 +171,7 @@ export const WEAPON_TYPE_DATA: Record<WeaponType, WeaponTypeData> = {
     defaultDamageElement: 'piercing',
     implicit: { stat: 'piercingDamage', baseValue: 2, growthPerLevel: 0.5 },
     invalidAffixes: [
-      'strength', 'healing', 'parry', 'glancingBlow', 'threatMultiplier',
+      'strength', 'healing', 'parry', 'glancingBlow',
       'redoubt', 'devotion', 'magicHit', 'magicCrit',
       ...meleeStats, ...nonWeaponAffixes
     ],

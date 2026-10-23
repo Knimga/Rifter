@@ -11,7 +11,7 @@ import { buildModel } from './core/build';
 import { ITEM_SEED, linkedDesign } from './core/link';
 import { CHARACTER_HEIGHT } from './core/stage-config';
 import { extentAlong, holdItems, type PlacedItem } from './core/hold';
-import { CLASSES, type ClassKey } from '../data/classes';
+import { CLASSES, type ClassKey } from '../data/units/classes';
 import { WEAPON_SERIES } from '../data/gear/weapons';
 import { SHIELDS } from '../data/gear/offhands';
 import type { WeaponType } from '../data/gear/types';

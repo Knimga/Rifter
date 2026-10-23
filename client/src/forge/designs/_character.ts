@@ -19,7 +19,7 @@ import type { Mesh } from '../core/mesh';
 import { slug } from '../core/slug';
 import { blob, box, frustum, loft } from '../core/primitives';
 import { add, cross, mul, mulC, norm, rotX, rotY, sub, type RGB, type Vec3 } from '../core/vec';
-import { CLASSES, type ClassKey } from '../../data/classes';
+import { CLASSES, type ClassKey } from '../../data/units/classes';
 import type { WeaponType } from '../../data/gear/types';
 import { band, ell } from './_armor';
 
@@ -545,13 +545,15 @@ export interface CasterRobeLook {
   boots: RGB;
   /** The hood's dark interior. */
   lining: RGB;
+  /** Draws the hair instead of the default short spiky hair (spikyHair in `hair`), e.g. the Acolyte's. */
+  drawHair?: (m: Mesh) => void;
 }
 
 /**
  * A caster in robes (the Arcanist and the Occultist): the standard body in `build`'s arm pose, a robe
  * fitted at the waist and falling to the ankles (clear of the legs) with edging at the hem, a sash with
  * knotted ends, bell sleeves widening toward the bare hands, small shoulder caps blending the sleeves
- * into the robe, short spiky hair, and the hood pushed back. `rf` jitters the hair.
+ * into the robe, short spiky hair (or `look.drawHair`), and the hood pushed back. `rf` jitters the hair.
  */
 export function casterRobe(m: Mesh, rf: (a: number, b: number) => number, look: CasterRobeLook, build: BodyBuild = {}): void {
   buildBody(m, {
@@ -596,6 +598,7 @@ export function casterRobe(m: Mesh, rf: (a: number, b: number) => number, look: 
     blob(m, [sh[0] * 0.98, sh[1] + 0.01, 0], [0.072, 0.06, 0.08], 0, 0, look.robe, { floorY: sh[1] - 0.04 });
   }
 
-  spikyHair(m, look.hair, rf);
+  if (look.drawHair) look.drawHair(m);
+  else spikyHair(m, look.hair, rf);
   hoodDown(m, { cloth: mulC(look.robe, 0.95), lining: look.lining, trim: look.trim });
 }

@@ -58,6 +58,7 @@
   --rift-loot: #d1a766;
   --rift-levelup: #e2d496;   /* level-up cues and XP fill: "act now", deliberately not the --glow accent */
   --rift-xp-track: #1a1c20;
+  --rift-fog: #050608;       /* fog of war over unseen tiles (read by the map renderer: viewEngine/three/fog.ts) */
   --rift-ap-spent: #15161a;  /* a spent action point */
   --rift-ap-lost: #000000;   /* an action point lost to a debuff (stun) */
   --rift-ap-extra: #ffffff;  /* an extra action point from a buff (haste) */

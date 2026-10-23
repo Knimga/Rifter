@@ -1,16 +1,16 @@
-// Landing an action's outcome (executeAction), for party members and enemies alike: the caster first turns to
-// face the tile it aimed at (view state), then floats, HP/MP and effect changes, loot for enemies it killed,
-// and threat. Outcomes still waiting for the caster's turn are cancelled on a location change.
+// Landing an action's outcome (executeAction), for party members and creatures alike: the caster first turns to
+// face the tile it aimed at (view state), then floats, HP/MP and effect changes,
+// threat, and creatures it summons. Outcomes still waiting for the caster's turn are cancelled on a location change.
 import { useCallback, useEffect, useRef, useState, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
 import { AIM_TURN_LEAD_MS } from '../data/constants';
-import { unitKey, type ActionOutcome, type CombatUnit, type UnitChange } from '../data/abilityExecution';
-import type { CombatState } from '../data/combat';
-import { posKey, samePos, type Pos } from '../data/dungeonHelpers';
-import type { DungeonData, ZoneData } from '../data/dungeonGen';
-import { withEnemyBuffs, type EnemyInstance } from '../data/enemies';
-import { generateLootDrop, type Item } from '../data/gear';
-import type { MemberState } from '../data/party';
-import type { Stats } from '../data/stats';
+import { applyThreatChange, changesThreat, threatKey, unitKey, type ActionOutcome, type CombatUnit, type UnitChange } from '../data/combat/abilityExecution';
+import { joinCombat, type CombatState } from '../data/combat/combat';
+import { findOpenTilesNear, posKey, samePos, type Pos } from '../data/world/grid';
+import { isFreeFloor, type DungeonData } from '../data/world/dungeonGen';
+import { withEnemyBuffs, type EnemyInstance } from '../data/units/enemies';
+import { createSummon, isSummonOf } from '../data/units/summons';
+import type { MemberState } from '../data/units/party';
+import type { Stats } from '../data/units/stats';
 import type { UnitAim } from '../components/ModelLayer';
 import type { SpawnFloat } from './useFloatingText';
 import { useLatest } from './useLatest';
@@ -18,18 +18,21 @@ import { useLatest } from './useLatest';
 /** Land an outcome; returns the delay (ms) before it lands (the caster turning toward its target first). */
 export type ApplyOutcome = (outcome: ActionOutcome, caster: CombatUnit, aimAt?: Pos) => number;
 
-export function useActionOutcomes({ spawnFloat, updateMembers, partyStatsRef, enemiesRef, dungeonRef, setEnemies, setCombat, updateCurrentZone, partyCanUse }: {
+/** How far from its summoner (tiles) a summoned creature may appear, when the tiles around are taken. */
+const SUMMON_MAX_RADIUS = 3;
+
+export function useActionOutcomes({ spawnFloat, updateMembers, partyStatsRef, partyPosRef, partyLevelRef, enemiesRef, dungeonRef, currentZoneRef, setEnemies, setCombat }: {
   spawnFloat: SpawnFloat;
   updateMembers: (fn: (m: MemberState, i: number) => MemberState, only?: (i: number) => boolean) => void;
   partyStatsRef: MutableRefObject<Stats[]>;
+  partyPosRef: MutableRefObject<Pos[]>;
+  /** The party's level: a summoned creature's. */
+  partyLevelRef: MutableRefObject<number>;
   enemiesRef: MutableRefObject<EnemyInstance[]>;
   dungeonRef: MutableRefObject<DungeonData | null>;
+  currentZoneRef: MutableRefObject<number>;
   setEnemies: Dispatch<SetStateAction<EnemyInstance[]>>;
   setCombat: Dispatch<SetStateAction<CombatState>>;
-  /** Change the current zone (its dropped loot). */
-  updateCurrentZone: (fn: (z: ZoneData) => ZoneData) => void;
-  /** Whether someone in the party can use an item (drops favour those). */
-  partyCanUse: (item: Item) => boolean;
 }) {
   // Where each unit last aimed an ability (unit id → tile + sequence): its model turns to face it
   const [unitAims, setUnitAims] = useState<Record<string, UnitAim>>({});
@@ -42,7 +45,7 @@ export function useActionOutcomes({ spawnFloat, updateMembers, partyStatsRef, en
   }, []);
   useEffect(() => cancelPendingOutcomes, [cancelPendingOutcomes]);
 
-  /** An action's effects: floating text, HP/MP/effect changes on party and enemies, loot, threat. */
+  /** An action's effects: floating text, HP/MP/effect changes on party and enemies, threat, summons. */
   const landOutcome = useCallback((outcome: ActionOutcome, caster: CombatUnit) => {
     for (const f of outcome.floats) spawnFloat(f.pos.x, f.pos.y, f.text, f.color);
 
@@ -68,28 +71,8 @@ export function useActionOutcomes({ spawnFloat, updateMembers, partyStatsRef, en
       }, i => partyChanges.has(i));
     }
 
+    // (An enemy this kills drops its loot and gives its XP where every death is handled: useEnemyDeaths)
     if (enemyChanges.size > 0) {
-      // Loot for enemies killed by this action
-      const d = dungeonRef.current;
-      const newDrops: Record<string, Item[]> = {};
-      for (const e of enemiesRef.current) {
-        const c = enemyChanges.get(e.id);
-        if (!d || !c || e.currentHp <= 0 || nextHp(e.currentHp, c, e.stats.hp) > 0) continue;
-        // Favouring what someone in the party can use
-        const item = generateLootDrop(d.baseEnemyLevel, e.classData.dropChance, partyCanUse);
-        if (item) {
-          const key = posKey(e.pos);
-          newDrops[key] = [...(newDrops[key] ?? []), item];
-        }
-      }
-      if (Object.keys(newDrops).length > 0) {
-        updateCurrentZone(z => {
-          const merged = { ...z.droppedItems };
-          for (const [k, items] of Object.entries(newDrops)) merged[k] = [...(merged[k] ?? []), ...items];
-          return { ...z, droppedItems: merged };
-        });
-      }
-
       setEnemies(prev => prev.map(e => {
         const c = enemyChanges.get(e.id);
         if (!c) return e;
@@ -104,14 +87,39 @@ export function useActionOutcomes({ spawnFloat, updateMembers, partyStatsRef, en
       }));
     }
 
-    if (caster.ref.side === 'party' && outcome.threat > 0) {
-      const idx = caster.ref.idx;
-      const gained = outcome.threat * caster.stats.threatMultiplier;
+    // Threat, for a party-side caster (party member or summoned ally)
+    const key = threatKey(caster);
+    if (key && changesThreat(outcome.threat)) {
+      const mult = caster.stats.threatMultiplier;
       setCombat(prev => prev.active
-        ? { ...prev, partyThreat: prev.partyThreat.map((t, i) => i === idx ? t + gained : t) }
+        ? { ...prev, threat: { ...prev.threat, [key]: applyThreatChange(prev.threat[key] ?? 0, outcome.threat, mult) } }
         : prev);
     }
-  }, [spawnFloat, updateCurrentZone, updateMembers]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    // Summoned creatures: each replaces the caster's last one from the same ability, appears on its aimed tile
+    // (or the free tile nearest the caster) and joins the turn order (party members summon, in a dungeon fight)
+    const d = dungeonRef.current;
+    if (outcome.summons && caster.ref.side === 'party' && d) {
+      const ownerIdx = caster.ref.idx;
+      const zone = d.zones[currentZoneRef.current];
+      let creatures = enemiesRef.current;
+      const added: EnemyInstance[] = [];
+      for (const req of outcome.summons) {
+        creatures = creatures.filter(e => !isSummonOf(e, ownerIdx, req.ability));
+        const partyTiles = new Set(partyPosRef.current.map(posKey));
+        const free = isFreeFloor(d, zone, [...creatures, ...added]);
+        const isOpen = (p: Pos) => free(p) && !partyTiles.has(posKey(p));
+        // On the aimed tile (a 'tile' ability), or the nearest free one to it if something moved there meanwhile;
+        // otherwise beside the caster
+        const pos = req.at && isOpen(req.at) ? req.at : findOpenTilesNear(req.at ?? caster.pos, isOpen, 1, SUMMON_MAX_RADIUS)[0];
+        const summon = pos && createSummon(req, ownerIdx, partyLevelRef.current, pos, zone.id);
+        if (summon) added.push(summon);
+      }
+      const replaced = new Set(enemiesRef.current.filter(e => !creatures.includes(e)).map(e => e.id));
+      setEnemies(prev => [...prev.filter(e => !replaced.has(e.id)), ...added]);
+      setCombat(prev => prev.active ? joinCombat(prev, added) : prev);
+    }
+  }, [spawnFloat, updateMembers]); // eslint-disable-line react-hooks/exhaustive-deps
   const landRef = useLatest(landOutcome);
 
   /**

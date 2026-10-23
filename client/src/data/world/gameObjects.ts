@@ -1,6 +1,6 @@
 // Interactable things on the map that aren't units or loot: doors, portals, and later treasure chests,
 // craftbenches and the like. Each is drawn by its forge design (`model`, forge category "Game Objects").
-import type { ModelLink } from '../forge/core/types';
+import type { ModelLink } from '../../forge/core/types';
 
 export interface GameObjectData {
   id: string;
@@ -12,7 +12,7 @@ export interface GameObjectData {
 
 function gameObject(id: string): GameObjectData {
   const o = GAME_OBJECTS.find((x) => x.id === id);
-  if (!o) throw new Error(`no game object '${id}' (data/gameObjects.ts)`);
+  if (!o) throw new Error(`no game object '${id}' (data/world/gameObjects.ts)`);
   return o;
 }
 

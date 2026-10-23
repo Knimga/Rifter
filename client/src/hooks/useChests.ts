@@ -2,11 +2,11 @@
 // taking items from it. Its window closes when the leader walks away or a fight starts; an emptied chest's
 // lid stands open.
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { rollContainerLoot } from '../data/containers';
-import { isAdjacent, type Pos } from '../data/dungeonHelpers';
-import type { DungeonData } from '../data/dungeonGen';
+import { rollContainerLoot } from '../data/gear/containers';
+import { isAdjacent, type Pos } from '../data/world/grid';
+import type { DungeonData } from '../data/world/dungeonGen';
 import type { Item } from '../data/gear';
-import { removeItem } from '../data/inventory';
+import { removeItem } from '../data/gear/inventory';
 
 export function useChests({ location, dungeon, currentZone, combatActive, playerPos, partyCanUse, takeLoot }: {
   location: 'sanctum' | 'dungeon';

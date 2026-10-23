@@ -1,5 +1,5 @@
-// Model for Fire Portal (data/gameObjects.ts › fire-portal).
-import { portalDesign } from '../designs/_portal';
+// Model for Fire Portal (data/world/gameObjects.ts › fire-portal).
+import { portalDesign } from './_portal';
 
 // Fiery orange, deepening to ember red
 export default portalDesign('fire-portal', {

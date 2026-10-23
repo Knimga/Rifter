@@ -1,8 +1,8 @@
 // The party members' state in play (HP, MP, buffs, HoTs, DoTs; indexed like the party) and their effective
 // stats, kept in step: HP and MP are clamped to their maxima whenever stats drop (a buff ending, a gear swap).
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { freshMember, memberStats, type MemberState, type PartyMemberConfig } from '../data/party';
-import type { PartyProgress } from '../data/xp';
+import { freshMember, memberStats, type MemberState, type PartyMemberConfig } from '../data/units/party';
+import type { PartyProgress } from '../data/units/xp';
 import { useLatest } from './useLatest';
 
 // Identity of a buff list. Lists are immutable (a change makes a new array), so a member's stats only need

@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { createMember, type PartyMemberConfig } from './data/party';
-import { START_PROGRESS, type PartyProgress } from './data/xp';
+import { createMember, type PartyMemberConfig } from './data/units/party';
+import { START_PROGRESS, type PartyProgress } from './data/units/xp';
 import MenuScreen from './screens/MenuScreen';
 import CharacterSelectScreen, { type PartyPick } from './screens/CharacterSelectScreen';
 import GameScreen from './screens/GameScreen';

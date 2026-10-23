@@ -6,7 +6,7 @@ import { hslRGB, mixC, mulC, type RGB, type Vec3 } from '../core/vec';
 // Seeds vary clothing color, build, a missing arm and whether the jaw hangs open.
 const design: Design = {
   id: 'creature.zombie',
-  source: { table: 'enemies', key: 'zombie' }, // data/enemies.ts › zombie
+  source: { table: 'enemies', key: 'zombie' }, // data/units/enemies.ts › zombie
   category: 'creature',
   label: 'Zombie',
   fit: { kind: 'standing', height: 1.12, maxRadius: 0.56 }, // uniform scale: height is the limiting fit

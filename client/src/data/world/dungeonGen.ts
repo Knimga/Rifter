@@ -1,9 +1,9 @@
-import type { EnemyClassData, EnemyInstance } from './enemies';
-import type { Item } from './gear';
-import { generateEnemyInstance } from './enemies';
-import { posKey, reachableTiles, type Pos } from './dungeonHelpers';
-import { chance, pick, randInt, shuffle } from './random';
-import { AGGRO_RANGE } from './constants';
+import type { EnemyClassData, EnemyInstance } from '../units/enemies';
+import type { Item } from '../gear';
+import { generateEnemyInstance } from '../units/enemies';
+import { posKey, reachableTiles, type Pos } from './grid';
+import { chance, pick, randInt, shuffle } from '../random';
+import { AGGRO_RANGE } from '../constants';
 
 // ─── Core Types ──────────────────────────────────────────────────────────────
 
