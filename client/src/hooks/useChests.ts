@@ -8,13 +8,15 @@ import type { DungeonData } from '../data/world/dungeonGen';
 import type { Item } from '../data/gear';
 import { removeItem } from '../data/gear/inventory';
 
-export function useChests({ location, dungeon, currentZone, combatActive, playerPos, partyCanUse, takeLoot }: {
+export function useChests({ location, dungeon, currentZone, combatActive, playerPos, partyLevel, partyCanUse, takeLoot }: {
   location: 'sanctum' | 'dungeon';
   dungeon: DungeonData | null;
   currentZone: number;
   combatActive: boolean;
   /** The leader's tile: a chest's window stays open only while it is next to the chest. */
   playerPos: Pos;
+  /** The party's level: a chest's affix tiers are rolled from it. */
+  partyLevel: number;
   /** Whether someone in the party can use an item (a chest's loot favours those). */
   partyCanUse: (item: Item) => boolean;
   /** Take items into the inventory (useInventory): the ones left over, or null if none was taken. */
@@ -31,13 +33,16 @@ export function useChests({ location, dungeon, currentZone, combatActive, player
   const openChest = openChestId ? zoneChests.find(c => c.id === openChestId) ?? null : null;
   const openChestItems = openChest ? containers[openChest.id] ?? [] : [];
 
-  /** Open a chest's window (the map only offers this next to it, out of combat). Filled the first time, at the dungeon's loot level. */
+  /**
+   * Open a chest's window: next to it, never in combat (the map only offers it then; checked here too, so no
+   * other way in can open one mid-fight). Filled the first time, at the dungeon's loot level.
+   */
   const openChestWindow = useCallback((chestId: string) => {
     const chest = zoneChests.find(c => c.id === chestId);
-    if (!chest || !dungeon) return;
-    setContainers(prev => (prev[chestId] ? prev : { ...prev, [chestId]: rollContainerLoot(chest.object, dungeon.baseEnemyLevel, partyCanUse) }));
+    if (!chest || !dungeon || combatActive) return;
+    setContainers(prev => (prev[chestId] ? prev : { ...prev, [chestId]: rollContainerLoot(chest.object, dungeon.baseEnemyLevel, partyLevel, partyCanUse) }));
     setOpenChestId(chestId);
-  }, [zoneChests, dungeon, partyCanUse]);
+  }, [zoneChests, dungeon, partyLevel, partyCanUse, combatActive]);
 
   /** Take one item from the open chest into the party inventory (not when it is full). Emptied, it closes. */
   const lootChest = useCallback((idx: number) => {

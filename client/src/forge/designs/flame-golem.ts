@@ -6,8 +6,8 @@ import { hslRGB, mixC, mulC, type RGB, type Vec3 } from '../core/vec';
 // head between big boulder shoulders, long arms swung back and bent at the elbow, hanging almost to the
 // ground with huge fists, short thick legs. Dark basalt skin (hue locked to a reddish grey), glowing orange
 // lava veins (a third of the torso, less on the bumpy limbs), rock spikes on the shoulders and back, small
-// round bright orange eyes.
-// Seeds vary the rock's tone, the lava's glow, the spikes and the build.
+// round bright orange eyes. The eyes and a few spots of the lava glow with a soft halo.
+// Seeds vary the rock's tone, the lava's glow, the spikes, the build and which lava spots glow.
 const design: Design = {
   id: 'creature.flame-golem',
   source: { table: 'enemies', key: 'flame-golem' }, // data/units/enemies.ts › flame-golem
@@ -68,7 +68,10 @@ const design: Design = {
     const H: Vec3 = [0, 1.5, 0.46];
     blob(m, H, [0.15, 0.13, 0.14], 0, 0.18, stone);
     box(m, [0, H[1] + 0.08, H[2] + 0.04], [0.26, 0.055, 0.1], rock, 0.2);
-    for (const sx of [-1, 1]) blob(m, [sx * 0.065, H[1] + 0.02, H[2] + 0.125], [0.042, 0.042, 0.035], 0, 0.05, eye, { e: 0.95, j: 0.05 });
+    for (const sx of [-1, 1]) {
+      blob(m, [sx * 0.065, H[1] + 0.02, H[2] + 0.125], [0.042, 0.042, 0.035], 0, 0.05, eye, { e: 0.95, j: 0.05 });
+      m.halo([sx * 0.065, H[1] + 0.02, H[2] + 0.16], 0.11, eye);
+    }
 
     // Big boulder shoulders; long arms swung back from the shoulder and bent at the elbow, hanging nearly to
     // the ground beside the body (not held out in front), leaning outward, ending in huge fists
@@ -96,6 +99,21 @@ const design: Design = {
       const len = rf(0.14, 0.24);
       const tip: Vec3 = [base[0] + sx * len * (onShoulder ? 0.6 : 0.3), base[1] + len, base[2] - len * 0.25];
       frustum(m, base, tip, 0.06, 0.006, 4, spikeColor, { caps: false });
+    }
+
+    // A few lava spots glow with a halo: random lava faces, spread apart, each halo just off its face and moving
+    // with its part
+    // A hotter yellow-orange than the lava, so the glow shows against the lava as well as the rock
+    const hotLava = mixC(lava, [255, 224, 130], 0.4);
+    const lavaFaces = m.faces.filter((f) => f.e >= 0.5 && f.c === lava);
+    const glowing: Vec3[] = [];
+    for (let tries = 0, want = ri(5, 8); tries < 60 && glowing.length < want && lavaFaces.length; tries++) {
+      const f = lavaFaces[Math.floor(c.R() * lavaFaces.length)];
+      const ctr: Vec3 = [0, 1, 2].map((k) => (f.v[0][k] + f.v[1][k] + f.v[2][k]) / 3) as Vec3;
+      if (glowing.some((g) => Math.hypot(g[0] - ctr[0], g[1] - ctr[1], g[2] - ctr[2]) < 0.25)) continue;
+      glowing.push(ctr);
+      m.part(m.partNames[f.part]);
+      m.halo(ctr, rf(0.16, 0.24), hotLava);
     }
 
     return 'Flame Golem';

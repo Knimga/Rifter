@@ -95,9 +95,10 @@ function ico(level: number): { V: Vec3[]; F: number[][] } {
  * A lumpy ellipsoid (like `blob`) with glowing patches of molten rock: `share` (0..1) of its faces are emissive
  * `lava`, the rest `col`. The lava grows as a few connected patches (from random seed faces, spreading to
  * neighbouring faces), so it reads as magma showing between rock plates rather than scattered spots, and the
- * share is exact for every seed.
+ * share is exact for every seed. `vein`: the patches' face options (default: glowing lava; e.g. `{ j: 0.18 }`
+ * for unlit moss).
  */
-export function crackedBlob(m: Mesh, c: Vec3, r: Vec3, level: number, jit: number, col: Col, lava: RGB, share: number, o: FaceOpts = {}): void {
+export function crackedBlob(m: Mesh, c: Vec3, r: Vec3, level: number, jit: number, col: Col, lava: Col, share: number, o: FaceOpts = {}, vein: FaceOpts = { e: 0.85, j: 0.1 }): void {
   const { V, F } = ico(level);
   const P = V.map((v): Vec3 => {
     const k = 1 + (m.R() - 0.5) * 2 * jit;
@@ -138,7 +139,7 @@ export function crackedBlob(m: Mesh, c: Vec3, r: Vec3, level: number, jit: numbe
     if (!grew) break;
   }
   F.forEach(([a, b, d], i) =>
-    isLava.has(i) ? m.tri(P[a], P[b], P[d], lava, c, { ...o, e: 0.85, j: 0.1 }) : m.tri(P[a], P[b], P[d], col, c, o));
+    isLava.has(i) ? m.tri(P[a], P[b], P[d], lava, c, { ...o, ...vein }) : m.tri(P[a], P[b], P[d], col, c, o));
 }
 
 /** Low-poly ellipsoid. level 0 = 20 tris, level 1 = 80. jit jitters every vertex radially (shared vertices, so no cracks). */

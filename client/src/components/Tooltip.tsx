@@ -1,7 +1,8 @@
 import { useState, useRef, type ReactNode, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import { PiMouseLeftClickFill, PiMouseRightClickFill } from 'react-icons/pi';
-import { isArmorItem, isShieldItem, isWeaponItem, type Item, type WeaponItem, type ArmorItem, type ShieldItem } from '../data/gear';
+import { isArmorItem, isOffhandItem, isShieldItem, isWeaponItem, type Item, type WeaponItem, type ArmorItem, type ShieldItem, type OffhandItem } from '../data/gear';
+import { OFFHAND_KIND_NAME } from '../data/gear/offhands';
 import type { Stats } from '../data/units/stats';
 import { RARITY_COLOR } from '../data/constants';
 import { describeEffect, formatModifier } from '../data/detailStrings';
@@ -95,13 +96,27 @@ interface ItemTooltipProps {
   stats?: Stats;
   proficient?: boolean;           // false marks the item type pink: the viewer can't use it
   clickAction?: ItemClickAction;  // shows the right-click hint
+  canCompare?: boolean;           // shows the Ctrl "Compare" hint (there is an equipped item to compare it with)
+}
+
+/**
+ * What holding a key does, for the bottom right of a tooltip: the action, then the key as a keycap, e.g.
+ * Compare [Ctrl] (ClickHint mirrored).
+ */
+export function KeyHint({ keyName, children, className = '' }: { keyName: string; children: ReactNode; className?: string }) {
+  return (
+    <div className={`flex items-center gap-1.5 text-[11px] text-rift-label ${className}`}>
+      <span>{children}</span>
+      <kbd aria-label={`Hold ${keyName}:`} className="shrink-0 px-1 py-px border border-rift-edge rounded-sm font-tech text-[9px] leading-none text-rift-muted">{keyName}</kbd>
+    </div>
+  );
 }
 
 /**
  * An item's tooltip: name (rarity color), type, implicit, its main readout (weapon damage and range, or
- * armor), rolled affixes, then the right-click hint.
+ * armor), rolled affixes, then the hints: right-click at the left, Ctrl to compare at the right.
  */
-function ItemTip({ item, type, proficient, clickAction, children }: Omit<ItemTooltipProps, 'stats'> & { item: Item; type: string; children: ReactNode }) {
+function ItemTip({ item, type, proficient, clickAction, canCompare, children }: Omit<ItemTooltipProps, 'stats'> & { item: Item; type: string; children?: ReactNode }) {
   return (
     <div className="w-[236px] box-border px-3.5 py-3 text-xs">
       <div className="font-display text-sm tracking-[0.03em]" style={{ color: RARITY_COLOR[item.rarity] }}>{item.name}</div>
@@ -115,7 +130,12 @@ function ItemTip({ item, type, proficient, clickAction, children }: Omit<ItemToo
           {item.affixes.map((affix, i) => <div key={i}>{formatModifier(affix.stat, affix.value)}</div>)}
         </div>
       )}
-      {clickAction && <ClickHint button="right" className="mt-2">{clickAction}</ClickHint>}
+      {(clickAction || canCompare) && (
+        <div className="mt-2 flex items-center justify-between gap-3">
+          {clickAction && <ClickHint button="right">{clickAction}</ClickHint>}
+          {canCompare && <KeyHint keyName="Ctrl" className="ml-auto">Compare</KeyHint>}
+        </div>
+      )}
     </div>
   );
 }
@@ -140,10 +160,34 @@ function ArmorTooltipContent({ item, stats: _stats, ...rest }: ItemTooltipProps 
   );
 }
 
+/** A quiver: no armor, only its implicit and affixes (ItemTip shows them). */
+function OffhandTooltipContent({ item, stats: _stats, ...rest }: ItemTooltipProps & { item: OffhandItem }) {
+  return <ItemTip item={item} type={OFFHAND_KIND_NAME[item.offhandKind]} {...rest} />;
+}
+
+/**
+ * An item's tooltip with, while `comparing` (Ctrl held), the equipped item's tooltip beside it on the right,
+ * bottoms aligned: the two side by side, no deltas. The hovered one stays where it would be alone. Each in its
+ * own tooltip frame (use with a `bare` Tooltip).
+ */
+export function ItemCompareTooltip({ equipped, comparing, ...props }: ItemTooltipProps & { item: Item; equipped: Item | null; comparing: boolean }) {
+  return (
+    <div className="relative">
+      <div className="rf-tip text-sm overflow-hidden"><ItemTooltipContent {...props} canCompare={!!equipped} /></div>
+      {comparing && equipped && (
+        <div className="rf-tip text-sm overflow-hidden absolute left-full bottom-0 ml-2">
+          <ItemTooltipContent item={equipped} stats={props.stats} />
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** Tooltip for any item kind. */
 export function ItemTooltipContent(props: ItemTooltipProps & { item: Item }) {
   const { item } = props;
   if (isWeaponItem(item)) return <WeaponTooltipContent {...props} item={item} />;
   if (isArmorItem(item) || isShieldItem(item)) return <ArmorTooltipContent {...props} item={item} />;
+  if (isOffhandItem(item)) return <OffhandTooltipContent {...props} item={item} />;
   return null;
 }

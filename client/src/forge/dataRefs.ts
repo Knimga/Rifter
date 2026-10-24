@@ -7,7 +7,7 @@ import { ENEMY_CLASSES, BOSS_CLASSES } from '../data/units/enemies';
 import { SUMMON_CLASSES } from '../data/units/summons';
 import { STARTER_WEAPON_SERIES, WEAPON_SERIES, weaponName } from '../data/gear/weapons';
 import { ARMOR_SERIES, STARTER_ARMOR_SERIES, armorName } from '../data/gear/armor';
-import { SHIELDS, STARTER_SHIELDS } from '../data/gear/offhands';
+import { OFFHANDS, SHIELDS, STARTER_SHIELDS } from '../data/gear/offhands';
 import { CLASSES, type ClassKey } from '../data/units/classes';
 import { GAME_OBJECTS } from '../data/world/gameObjects';
 import { ARMOR_SLOTS, type WeaponType } from '../data/gear/types';
@@ -54,11 +54,14 @@ export function allDataEntries(): DataEntry[] {
       link: s.models[slot],
     })),
   );
-  const offhands: DataEntry[] = SHIELDS.map((s) => ({
-    ref: { table: 'offhands', key: s.id },
-    name: s.name,
-    path: `data/gear/offhands.ts › SHIELDS ${s.id}`,
-    link: s.model,
+  const offhands: DataEntry[] = [
+    ...SHIELDS.map((s) => ({ ...s, list: 'SHIELDS' })),
+    ...Object.entries(OFFHANDS).flatMap(([kind, o]) => o.drops.map((t) => ({ ...t, list: `${kind} drops` }))),
+  ].map((o) => ({
+    ref: { table: 'offhands', key: o.id },
+    name: o.name,
+    path: `data/gear/offhands.ts › ${o.list} ${o.id}`,
+    link: o.model,
   }));
   const classes: DataEntry[] = (Object.entries(CLASSES) as [ClassKey, (typeof CLASSES)[ClassKey]][]).map(([key, c]) => ({
     ref: { table: 'classes', key },
@@ -124,5 +127,6 @@ function starterLinks(): { path: string; link: ModelLink }[] {
     ...STARTER_WEAPON_SERIES.flatMap((s) => Object.entries(s.weapons).map(([type, w]) => ({ path: `data/gear/weapons.ts › STARTER_WEAPON_SERIES ${s.id} › ${type}`, link: w!.model }))),
     ...STARTER_ARMOR_SERIES.flatMap((s) => ARMOR_SLOTS.map((slot) => ({ path: `data/gear/armor.ts › STARTER_ARMOR_SERIES ${s.id} › ${slot}`, link: s.models[slot] }))),
     ...STARTER_SHIELDS.map((s) => ({ path: `data/gear/offhands.ts › STARTER_SHIELDS ${s.id}`, link: s.model })),
+    ...Object.entries(OFFHANDS).flatMap(([kind, o]) => o.starter.map((t) => ({ path: `data/gear/offhands.ts › ${kind} starter ${t.id}`, link: t.model }))),
   ];
 }

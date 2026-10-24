@@ -2,7 +2,7 @@
 // and the armor series: the named sets of four pieces, one series per type and tier (ARMOR_SERIES).
 // Like weapons, a piece is a type x tier: its type sets its stats, its series its name and model.
 import type { BuffableStat } from '../units/stats';
-import { meleeStats, rangedStats, type ArmorSlot } from './types';
+import { damageTypeAffixes, meleeStats, rangedStats, type ArmorSlot } from './types';
 import type { ArmorProficiency } from '../units/classes';
 import type { ModelLink } from '../../forge/core/types';
 
@@ -36,7 +36,11 @@ export const ARMOR_TYPE_DATA: Record<ArmorProficiency, ArmorTypeData> = {
         gloves: { baseValue: 2, growthPerLevel: 0.20 },
       },
     },
-    invalidAffixes: ['strength', 'finesse', 'block', 'parry', 'glancingBlow', ...rangedStats, ...meleeStats],
+    invalidAffixes: [
+      'strength', 'finesse', 'block', 'parry', 'glancingBlow', 
+      ...rangedStats, ...meleeStats, ...damageTypeAffixes(['physical','poison']),
+      'redoubt', 'expertise',
+    ],
   },
   Light: {
     baseArmor: 7,
@@ -49,7 +53,9 @@ export const ARMOR_TYPE_DATA: Record<ArmorProficiency, ArmorTypeData> = {
         gloves: { baseValue: 1, growthPerLevel: 0.10 },
       },
     },
-    invalidAffixes: ['magicHit', 'magicCrit', 'block'],
+    invalidAffixes: [
+      'magicHit', 'magicCrit', 'block', ...damageTypeAffixes(['holy'])
+    ],
   },
   Medium: {
     baseArmor: 8,
@@ -62,7 +68,7 @@ export const ARMOR_TYPE_DATA: Record<ArmorProficiency, ArmorTypeData> = {
         gloves: { baseValue: 1, growthPerLevel: 0.10 },
       },
     },
-    invalidAffixes: [],
+    invalidAffixes: [...damageTypeAffixes(['holy'])],
   },
   Heavy: {
     baseArmor: 12,
@@ -75,7 +81,10 @@ export const ARMOR_TYPE_DATA: Record<ArmorProficiency, ArmorTypeData> = {
         gloves: { baseValue: 2, growthPerLevel: 0.20 },
       },
     },
-    invalidAffixes: ['initiative', 'dodge', 'evasion', 'movement', ...rangedStats],
+    invalidAffixes: [
+      'finesse', 'evasion', 'stealth', 'initiative', 'dodge', 
+      ...rangedStats, ...damageTypeAffixes(['poison','shadow','ice'])
+    ],
   },
 };
 

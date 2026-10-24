@@ -62,3 +62,20 @@ export function trailFollowers(path: Pos[], followers: Pos[], isOpen: (p: Pos) =
     return spot;
   });
 }
+
+/**
+ * Party positions with no two members on one tile: in `order` (who keeps their tile first), a member whose
+ * tile is already taken moves to the nearest open tile no one holds. E.g. a member who fell and was stood on
+ * while down, getting back up.
+ */
+export function spreadOut(positions: Pos[], order: number[], isOpen: (p: Pos) => boolean): Pos[] {
+  const out = [...positions];
+  const placed: Pos[] = [];
+  const isFree = (p: Pos) => isOpen(p) && !placed.some((q) => samePos(p, q));
+  for (const i of order) {
+    const p = placed.some((q) => samePos(q, positions[i])) ? findOpenTilesNear(positions[i], isFree, 1, 5)[0] ?? positions[i] : positions[i];
+    placed.push(p);
+    out[i] = p;
+  }
+  return out;
+}

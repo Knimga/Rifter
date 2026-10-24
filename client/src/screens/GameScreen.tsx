@@ -6,18 +6,21 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { CLASSES } from '../data/units/classes';
 import { generateLootDrop, isWeaponItem, type Item } from '../data/gear';
 import { partyCanUseItem } from '../data/gear/inventory';
-import { AGGRO_RANGE, AUTO_END_TURN_DELAY_MS, COMBAT_TEXT_COLOR, STUNNED_PAUSE_MS } from '../data/constants';
+import { AUTO_END_TURN_DELAY_MS, COMBAT_TEXT_COLOR, STUNNED_PAUSE_MS } from '../data/constants';
 import { hasPointsToSpend, isOnMap, type PartyMemberConfig } from '../data/units/party';
 import { xpToNext, type PartyProgress } from '../data/units/xp';
-import { isHostile, isSummon, type EnemyInstance } from '../data/units/enemies';
-import { affectedKeys, unitsInArea } from '../data/combat/areas';
-import { chebyshev, findOpenTilesNear, hasLineOfSight, posKey, samePos, type Pos } from '../data/world/grid';
-import { partyMoveTargets, partyWalk, findFollowerSpawns, trailFollowers } from '../data/world/movement';
-import { SANCTUM, isSanctumWalkable } from '../data/world/sanctum';
+import { isAlly, isHostile, type EnemyInstance } from '../data/units/enemies';
+import { areaTone } from '../data/combat/areas';
+import { aimPartyAction } from '../data/combat/targeting';
+import type { Ability } from '../data/combat/abilities';
+import { findOpenTilesNear, posKey, samePos, type Pos } from '../data/world/grid';
+import { partyWalk, findFollowerSpawns, spreadOut, trailFollowers } from '../data/world/movement';
+import { SANCTUM, SANCTUM_FLOORS, isSanctumWalkable } from '../data/world/sanctum';
 import { gameObjectName } from '../data/world/gameObjects';
 import { generateDungeon, isFreeFloor, objectTilesOf, spawnDungeonEnemies, zoneWalkable, type DungeonData, type ZoneData } from '../data/world/dungeonGen';
 import { DUNGEON_PRESETS, type DungeonKey } from '../data/world/dungeonPresets';
-import { startCombat, joinCombat, advanceTurn, apLeft, moveBudget, moveCost, stunnedOutcome, getCurrentCombatant, deadPartyIndices, type CombatState } from '../data/combat/combat';
+import { INITIAL_COMBAT, aggroedBy, startCombat, joinCombat, advanceTurn, apLeft, moveBudget, moveCost, stunnedOutcome, getCurrentCombatant, deadPartyIndices, type CombatState } from '../data/combat/combat';
+import { isRooted } from '../data/units/stats';
 import { creatureUnit, executeAction, memberUnit, toAction, type CombatUnit } from '../data/combat/abilityExecution';
 import { useEnemyTurn, type EnemyAoePreview } from '../hooks/useEnemyTurn';
 import { useFloatingText } from '../hooks/useFloatingText';
@@ -32,6 +35,8 @@ import { useGameKeys } from '../hooks/useGameKeys';
 import { useRoundTick } from '../hooks/useRoundTick';
 import { useActionOutcomes } from '../hooks/useActionOutcomes';
 import { useFogOfWar } from '../hooks/useFogOfWar';
+import { useReach } from '../hooks/useReach';
+import { useMapReady } from '../hooks/useMapReady';
 
 import CharacterSheet from '../components/CharacterSheet';
 import ContainerWindow from '../components/ContainerWindow';
@@ -42,6 +47,7 @@ import type { PartyTokenData } from '../components/mapParts';
 import Backdrop from '../components/ui/Backdrop';
 import RiftButton from '../components/ui/RiftButton';
 import ActionDock, { type SlotContent } from '../components/hud/ActionDock';
+import ActingStatus from '../components/hud/ActingStatus';
 import { apState } from '../components/hud/ApTracker';
 import PartyRows from '../components/hud/PartyRows';
 import { heldGear } from '../components/characterModel';
@@ -56,21 +62,8 @@ interface Props {
   setProgress: (progress: PartyProgress) => void;
 }
 
-/** Longest the map stays hidden waiting for its 3D layer (ms): if it never reports ready, show the map anyway. */
-const MAP_READY_TIMEOUT_MS = 1500;
-
 /** Screen space the HUD covers on each side (px): the map pans only within the area inside it. */
 const HUD_INSETS: Insets = { top: 84, right: 24, bottom: 164, left: 300 };
-
-const INITIAL_COMBAT: CombatState = {
-  active: false,
-  turnOrder: [],
-  currentTurnIndex: 0,
-  round: 0,
-  apSpent: 0,
-  paidTiles: 0,
-  threat: {},
-};
 
 export default function GameScreen({ party, setParty, progress, setProgress }: Props) {
   const [location, setLocation] = useState<'sanctum' | 'dungeon'>('sanctum');
@@ -86,6 +79,8 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
   const [enemyAoePreview, setEnemyAoePreview] = useState<EnemyAoePreview | null>(null);
   // The unit (unitKey) a creature is about to hit, highlighted on the map
   const [enemyTargetKey, setEnemyTargetKey] = useState<string | null>(null);
+  // The ability the acting creature is using: named in the status box at the bottom
+  const [enemyAbility, setEnemyAbility] = useState<Ability | null>(null);
   const [currentZone, setCurrentZone] = useState(0);
   const [followerPositions, setFollowerPositions] = useState<Pos[]>([...SANCTUM.followerStarts]);
 
@@ -123,9 +118,9 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
 
   // Current zone data
   const zone = dungeon?.zones[currentZone] ?? null;
-  // Every creature of the zone: hostile enemies, and the party's summoned allies (isSummon)
+  // Every creature of the zone: hostile enemies (summoned ones too), and the party's summoned allies (isAlly)
   const zoneEnemies = enemies.filter(e => e.zoneId === currentZone);
-  const zoneSummons = zoneEnemies.filter(e => isSummon(e) && e.currentHp > 0);
+  const zoneSummons = zoneEnemies.filter(e => isAlly(e) && e.currentHp > 0);
   const portalPos = dungeon && currentZone === dungeon.endZoneId ? dungeon.portalPos : null;
 
   // Party members as drawn on the maps: the leader always, followers only while alive
@@ -142,36 +137,20 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
     // Equipped items, as the member's 3D model holds them
     ...heldGear(m.gear),
   }));
-  // On the map: the leader always, followers only while alive (the HUD's party rows show everyone)
-  const partyTokens = memberTokens.filter(t => isOnMap(t.partyIndex, t.hp));
+  // On the map: the living members (isOnMap; the HUD's party rows show everyone)
+  const partyTokens = memberTokens.filter(t => isOnMap(t.hp));
 
   // Fog of war (dungeons only): what the living members see now, and what the party has seen before. Only
   // known tiles can be walked to, and only enemies in sight are on the map (drawn, targetable).
   // Summoned allies see for the party too (and are always shown)
   const viewers = [...memberTokens.filter(t => t.hp > 0).map(t => t.pos), ...zoneSummons.map(e => e.pos)];
   const { fog, resetFog } = useFogOfWar({ location, dungeon, currentZone, viewers });
-  const seenEnemies = fog ? zoneEnemies.filter(e => isSummon(e) || fog.visible.has(posKey(e.pos))) : zoneEnemies;
+  const seenEnemies = fog ? zoneEnemies.filter(e => isAlly(e) || fog.visible.has(posKey(e.pos))) : zoneEnemies;
 
-  // Where the active mover can go this turn (tile key -> steps it costs), by the shared movement rules
-  // (partyMoveTargets): walls, game objects (the portal, chests) and enemies block the way, and nobody stops
-  // on an occupied tile. The maps highlight exactly these; handleMove accepts only these.
-  // In combat the active member moves on its AP (moveBudget: tiles already paid for, plus `movement` per AP left)
+  // The active mover: in combat the acting member, on its AP (moveBudget: tiles already paid for, plus `movement`
+  // per AP left); out of combat the leader. Where it can move, and aim a 'tile' ability: useReach
   const activeStats = partyAllStats[activePartyIdx];
   const activeAp = combat.active ? apLeft(activeStats.apMax, combat) : 0;
-  const moverPos = combat.active ? activePartyPos : playerPos;
-  const moverMovement = combat.active ? moveBudget(combat.paidTiles, activeAp, activeStats) : partyAllStats[0].movement;
-  const unitTilesKey = [...partyTokens.map(t => posKey(t.pos)), '|', ...zoneEnemies.filter(e => e.currentHp > 0).map(e => `${posKey(e.pos)}${e.ally ? 'a' : ''}`)].join(';');
-  const moveTargets = useMemo(() => {
-    const isWalkable = zone && dungeon ? zoneWalkable(dungeon, zone) : isSanctumWalkable;
-    // Enemies block the way; party members and summoned allies can be walked through, not stopped on
-    const living = zoneEnemies.filter(e => e.currentHp > 0);
-    const enemyTiles = new Set(living.filter(isHostile).map(e => posKey(e.pos)));
-    const unitTiles = new Set([...living.map(e => posKey(e.pos)), ...partyTokens.map(t => posKey(t.pos))]);
-    const targets = partyMoveTargets(moverPos, moverMovement, isWalkable, p => enemyTiles.has(posKey(p)), p => unitTiles.has(posKey(p)));
-    // Never into fog the party hasn't seen through
-    if (fog) for (const key of targets.keys()) if (!fog.visible.has(key) && !fog.explored.has(key)) targets.delete(key);
-    return targets;
-  }, [moverPos.x, moverPos.y, moverMovement, zone, dungeon, unitTilesKey, fog]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // What a move of `steps` costs the active member now (the map shows it on the hovered tile)
   const moveApCost = combat.active
@@ -181,23 +160,13 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
   // Selected action, normalised (weapon folded in) — drives map targeting and range
   const activeAction = activeAbility ? toAction(activeAbility, activeWeapon) : null;
 
-  // Tiles a 'tile' ability (e.g. a summon placed at range) can be aimed at: walkable floor in range and line
-  // of sight of the acting member, that the party sees now, with no one on it. In combat only. The map
-  // highlights and accepts exactly these; handlePlayerAttack checks against them.
-  const tileRange = activeAction?.target === 'tile' ? activeAction.range : null;
-  const tileTargets = useMemo(() => {
-    if (tileRange === null || !combat.active || !zone || !dungeon) return null;
-    const walkable = zoneWalkable(dungeon, zone);
-    const taken = new Set([...partyTokens.map(t => posKey(t.pos)), ...zoneEnemies.filter(e => e.currentHp > 0).map(e => posKey(e.pos))]);
-    const out = new Set<string>();
-    for (const key of zone.floors) {
-      if (taken.has(key) || (fog && !fog.visible.has(key))) continue;
-      const [x, y] = key.split(',').map(Number);
-      const p = { x, y };
-      if (walkable(p) && chebyshev(activePartyPos, p) <= tileRange && hasLineOfSight(activePartyPos, p, zone.floors)) out.add(key);
-    }
-    return out;
-  }, [tileRange, combat.active, zone, dungeon, activePartyPos.x, activePartyPos.y, unitTilesKey, fog]); // eslint-disable-line react-hooks/exhaustive-deps
+  const { moveTargets, tileTargets } = useReach({
+    zone, dungeon, fog, zoneEnemies, combatActive: combat.active,
+    partyTiles: partyTokens.map(t => t.pos),
+    mover: combat.active ? activePartyPos : playerPos,
+    movement: combat.active ? moveBudget(combat.paidTiles, activeAp, activeStats.movement, isRooted(partyBuffs[activePartyIdx] ?? [])) : partyAllStats[0].movement,
+    tileRange: activeAction?.target === 'tile' ? activeAction.range : null,
+  });
 
   // ─── Latest values, for callbacks, timers and the enemy turn ─────────────
 
@@ -232,7 +201,7 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
   const partyCanUse = useCallback((item: Item) => partyCanUseItem(partyRef.current, item), [partyRef]);
 
   const { inventory, takeLoot, equipItem, unequipItem } = useInventory({ party, setParty, spawnFloat });
-  const chests = useChests({ location, dungeon, currentZone, combatActive: combat.active, playerPos, partyCanUse, takeLoot });
+  const chests = useChests({ location, dungeon, currentZone, combatActive: combat.active, playerPos, partyLevel: progress.level, partyCanUse, takeLoot });
 
   /** Replace the current zone's data in the dungeon (e.g. its dropped items). */
   const updateCurrentZone = useCallback((fn: (z: ZoneData) => ZoneData) => {
@@ -263,7 +232,7 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
     if (!d) return;
     const drops: Record<string, Item[]> = {};
     for (const e of dead) {
-      const item = generateLootDrop(d.baseEnemyLevel, e.classData.dropChance, partyCanUse);
+      const item = generateLootDrop(d.baseEnemyLevel, partyLevelRef.current, e.classData.dropChance, partyCanUse);
       if (item) (drops[posKey(e.pos)] ??= []).push(item);
     }
     if (Object.keys(drops).length === 0) return;
@@ -281,7 +250,7 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
   });
   useRoundTick({
     combatActive: combat.active, round: combat.round, membersRef, updateMembers, partyStatsRef, partyPosRef,
-    enemiesRef, setEnemies, setCombat, spawnFloat,
+    enemiesRef, currentZoneRef, setEnemies, setCombat, spawnFloat,
   });
   const { xpGain, addXp, awardKills } = useExperience({ progress, setProgress, party, setParty, spawnFloat, leaderPosRef });
   // Every enemy that dies, however (a hit, a DoT tick), gives its XP and drops its loot, once
@@ -332,6 +301,22 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
 
   // ─── Death checks ────────────────────────────────────────────────────────
 
+  /**
+   * Bring fallen members back (reviveDowned: 10% HP), each on a tile of its own: one that was stood on while it
+   * was down (it was off the map) steps aside to the nearest free tile, the living keeping theirs.
+   */
+  const reviveParty = () => {
+    const down = partyHp.flatMap((hp, i) => (hp <= 0 ? [i] : []));
+    if (down.length > 0) {
+      const order = [...partyHp.flatMap((hp, i) => (hp > 0 ? [i] : [])), ...down];
+      const isOpen = zone && dungeon ? isFreeFloor(dungeon, zone, enemies) : isSanctumWalkable;
+      const spread = spreadOut(partyPositions, order, isOpen);
+      if (!samePos(spread[0], playerPos)) setPlayerPos(spread[0]);
+      if (spread.slice(1).some((p, i) => !samePos(p, followerPositions[i]))) setFollowerPositions(prev => prev.map((p, i) => spread[i + 1] ?? p));
+    }
+    reviveDowned();
+  };
+
   useEffect(() => {
     // A party wipe: everyone wakes in the Sanctum at full HP and MP
     if (partyHp.every(hp => hp <= 0)) {
@@ -340,7 +325,7 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
       return;
     }
     // Out of combat: revive any individual dead members to 10%
-    if (!combat.active && partyHp.some(hp => hp <= 0)) reviveDowned();
+    if (!combat.active && partyHp.some(hp => hp <= 0)) reviveParty();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [partyHp, combat.active]);
 
@@ -361,15 +346,8 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
    * (or add them to the combat already running).
    */
   const triggerAggro = useCallback((pos: Pos, zoneEnemyList: EnemyInstance[], floors: Set<string>, inCombat: boolean) => {
-    const spotted = zoneEnemyList.filter(e =>
-      e.currentHp > 0 && !e.aggroed &&
-      chebyshev(pos, e.pos) <= AGGRO_RANGE &&
-      hasLineOfSight(pos, e.pos, floors)
-    );
-    if (spotted.length === 0) return;
-
-    const aggroGroupIds = new Set(spotted.map(e => e.groupId));
-    const newlyAggroed = zoneEnemyList.filter(e => e.currentHp > 0 && !e.aggroed && aggroGroupIds.has(e.groupId));
+    const newlyAggroed = aggroedBy(pos, zoneEnemyList, floors);
+    if (newlyAggroed.length === 0) return;
     const aggroIds = new Set(newlyAggroed.map(e => e.id));
     setEnemies(prev => prev.map(e => aggroIds.has(e.id) ? { ...e, aggroed: true } : e));
     setCombat(prev => inCombat
@@ -466,45 +444,23 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
       return;
     }
 
-    const isAt = (p: Pos) => samePos(p, targetPos);
+    // Who it lands on (aimPartyAction); used where it can't be, it is just put away
     const partyUnit = (i: number): CombatUnit => memberUnit(i, party[i]?.characterName, partyAllStats[i], partyPosRef.current[i]);
     const caster = partyUnit(activePartyIdx);
-    let targets: CombatUnit[] = [];
-    // The party's side in the ability's area (living members and summoned allies): its 'allies' effects
-    let allies: CombatUnit[] = [];
+    const aimed = aimPartyAction(action, {
+      casterPos: activePartyPos, at: targetPos, floors: zone?.floors ?? SANCTUM_FLOORS, inCombat: combat.active,
+      partySide: () => [...party.flatMap((_, i) => (partyHp[i] ?? 0) > 0 ? [partyUnit(i)] : []), ...zoneSummons.map(creatureUnit)],
+      allyAt: (p) => {
+        const i = partyPositions.findIndex(q => samePos(q, p));
+        const summon = zoneSummons.find(e => samePos(e.pos, p));
+        return i >= 0 ? partyUnit(i) : summon ? creatureUnit(summon) : null;
+      },
+      hostiles: zoneEnemies.filter(e => e.currentHp > 0 && isHostile(e)).map(creatureUnit),
+      tileTargets,
+    });
+    if (!aimed) { clearActiveSlot(); return; }
 
-    if (action.target === 'self') {
-      // Only fire when the player clicks their own tile
-      if (!isAt(activePartyPos)) { clearActiveSlot(); return; }
-    } else if (action.target === 'ally') {
-      // Fire on any party member's tile, in or out of combat, or a summoned ally's
-      const allyIdx = partyPositions.findIndex(isAt);
-      const summon = zoneSummons.find(e => isAt(e.pos));
-      if (allyIdx >= 0) targets = [partyUnit(allyIdx)];
-      else if (summon) targets = [creatureUnit(summon)];
-      else { clearActiveSlot(); return; }
-    } else if (action.target === 'tile') {
-      // An empty tile in range and sight (tileTargets); the outcome gets the tile (e.g. where a summon appears)
-      if (!tileTargets?.has(posKey(targetPos))) { clearActiveSlot(); return; }
-    } else {
-      // Enemy-targeting: only works in combat with a loaded zone, in range and LOS
-      if (!combat.active) { clearActiveSlot(); return; }
-      if (!zone) return;
-      if (chebyshev(activePartyPos, targetPos) > action.range || !hasLineOfSight(activePartyPos, targetPos, zone.floors)) {
-        clearActiveSlot();
-        return;
-      }
-      const area = action.area ?? 'single';
-      const affected = affectedKeys(activePartyPos, targetPos, area, zone.floors);
-      // Enemies only: never the party's summoned allies
-      const hit = zoneEnemies.filter(e => e.currentHp > 0 && isHostile(e) && affected.has(posKey(e.pos)));
-      if (area === 'single' && hit.length === 0) { clearActiveSlot(); return; }
-      targets = hit.map(creatureUnit);
-      const partySide = [...party.flatMap((_, i) => (partyHp[i] ?? 0) > 0 ? [partyUnit(i)] : []), ...zoneSummons.map(creatureUnit)];
-      allies = unitsInArea(affected, partySide);
-    }
-
-    applyActionOutcome(executeAction(caster, action, targets, targetPos, allies), caster, targetPos);
+    applyActionOutcome(executeAction(caster, action, aimed.targets, targetPos, aimed.allies), caster, targetPos);
     clearActiveSlot();
     if (combat.active) setCombat(prev => ({ ...prev, apSpent: prev.apSpent + action.apCost }));
   }, [combat.active, isPlayerTurn, activeAp, activePartyIdx, activeAction, zoneEnemies, activePartyPos, activeMp, partyAllStats, partyPositions, partyHp, party, zone, zoneSummons, tileTargets, applyActionOutcome, spawnFloat]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -547,43 +503,29 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
   useEnemyTurn(
     combat, currentCombatant,
     enemyTurnRefs,
-    setEnemies, setCombat, setEnemyAoePreview, setEnemyTargetKey,
+    setEnemies, setCombat, setEnemyAoePreview, setEnemyTargetKey, setEnemyAbility,
   );
 
   // ─── Combat end detection ────────────────────────────────────────────────
 
-  // Every enemy in the fight is dead: it's over, and the party's summoned allies vanish with it
+  // Every enemy in the fight is dead (summoned ones too): it's over, and every summoned creature vanishes with it
   useEffect(() => {
     if (!combat.active) return;
     const allAggroedDead = zoneEnemies.filter(e => e.aggroed && isHostile(e)).every(e => e.currentHp <= 0);
     if (!allAggroedDead) return;
-    reviveDowned();
+    reviveParty();
     setCombat(INITIAL_COMBAT);
-    setEnemies(prev => prev.filter(isHostile));
+    setEnemies(prev => prev.filter(e => !e.summon));
   }, [combat.active, zoneEnemies]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ─── Map loading ─────────────────────────────────────────────────────────
-  // A new map (the Sanctum, a dungeon zone) shows its HTML floor a moment before its 3D layer has drawn
-  // (models, fog). Until it has, the map is hidden under a dark cover, so it never shows bare or unfogged.
+  // The map stays under a dark cover until its 3D layer has drawn (useMapReady)
   const mapKey = `${location}:${zone?.id ?? ''}`;
-  const [readyMap, setReadyMap] = useState<string | null>(null);
-  const mapLoading = readyMap !== mapKey;
-  const onMapReady = useCallback(() => setReadyMap(mapKey), [mapKey]);
-  useEffect(() => {
-    if (!mapLoading) return;
-    const id = setTimeout(() => setReadyMap(mapKey), MAP_READY_TIMEOUT_MS);
-    return () => clearTimeout(id);
-  }, [mapKey, mapLoading]);
+  const { mapLoading, onMapReady } = useMapReady(mapKey);
 
   // ─── Render ──────────────────────────────────────────────────────────────
 
   const activeTarget = activeAction?.target ?? null;
-  // What the selected ability's area does to those in it: harms (an enemy ability's effects on its targets),
-  // helps (heals, buffs and HoTs on allies there, or on an ally ability's targets), or both
-  const areaHelps = !!activeAction?.effects.some(e => (e.type === 'heal' || e.type === 'buff' || e.type === 'hot')
-    && (e.appliesTo === 'allies' || (e.appliesTo === 'target' && activeAction.target !== 'enemy')));
-  const areaHarms = activeAction?.target === 'enemy' && activeAction.effects.some(e => e.appliesTo === 'target');
-  const areaTone = areaHelps && areaHarms ? 'mixed' : areaHelps ? 'help' : 'harm';
 
   // ─── HUD state ───────────────────────────────────────────────────────────
   // A creature the AI runs (an enemy or a summoned ally) is taking its turn
@@ -599,7 +541,7 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
 
       {/* The map, full screen: drag with the right mouse button to pan (kept within the area the HUD leaves free) */}
       <div className="absolute inset-0">
-        <PanView resetKey={`${location}:${zone?.id ?? ''}`} insets={HUD_INSETS}>
+        <PanView resetKey={mapKey} insets={HUD_INSETS}>
           {location === 'sanctum' && (
             <SanctumMap
               playerPos={playerPos}
@@ -632,7 +574,7 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
               onOpenChest={chests.openChestWindow}
               activeTarget={activeTarget}
               activeAbilityArea={activeAction?.area}
-              areaTone={areaTone}
+              areaTone={activeAction ? areaTone(activeAction) : 'harm'}
               actionRange={activeAction?.range ?? 0}
               onAbilityUse={handlePlayerAttack}
               onAbilityDeselect={clearActiveSlot}
@@ -737,9 +679,8 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
         </div>
       )}
       {aiActing && currentCombatant && (
-        <div role="status" className="rf-hud absolute left-1/2 -translate-x-1/2 bottom-6 z-30 flex items-baseline gap-3.5 px-8 py-5">
-          <span className="font-display text-lg tracking-[0.06em] text-rift-ink">{currentCombatant.name}</span>
-          <span className="text-xs text-rift-muted">is acting</span>
+        <div className="absolute left-1/2 -translate-x-1/2 bottom-6 z-30">
+          <ActingStatus name={currentCombatant.name} ability={enemyAbility} />
         </div>
       )}
 
@@ -757,6 +698,7 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
           partyHp={partyHp}
           partyMp={members.map(m => m.mp)}
           partyStats={partyAllStats}
+          partyBuffs={partyBuffs}
           inventory={inventory}
           onClose={() => setShowCharSheet(false)}
           onEquipItem={equipItem}

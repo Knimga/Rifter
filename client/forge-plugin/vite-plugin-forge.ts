@@ -1,7 +1,7 @@
 // DEV ONLY (apply: 'serve'). Lets the builder page Approve/Discard a draft and save snapshots,
 // and keeps the design registries fresh when design files appear or disappear.
 // Registered in vite.config.ts.
-import { copyFileSync, existsSync, mkdirSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { normalizePath, type Plugin } from 'vite';
 
@@ -60,7 +60,9 @@ export function forgePlugin({ forgeDir, snapshotDir }: { forgeDir: string; snaps
             if (url.startsWith('/approve') || url.startsWith('/discard')) {
               if (!ID.test(stem)) return send(400, { error: 'bad id' });
               if (!existsSync(draft)) return send(404, { error: 'no such draft' });
-              if (url.startsWith('/approve')) copyFileSync(draft, live); // replaces the approved file (git keeps history)
+              // Approve: replaces the approved file (git keeps history). A draft reaches the shared helpers as
+              // '../designs/_x'; from designs/ that is './_x', as approved designs write it.
+              if (url.startsWith('/approve')) writeFileSync(live, readFileSync(draft, 'utf8').replaceAll("from '../designs/", "from './"));
               unlinkSync(draft);
               onDesignFileAddedOrRemoved(draft);
               return send(200, { ok: true });

@@ -1,7 +1,7 @@
 // Placing item models (weapons, shields) into a body model's hands, and merging them into one Model.
 // Renderer-agnostic and game-data-free: callers decide which item goes where and how it is oriented
 // (see src/forge/equip.ts). The result is an ordinary Model, so every renderer shows held gear as-is.
-import type { MeshData, Model } from './types';
+import type { Halo, MeshData, Model } from './types';
 import { cross, dot, mul, norm, sub, type Vec3 } from './vec';
 
 /** Right-handed orthonormal frame: `axis`, then `second` made perpendicular to it, then their cross product. */
@@ -48,11 +48,14 @@ export interface PlacedItem {
   placement: Placement;
 }
 
-/** Item vertex positions moved into body space (a proper rotation + uniform scale, so faces keep their winding). */
-function placePositions(mesh: MeshData, p: Placement): Float32Array {
+/**
+ * Item points (`P`: x, y, z per point) moved into body space (a proper rotation + uniform scale, so faces keep
+ * their winding).
+ */
+function placePoints(P: ArrayLike<number>, p: Placement): Float32Array {
   const [i0, i1, i2] = frame(p.itemAxis, p.itemSecond);
   const [w0, w1, w2] = frame(p.worldAxis, p.worldSecond);
-  const P = mesh.positions, pin = p.itemPin, to = p.worldPin, s = p.scale;
+  const pin = p.itemPin, to = p.worldPin, s = p.scale;
   const out = new Float32Array(P.length);
   for (let k = 0; k < out.length; k += 3) {
     const dx = P[k] - pin[0], dy = P[k + 1] - pin[1], dz = P[k + 2] - pin[2];
@@ -67,7 +70,12 @@ function placePositions(mesh: MeshData, p: Placement): Float32Array {
 export function holdItems(body: Model, items: PlacedItem[]): Model {
   if (!items.length) return body;
   const meshes = [body.mesh, ...items.map((i) => i.mesh)];
-  const positions = [body.mesh.positions, ...items.map((i) => placePositions(i.mesh, i.placement))];
+  const positions = [body.mesh.positions, ...items.map((i) => placePoints(i.mesh.positions, i.placement))];
+  // Each item's halos move with it (and its part), their radius scaled with it
+  const halos: Halo[] = [...body.mesh.halos, ...items.flatMap((item, i) => item.mesh.halos.map((h): Halo => {
+    const q = placePoints(h.p, item.placement);
+    return { p: [q[0], q[1], q[2]], r: h.r * item.placement.scale, c: h.c, part: body.mesh.partNames.length + i };
+  }))];
   const tris = meshes.reduce((n, m) => n + m.triCount, 0);
   const cat = <T extends Float32Array | Uint8Array>(make: (n: number) => T, get: (m: MeshData, i: number) => ArrayLike<number>, per: number): T => {
     const out = make(tris * per);
@@ -100,6 +108,7 @@ export function holdItems(body: Model, items: PlacedItem[]): Model {
       alpha: cat((n) => new Float32Array(n), (m) => m.alpha, 1),
       part,
       partNames,
+      halos,
       bounds: { min, max },
     },
   };

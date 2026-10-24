@@ -9,7 +9,7 @@ import type { Mesh } from '../core/mesh';
 import { blob, frustum } from '../core/primitives';
 import { add, mul, norm, type RGB, type Vec3 } from '../core/vec';
 import { CHARACTER_HEIGHT } from '../core/stage-config';
-import { HEAD, casterRobe, classEntry, classHold } from '../designs/_character';
+import { HEAD, casterRobe, classEntry, classHold } from './_character';
 
 const HAIR: RGB = [222, 194, 122]; // blonde
 

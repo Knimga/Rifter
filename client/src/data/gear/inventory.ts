@@ -1,5 +1,7 @@
 import type { GearSlot, GearSlots, Item } from './types';
-import { isWeaponItem, isShieldItem, isArmorItem } from '.';
+import { isWeaponItem, isShieldItem, isOffhandItem, isArmorItem } from '.';
+import { OFFHAND_PROFICIENCY } from './offhands';
+import { WEAPON_TYPE_DATA } from './weapons';
 import { CLASSES, type ClassData, type ClassKey } from '../units/classes';
 
 export const INVENTORY_COLS = 12;
@@ -32,6 +34,7 @@ export function takeIntoInventory(inventory: Inventory, items: Item[]): { invent
 export function isProficient(classData: ClassData, item: Item): boolean {
   if (isWeaponItem(item)) return (classData.weaponProficiencies as string[]).includes(item.weaponType);
   if (isShieldItem(item)) return classData.weaponProficiencies.includes('Shields');
+  if (isOffhandItem(item)) return classData.weaponProficiencies.includes(OFFHAND_PROFICIENCY[item.offhandKind]);
   if (isArmorItem(item)) return classData.armorProficiencies.includes(item.armorType);
   return false;
 }
@@ -42,9 +45,35 @@ export const partyCanUseItem = (party: { selectedClass: ClassKey }[], item: Item
 
 // ─── Equip / unequip ──────────────────────────────────────────────────────────
 
-/** True if the item at `inventoryIdx` can be equipped (a swap with an occupied slot is fine). */
-export const canEquip = (classData: ClassData, item: Item | undefined): item is Item =>
-  !!item && isProficient(classData, item);
+/**
+ * Whether a mainhand and an offhand can be held together: any offhand with a one-handed weapon (or none),
+ * none with a two-handed one (WEAPON_TYPE_DATA twoHanded).
+ */
+export function handsFit(mainhand: Item | null, offhand: Item | null): boolean {
+  return !mainhand || !offhand || !isWeaponItem(mainhand) || !WEAPON_TYPE_DATA[mainhand.weaponType].twoHanded;
+}
+
+/**
+ * The other hand's item that equipping `item` would push off (a shield when equipping a two-hander, a
+ * two-hander when equipping a shield), or null. It goes to the inventory (equipFromInventory).
+ */
+function handsClash(gear: GearSlots, item: Item): GearSlot | null {
+  if (item.slot === 'mainhand') return handsFit(item, gear.offhand) ? null : 'offhand';
+  if (item.slot === 'offhand') return handsFit(gear.mainhand, item) ? null : 'mainhand';
+  return null;
+}
+
+/**
+ * True if the item at `inventoryIdx` can be equipped: the member is proficient with it, and the inventory has
+ * room for what it displaces (the item in its slot trades places with it; an item in the other hand it can't
+ * be held with comes off too: handsFit).
+ */
+export function canEquip(classData: ClassData, item: Item | undefined, inventory: Inventory, gear: GearSlots): item is Item {
+  if (!item || !isProficient(classData, item)) return false;
+  const clash = handsClash(gear, item);
+  const returned = (gear[item.slot] ? 1 : 0) + (clash && gear[clash] ? 1 : 0);
+  return inventory.length - 1 + returned <= INVENTORY_SIZE;
+}
 
 /** An equipped item can be unequipped whenever the inventory has room for it. */
 export const canUnequip = (inventory: Inventory, gear: GearSlots, slot: GearSlot) =>
@@ -52,14 +81,19 @@ export const canUnequip = (inventory: Inventory, gear: GearSlots, slot: GearSlot
 
 /**
  * Equip the inventory item at `inventoryIdx` into its slot. If the slot was occupied, the
- * previously equipped item takes the new item's place in the inventory (the two trade places).
+ * previously equipped item takes the new item's place in the inventory (the two trade places). An item in
+ * the other hand that can't be held with it (handsFit: a shield with a two-hander) goes to the inventory
+ * too. Caller checks canEquip first.
  */
 export function equipFromInventory(inventory: Inventory, gear: GearSlots, inventoryIdx: number): { inventory: Inventory; gear: GearSlots } {
   const item = inventory[inventoryIdx];
   const displaced = gear[item.slot];
+  const clash = handsClash(gear, item);
+  const next = displaced ? inventory.map((it, i) => i === inventoryIdx ? displaced : it) : removeItem(inventory, inventoryIdx);
+  const clashed = clash ? gear[clash] : null;
   return {
-    inventory: displaced ? inventory.map((it, i) => i === inventoryIdx ? displaced : it) : removeItem(inventory, inventoryIdx),
-    gear: { ...gear, [item.slot]: item },
+    inventory: clashed ? addItem(next, clashed) : next,
+    gear: { ...gear, [item.slot]: item, ...(clash ? { [clash]: null } : {}) },
   };
 }
 

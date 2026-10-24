@@ -38,7 +38,7 @@ export function useInventory({ party, setParty, spawnFloat }: {
 
   const equipItem = useCallback((inventoryIdx: number, charIdx: number) => {
     const member = party[charIdx];
-    if (!member || !canEquip(CLASSES[member.selectedClass], inventory[inventoryIdx])) return;
+    if (!member || !canEquip(CLASSES[member.selectedClass], inventory[inventoryIdx], inventory, member.gear)) return;
     applyGearChange(charIdx, equipFromInventory(inventory, member.gear, inventoryIdx));
   }, [inventory, party, applyGearChange]);
 

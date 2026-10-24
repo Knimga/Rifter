@@ -24,7 +24,7 @@ src/viewEngine/three/   drawing forge models with three.js, in the game and the 
 The forge folder holds the forge UI and the link between its models and game data; drawing models (outside the forge's own page logic) is `viewEngine`'s.
 
 ## Data flow
-`Design.build(ctx)` draws triangles into `ctx.mesh` -> `finalize()` scales to game units and writes standard anchors -> `bake()` produces `MeshData` (flat typed arrays) -> `toThree()` makes up to 3 meshes (lit, emissive unlit, translucent). The same `MeshData` feeds the software contact-sheet renderer.
+`Design.build(ctx)` draws triangles into `ctx.mesh` -> `finalize()` scales to game units and writes standard anchors -> `bake()` produces `MeshData` (flat typed arrays) -> `toThree()` makes up to 3 meshes (lit, emissive unlit, translucent), plus one of camera-facing additive quads for its halos (`m.halo`). The same `MeshData` feeds the software contact-sheet renderer.
 
 ## Units, orientation, camera
 - 1 unit = 1 tile. Grid cell (gx, gy) centers at world (gx + .5, 0, gy + .5). Grid +y is world +z (down the screen, toward the camera).

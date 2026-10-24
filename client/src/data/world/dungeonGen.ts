@@ -2,7 +2,7 @@ import type { EnemyClassData, EnemyInstance } from '../units/enemies';
 import type { Item } from '../gear';
 import { generateEnemyInstance } from '../units/enemies';
 import { posKey, reachableTiles, type Pos } from './grid';
-import { chance, pick, randInt, shuffle } from '../random';
+import { chance, pick, randFloat, randInt, shuffle } from '../random';
 import { AGGRO_RANGE } from '../constants';
 
 // ─── Core Types ──────────────────────────────────────────────────────────────
@@ -29,6 +29,8 @@ export interface ZoneData {
   floors: Set<string>;   // "x,y" keys for all walkable tiles
   rooms: Room[];
   doors: Door[];
+  /** Wall tiles standing in the middle of rooms (IslandConfig): never door spots. */
+  islands: Set<string>;
   droppedItems: Record<string, Item[]>; // "x,y" → items dropped at that tile
 }
 
@@ -78,17 +80,41 @@ export function isFreeFloor(d: DungeonData, zone: ZoneData, enemies: EnemyInstan
 
 // ─── Config Types ─────────────────────────────────────────────────────────────
 
+/**
+ * Islands: small clusters of wall tiles standing in the middle of rooms (pillars, boulders, giant fungus). Each is
+ * a connected blob of `size` tiles; islands never touch each other or the room's walls (always at least one floor
+ * tile between them, diagonals included), so they never block the way. Many single-tile islands, or a few big ones.
+ */
+export interface IslandConfig {
+  /** Share of the zone's rooms that get islands (0..1); the rest have none. */
+  roomChance: number;
+  /** Tiles per island: [min, max]. */
+  size: [number, number];
+  /** Share of a room's floor to turn into islands (0..1), as far as they fit with their gaps. */
+  density: number;
+}
+
 export interface ZoneConfig {
   minRoomSize: number;
   maxRoomSize: number;
   splitDepth: number;
+  /** Width of the corridors ('rooms') or of the openings between rooms ('caverns'). */
   corridorWidth: number;
+  /**
+   * How the rooms are shaped and joined. 'rooms' (default): rectangles joined by straight corridors. 'caverns':
+   * round, organic rooms, each nearly filling its space, joined to their neighbours by short openings.
+   */
+  layout?: 'rooms' | 'caverns';
+  /** Wall islands inside rooms (none if absent). */
+  islands?: IslandConfig;
   enemyGroups: EnemyClassData[][];  // one group chosen at random per room
 }
 
 export interface BossZoneConfig {
-  roomSize: number;       // boss room is a square of this side length
-  corridorWidth: number;  // corridor connecting boss room to antechamber
+  roomSize: number;       // boss room is a square of this side length (a cavern: round, within that square)
+  corridorWidth: number;  // corridor (or, for caverns, opening) connecting boss room to antechamber
+  /** The boss room and its antechamber: rectangles joined by a corridor ('rooms', default), or caverns ('caverns'). */
+  layout?: 'rooms' | 'caverns';
   bossGroup: EnemyClassData[];  // placed scattered in the boss room center
 }
 
@@ -126,6 +152,25 @@ function fillRect(floors: Set<string>, r: Rect): void {
   }
 }
 
+/** A room's floor tiles (within its rectangle: a cavern's or one with islands isn't all floor). */
+function roomFloor(zone: Pick<ZoneData, 'floors'>, room: Rect): Pos[] {
+  const tiles: Pos[] = [];
+  for (let x = room.x; x < room.x + room.w; x++)
+    for (let y = room.y; y < room.y + room.h; y++) if (zone.floors.has(posKey({ x, y }))) tiles.push({ x, y });
+  return tiles;
+}
+
+/** The room's floor tile nearest its center (its center, unless that's an island or outside a cavern's shape). */
+function roomSpot(zone: Pick<ZoneData, 'floors'>, room: Rect): Pos {
+  const c = roomCenter(room);
+  let best = c, bestD = Infinity;
+  for (const p of roomFloor(zone, room)) {
+    const d = (p.x - c.x) ** 2 + (p.y - c.y) ** 2;
+    if (d < bestD) { best = p; bestD = d; }
+  }
+  return best;
+}
+
 // ─── BSP ─────────────────────────────────────────────────────────────────────
 
 interface BSPNode {
@@ -138,7 +183,7 @@ interface BSPNode {
 function splitBSP(
   node: BSPNode,
   depth: number,
-  zoneConfig: Pick<ZoneConfig, 'minRoomSize' | 'maxRoomSize'>,
+  zoneConfig: Pick<ZoneConfig, 'minRoomSize' | 'maxRoomSize' | 'layout'>,
   nextId: { value: number },
 ): void {
   const minLeaf = zoneConfig.minRoomSize + 2; // room + 1 tile padding each side
@@ -176,8 +221,10 @@ function splitBSP(
   const maxH = Math.min(zoneConfig.maxRoomSize, node.h - 2);
   if (maxW < zoneConfig.minRoomSize || maxH < zoneConfig.minRoomSize) return;
 
-  const rw = randInt(zoneConfig.minRoomSize, maxW);
-  const rh = randInt(zoneConfig.minRoomSize, maxH);
+  // A cavern nearly fills its space, so its neighbours are close and the openings between them short
+  const cavern = zoneConfig.layout === 'caverns';
+  const rw = randInt(cavern ? Math.max(zoneConfig.minRoomSize, maxW - 1) : zoneConfig.minRoomSize, maxW);
+  const rh = randInt(cavern ? Math.max(zoneConfig.minRoomSize, maxH - 1) : zoneConfig.minRoomSize, maxH);
   const rx = node.x + 1 + randInt(0, node.w - 2 - rw);
   const ry = node.y + 1 + randInt(0, node.h - 2 - rh);
 
@@ -232,6 +279,138 @@ function connectBSP(node: BSPNode, floors: Set<string>, corridorWidth: number): 
   }
 }
 
+// ─── Caverns ─────────────────────────────────────────────────────────────────
+
+/**
+ * A round, organic room in its rectangle: an oval whose edge wobbles (a few slow waves around it), clipped to
+ * the rectangle.
+ */
+function carveCavern(floors: Set<string>, room: Rect): void {
+  const cx = room.x + room.w / 2, cy = room.y + room.h / 2, rx = room.w / 2, ry = room.h / 2;
+  const waves = [2, 3, 5].map((k, i) => ({ k, amp: randFloat(0.03, [0.1, 0.08, 0.05][i]), phase: randFloat(0, Math.PI * 2) }));
+  for (let x = room.x; x < room.x + room.w; x++) {
+    for (let y = room.y; y < room.y + room.h; y++) {
+      const dx = (x + 0.5 - cx) / rx, dy = (y + 0.5 - cy) / ry, a = Math.atan2(dy, dx);
+      const edge = 1 + waves.reduce((sum, w) => sum + w.amp * Math.sin(w.k * a + w.phase), 0);
+      if (Math.hypot(dx, dy) <= edge) floors.add(posKey({ x, y }));
+    }
+  }
+}
+
+/**
+ * An opening of `width` tiles from `a` to `b` (a straight run of a square brush), within the zone's inner
+ * tiles (its outer ring stays wall).
+ */
+function carveOpening(floors: Set<string>, a: Pos, b: Pos, width: number, zw: number, zh: number): void {
+  const off = -Math.floor((width - 1) / 2);
+  const steps = Math.max(Math.abs(b.x - a.x), Math.abs(b.y - a.y), 1);
+  for (let i = 0; i <= steps; i++) {
+    const px = Math.round(a.x + ((b.x - a.x) * i) / steps), py = Math.round(a.y + ((b.y - a.y) * i) / steps);
+    for (let ox = 0; ox < width; ox++)
+      for (let oy = 0; oy < width; oy++) {
+        const x = px + off + ox, y = py + off + oy;
+        if (x >= 1 && y >= 1 && x < zw - 1 && y < zh - 1) floors.add(posKey({ x, y }));
+      }
+  }
+}
+
+/**
+ * Open two caverns (their floor tiles `A`, `B`) into each other by the shortest way: an opening between the
+ * closest pair of tiles (a random one among the pairs within a tile of the closest).
+ */
+function openBetween(floors: Set<string>, A: Pos[], B: Pos[], width: number, zw: number, zh: number): void {
+  if (A.length === 0 || B.length === 0) return;
+  let best = Infinity;
+  const pairs: { a: Pos; b: Pos; d: number }[] = [];
+  for (const a of A) for (const b of B) {
+    const d = Math.hypot(a.x - b.x, a.y - b.y);
+    if (d <= best + 1) { pairs.push({ a, b, d }); best = Math.min(best, d); }
+  }
+  const { a, b } = pick(pairs.filter(p => p.d <= best + 1));
+  carveOpening(floors, a, b, width, zw, zh);
+}
+
+/**
+ * Join the caverns of the two halves of every split, like connectBSP but by the shortest way (openBetween), so
+ * neighbouring rooms open into each other instead of being joined by long hallways.
+ */
+function connectCaverns(node: BSPNode, floors: Set<string>, width: number, zw: number, zh: number): void {
+  if (!node.left || !node.right) return;
+  connectCaverns(node.left, floors, width, zw, zh);
+  connectCaverns(node.right, floors, width, zw, zh);
+  const tilesOf = (n: BSPNode) => collectRooms(n).flatMap(room => roomFloor({ floors }, room));
+  openBetween(floors, tilesOf(node.left), tilesOf(node.right), width, zw, zh);
+}
+
+/**
+ * Round off the cavern's edges once: a wall tile with at least 5 of its 8 neighbours floor becomes floor (fills
+ * notches where openings meet rooms). The zone's outer ring stays wall.
+ */
+function smoothCaverns(floors: Set<string>, zw: number, zh: number): void {
+  const add: string[] = [];
+  for (let x = 1; x < zw - 1; x++) {
+    for (let y = 1; y < zh - 1; y++) {
+      if (floors.has(posKey({ x, y }))) continue;
+      let n = 0;
+      for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) if ((dx || dy) && floors.has(posKey({ x: x + dx, y: y + dy }))) n++;
+      if (n >= 5) add.push(posKey({ x, y }));
+    }
+  }
+  for (const k of add) floors.add(k);
+}
+
+// ─── Islands ─────────────────────────────────────────────────────────────────
+
+/** True if every floor tile of the zone can be walked to from every other (by the movement rules). */
+function allConnected(floors: Set<string>): boolean {
+  const first = floors.values().next().value;
+  if (first === undefined) return true;
+  const [x, y] = first.split(',').map(Number);
+  return reachableTiles({ x, y }, Infinity, p => floors.has(posKey(p))).size === floors.size;
+}
+
+/**
+ * Islands in a share of the rooms (IslandConfig): in each, blobs of wall grown from random floor tiles until
+ * about `density` of its floor is island. An island tile needs all 8 tiles around it to be floor (or its own
+ * island), so islands keep a gap of at least one tile from the walls and each other; an island is kept only if
+ * every floor tile of the zone can still be walked to.
+ */
+function placeIslands(zone: ZoneData, cfg: IslandConfig): void {
+  const { floors, islands } = zone;
+  const around = (p: Pos) => [-1, 0, 1].flatMap(dx => [-1, 0, 1].filter(dy => dx || dy).map(dy => ({ x: p.x + dx, y: p.y + dy })));
+  for (const room of zone.rooms) {
+    if (!chance(cfg.roomChance)) continue;
+    const roomTiles = roomFloor(zone, room);
+    let left = Math.round(roomTiles.length * cfg.density);
+    // Never smaller than the size range allows: once the room's share left is below it, the room is done
+    for (let tries = 0; left >= cfg.size[0] && tries < 40; tries++) {
+      const own = new Set<string>();
+      const fits = (p: Pos) => floors.has(posKey(p)) && !own.has(posKey(p)) && around(p).every(q => floors.has(posKey(q)) || own.has(posKey(q)));
+      const seeds = roomTiles.filter(fits);
+      if (seeds.length === 0) break;
+      const target = Math.min(left, randInt(cfg.size[0], cfg.size[1]));
+      const grown = [pick(seeds)];
+      own.add(posKey(grown[0]));
+      while (own.size < target) {
+        const next = grown.flatMap(p => [[0, 1], [1, 0], [0, -1], [-1, 0]].map(([dx, dy]) => ({ x: p.x + dx, y: p.y + dy }))).filter(fits);
+        if (next.length === 0) break;
+        const p = pick(next);
+        grown.push(p);
+        own.add(posKey(p));
+      }
+      // Too little room to grow to its minimum: not placed
+      if (own.size < cfg.size[0]) continue;
+      for (const k of own) floors.delete(k);
+      if (!allConnected(floors)) {
+        for (const k of own) floors.add(k);
+        continue;
+      }
+      for (const k of own) islands.add(k);
+      left -= own.size;
+    }
+  }
+}
+
 // ─── Regular Zone Generator ──────────────────────────────────────────────────
 
 function generateZone(id: number, width: number, height: number, zoneConfig: ZoneConfig): ZoneData {
@@ -242,11 +421,18 @@ function generateZone(id: number, width: number, height: number, zoneConfig: Zon
 
   const rooms = collectRooms(root);
   const floors = new Set<string>();
-  rooms.forEach(r => fillRect(floors, r));
+  if (zoneConfig.layout === 'caverns') {
+    rooms.forEach(r => carveCavern(floors, r));
+    connectCaverns(root, floors, zoneConfig.corridorWidth, width, height);
+    smoothCaverns(floors, width, height);
+  } else {
+    rooms.forEach(r => fillRect(floors, r));
+    connectBSP(root, floors, zoneConfig.corridorWidth);
+  }
 
-  connectBSP(root, floors, zoneConfig.corridorWidth);
-
-  return { id, width, height, floors, rooms, doors: [], droppedItems: {} };
+  const zone: ZoneData = { id, width, height, floors, rooms, doors: [], islands: new Set(), droppedItems: {} };
+  if (zoneConfig.islands) placeIslands(zone, zoneConfig.islands);
+  return zone;
 }
 
 // ─── Boss Zone Generator ──────────────────────────────────────────────────────
@@ -257,11 +443,14 @@ const BOSS_ZONE_PADDING = 9;
 
 type CardinalDir = 'north' | 'south' | 'east' | 'west';
 
+/**
+ * Which side of the boss room its door is on: the way from the room's middle toward the door, mostly (a round
+ * room's door can sit inside its square's corners, so the square's sides can't tell).
+ */
 function getEntryDirection(doorPos: Pos, bossRoom: Room): CardinalDir {
-  if (doorPos.y < bossRoom.y) return 'north';
-  if (doorPos.y >= bossRoom.y + bossRoom.h) return 'south';
-  if (doorPos.x < bossRoom.x) return 'west';
-  return 'east';
+  const dx = doorPos.x + 0.5 - (bossRoom.x + bossRoom.w / 2), dy = doorPos.y + 0.5 - (bossRoom.y + bossRoom.h / 2);
+  if (Math.abs(dy) >= Math.abs(dx)) return dy < 0 ? 'north' : 'south';
+  return dx < 0 ? 'west' : 'east';
 }
 
 /** Generates just the main boss room. Antechamber is added after door placement. */
@@ -270,9 +459,10 @@ function generateBossZoneMain(id: number, config: BossZoneConfig): { zone: ZoneD
   const half = Math.floor((zoneSize - config.roomSize) / 2);
   const bossRoom: Room = { id: 0, x: half, y: half, w: config.roomSize, h: config.roomSize };
   const floors = new Set<string>();
-  fillRect(floors, bossRoom);
+  if (config.layout === 'caverns') carveCavern(floors, bossRoom);
+  else fillRect(floors, bossRoom);
   return {
-    zone: { id, width: zoneSize, height: zoneSize, floors, rooms: [bossRoom], doors: [], droppedItems: {} },
+    zone: { id, width: zoneSize, height: zoneSize, floors, rooms: [bossRoom], doors: [], islands: new Set(), droppedItems: {} },
     bossRoom,
   };
 }
@@ -280,51 +470,63 @@ function generateBossZoneMain(id: number, config: BossZoneConfig): { zone: ZoneD
 /**
  * Adds an antechamber (small room) in a random cardinal direction that is not
  * the entry direction, connects it with a corridor, and returns the portal position.
+ * Caverns: the antechamber is a cavern too, opening into the boss room by the shortest way (no corridor).
  */
 function addBossAntechamber(
   zone: ZoneData,
   bossRoom: Room,
   entryDir: CardinalDir,
   corridorWidth: number,
+  layout: BossZoneConfig['layout'] = 'rooms',
 ): Pos {
   const dir = pick((['north', 'south', 'east', 'west'] as const).filter(d => d !== entryDir));
   const { x: cx, y: cy } = roomCenter(bossRoom);
   const A = ANTECHAMBER_SIZE;
 
   // Antechamber placement against the zone edge, and the corridor back to the boss room wall
-  const layout: Record<CardinalDir, { room: Rect; corridor: Parameters<typeof drawCorridor>[0]; from: number; to: number; at: number }> = {
+  const placement: Record<CardinalDir, { room: Rect; corridor: Parameters<typeof drawCorridor>[0]; from: number; to: number; at: number }> = {
     north: { room: { x: cx - Math.floor(A / 2), y: 1, w: A, h: A },                       corridor: 'v', from: 1 + A,                   to: bossRoom.y - 1,               at: cx },
     south: { room: { x: cx - Math.floor(A / 2), y: zone.height - 1 - A, w: A, h: A },     corridor: 'v', from: bossRoom.y + bossRoom.h, to: zone.height - 1 - A - 1,      at: cx },
     east:  { room: { x: zone.width - 1 - A, y: cy - Math.floor(A / 2), w: A, h: A },      corridor: 'h', from: bossRoom.x + bossRoom.w, to: zone.width - 1 - A - 1,       at: cy },
     west:  { room: { x: 1, y: cy - Math.floor(A / 2), w: A, h: A },                       corridor: 'h', from: 1 + A,                   to: bossRoom.x - 1,               at: cy },
   };
-  const { room, corridor, from, to, at } = layout[dir];
-
-  drawCorridor(corridor, from, to, at, zone.floors, corridorWidth);
-  fillRect(zone.floors, room);
+  const { room, corridor, from, to, at } = placement[dir];
   zone.rooms.push({ id: 1, ...room });
 
+  if (layout === 'caverns') {
+    carveCavern(zone.floors, room);
+    openBetween(zone.floors, roomFloor(zone, bossRoom), roomFloor(zone, room), corridorWidth, zone.width, zone.height);
+    smoothCaverns(zone.floors, zone.width, zone.height);
+    return roomSpot(zone, room);
+  }
+  drawCorridor(corridor, from, to, at, zone.floors, corridorWidth);
+  fillRect(zone.floors, room);
   return roomCenter(room);
 }
 
 // ─── Door Placement ─────────────────────────────────────────────────────────
 
-/** Wall tiles directly bordering any room edge (deduplicated). */
+/**
+ * Where a door can go: a wall tile set into the edge of a room's floor (deduplicated), never an island. Along a
+ * rectangular room's sides; around a round room, any wall tile with exactly one floor tile beside it (not
+ * diagonally) and wall behind it, so the door is set into the wall, facing into the room.
+ */
 function findDoorCandidates(zone: ZoneData): Pos[] {
   const candidates = new Map<string, Pos>();
+  const isFloor = (p: Pos) => zone.floors.has(posKey(p));
   const consider = (p: Pos) => {
-    if (p.x >= 0 && p.y >= 0 && p.x < zone.width && p.y < zone.height && !zone.floors.has(posKey(p))) {
+    if (p.x >= 0 && p.y >= 0 && p.x < zone.width && p.y < zone.height && !isFloor(p) && !zone.islands.has(posKey(p))) {
       candidates.set(posKey(p), p);
     }
   };
   for (const room of zone.rooms) {
-    for (let x = room.x; x < room.x + room.w; x++) {
-      consider({ x, y: room.y - 1 });
-      consider({ x, y: room.y + room.h });
-    }
-    for (let y = room.y; y < room.y + room.h; y++) {
-      consider({ x: room.x - 1, y });
-      consider({ x: room.x + room.w, y });
+    // Its floor's edge: every wall tile beside a floor tile of the room (a rectangle's sides, a cavern's outline)
+    for (const t of roomFloor(zone, room)) {
+      for (const [dx, dy] of [[0, 1], [1, 0], [0, -1], [-1, 0]]) {
+        const p = { x: t.x + dx, y: t.y + dy }, behind = { x: p.x + dx, y: p.y + dy };
+        const floorsBeside = [[0, 1], [1, 0], [0, -1], [-1, 0]].filter(([ex, ey]) => isFloor({ x: p.x + ex, y: p.y + ey })).length;
+        if (floorsBeside === 1 && !isFloor(behind)) consider(p);
+      }
     }
   }
   return [...candidates.values()];
@@ -402,7 +604,7 @@ export function generateDungeon(config: DungeonConfig): DungeonData {
   // end from a random point (roughly one end of its longest walk)
   const startEnd = farFloor(zones[0], randomFloor(zones[0]));
   const startRoom = zones[0].rooms.find(r => inRect(startEnd, r)) ?? zones[0].rooms[0];
-  const playerStart = roomCenter(startRoom);
+  const playerStart = roomSpot(zones[0], startRoom);
 
   // Linear chain 0 → 1 → … → boss, no branches: the first zone has one door (forward), every later zone a
   // door back and a door forward. A zone's forward door is as far as possible (by walking) from where the
@@ -424,7 +626,7 @@ export function generateDungeon(config: DungeonConfig): DungeonData {
   // Determine entry direction from the boss zone's entry door, then add antechamber
   const entryDoor = bossZone.doors[0];
   const entryDir = entryDoor ? getEntryDirection(entryDoor.pos, bossRoom) : 'south';
-  const portalPos = addBossAntechamber(bossZone, bossRoom, entryDir, config.bossZone.corridorWidth);
+  const portalPos = addBossAntechamber(bossZone, bossRoom, entryDir, config.bossZone.corridorWidth, config.bossZone.layout);
   const chestSpot = entryDoor ? bossChestSpot(bossZone, bossRoom, entryDoor.pos) : null;
 
   return {
@@ -512,13 +714,16 @@ export function spawnDungeonEnemies(dungeon: DungeonData, config: DungeonConfig)
     }
   }
 
-  /** Place one enemy group on random free floor tiles inside `area`. False (nothing placed) if the group doesn't fit there. */
-  const placeGroup = (zone: ZoneData, area: Rect, group: EnemyClassData[]): boolean => {
+  /**
+   * Place one enemy group on random free floor tiles inside `area` (away from the zone's entry, unless
+   * `nearEntryOk`). False (nothing placed) if the group doesn't fit there.
+   */
+  const placeGroup = (zone: ZoneData, area: Rect, group: EnemyClassData[], nearEntryOk = false): boolean => {
     const free: Pos[] = [];
     for (let x = area.x; x < area.x + area.w; x++) {
       for (let y = area.y; y < area.y + area.h; y++) {
         const key = `${zone.id}:${posKey({ x, y })}`;
-        if (zone.floors.has(posKey({ x, y })) && !occupied.has(key) && !nearEntry.has(key)) free.push({ x, y });
+        if (zone.floors.has(posKey({ x, y })) && !occupied.has(key) && (nearEntryOk || !nearEntry.has(key))) free.push({ x, y });
       }
     }
     if (free.length < group.length) return false;
@@ -536,16 +741,19 @@ export function spawnDungeonEnemies(dungeon: DungeonData, config: DungeonConfig)
 
   for (const zone of dungeon.zones) {
     if (zone.id === dungeon.endZoneId) {
-      // Boss group scattered in the center half of the boss room
+      // Boss group scattered in the center half of the boss room. The boss is always placed: if the center is too
+      // near the door (a round room's door can sit on its diagonal), anywhere in the room away from the door, and
+      // failing that the center after all
       const group = config.bossZone.bossGroup;
       if (group.length === 0) continue;
       const bossRoom = zone.rooms[0];
-      placeGroup(zone, {
+      const center: Rect = {
         x: bossRoom.x + Math.floor(bossRoom.w / 4),
         y: bossRoom.y + Math.floor(bossRoom.h / 4),
         w: Math.ceil(bossRoom.w / 2),
         h: Math.ceil(bossRoom.h / 2),
-      }, group);
+      };
+      if (!placeGroup(zone, center, group) && !placeGroup(zone, bossRoom, group)) placeGroup(zone, center, group, true);
       continue;
     }
 

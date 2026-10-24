@@ -33,6 +33,7 @@ export const GAME_OBJECTS: GameObjectData[] = [
   // map that places it, not here.
   { id: 'necrotic-portal', name: 'Necrotic Portal', model: 'object.necrotic-portal', glow: 'var(--rift-portal-necrotic)' },
   { id: 'fire-portal', name: 'Fire Portal', model: 'object.fire-portal', glow: 'var(--rift-portal-fire)' },
+  { id: 'fungal-portal', name: 'Fungal Portal', model: 'object.fungal-portal', glow: 'var(--rift-portal-fungal)' },
   // A plain wooden chest bound in iron, locked; stands on a floor tile, its lock facing the open side
   { id: 'basic-treasure-chest', name: 'Basic Treasure Chest', model: 'object.basic-treasure-chest' },
 ];

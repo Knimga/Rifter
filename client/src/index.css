@@ -64,6 +64,7 @@
   --rift-ap-extra: #ffffff;  /* an extra action point from a buff (haste) */
   --rift-portal-necrotic: #b2ecc0; /* a usable portal's tile glow, in its own color */
   --rift-portal-fire: #f0a060;
+  --rift-portal-fungal: #d6e47c;
 
   /* Effect lines (ability cards, item tooltips) */
   --tone-base: var(--rift-muted);
@@ -262,6 +263,8 @@
   .rf-apdots > span { width: 4px; height: 4px; border-radius: 50%; background: var(--rift-soft); }
   .rf-aslot .rf-apdots { position: absolute; left: 6px; bottom: 6px; }
   .rf-aslot.is-dim .rf-apdots > span { background: var(--rift-rim-hi); }
+  /* The slot's number key (bottom right, opposite the AP dots): small and dim */
+  .rf-aslot-key { position: absolute; right: 5px; bottom: 3px; font-size: 9px; line-height: 1; color: var(--rift-faint); pointer-events: none; }
 
   /* AP tracker (action bar): label, one pip per action point, available / total, lost-AP chip */
   .rf-ap { display: flex; align-items: center; gap: 8px; min-height: 16px; outline: none; }

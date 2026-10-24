@@ -1,7 +1,7 @@
 // The action bar (UI handoff, game screen, bottom centre): the acting member (portrait, name, class,
 // movement and, in combat, its AP tracker), five slots (weapon attack or an ability, its AP cost as dots;
-// right-click to assign) and End Turn. A slot dims when its ability costs more MP or AP than the member
-// has, or the member can't act now.
+// right-click to assign; number keys 1-5 use them like clicks) and End Turn. A slot dims when its ability
+// costs more MP or AP than the member has, or the member can't act now.
 import { createElement, useEffect, useRef, useState, type CSSProperties, type MouseEvent } from 'react';
 import { CLASSES } from '../../data/units/classes';
 import { type Ability } from '../../data/combat/abilities';
@@ -16,6 +16,10 @@ import ApTracker, { type ApState } from './ApTracker';
 import RiftButton from '../ui/RiftButton';
 import Portrait from './Portrait';
 import { heldGear } from '../characterModel';
+import { useLatest } from '../../hooks/useLatest';
+
+/** Number keys 1..SLOT_KEYS use the action bar's slots, left to right (each slot shows its key). */
+const SLOT_KEYS = 5;
 
 /** What an action bar slot holds: the weapon attack, an ability, or nothing. */
 export type SlotContent = 'weapon-attack' | Ability | null;
@@ -61,6 +65,35 @@ export default function ActionDock({ member, stats, mp, slots, onSlotsChange, ar
   };
 
   const weaponAttack = weapon ? toAction('weapon-attack', weapon) : null;
+
+  /** Slot i's ability (the weapon attack, or the slot's own), and whether it can be used now (MP, AP, turn). */
+  const slotState = (i: number) => {
+    const slot = slots[i];
+    const ability = slot === 'weapon-attack' ? weaponAttack : slot;
+    const afford = !ability || ability.mpCost <= mp;
+    const affordAp = !ability || !ap || ability.apCost <= ap.available;
+    return { slot, ability, afford, affordAp, usable: !!ability && afford && affordAp && canAct };
+  };
+  /** Clicking slot i, or pressing its number key: arm its ability (or disarm it, if armed), when usable. */
+  const toggleSlot = (i: number) => {
+    const { ability, usable } = slotState(i);
+    if (usable) onArmedSlotChange(armedSlot === i && ability ? null : i);
+  };
+
+  // Number keys 1-5 use slots 1-5, like clicking them (not while typing in a field, or with a modifier held)
+  const toggleSlotRef = useLatest(toggleSlot);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.repeat || e.ctrlKey || e.altKey || e.metaKey) return;
+      const target = e.target as HTMLElement | null;
+      if (target && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))) return;
+      const n = Number(e.key);
+      if (Number.isInteger(n) && n >= 1 && n <= SLOT_KEYS) toggleSlotRef.current(n - 1);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [toggleSlotRef]);
+
   // The armed slot's AP cost, previewed on the tracker
   const armedContent = armedSlot !== null ? slots[armedSlot] : null;
   const armedCost = (armedContent === 'weapon-attack' ? weaponAttack : armedContent)?.apCost ?? 0;
@@ -88,11 +121,8 @@ export default function ActionDock({ member, stats, mp, slots, onSlotsChange, ar
 
       {/* Slots */}
       <div className="flex gap-2">
-        {slots.map((slot, i) => {
-          const ability = slot === 'weapon-attack' ? weaponAttack : slot;
-          const afford = !ability || ability.mpCost <= mp;
-          const affordAp = !ability || !ap || ability.apCost <= ap.available;
-          const usable = !!ability && afford && affordAp && canAct;
+        {slots.map((_, i) => {
+          const { slot, ability, afford, affordAp, usable } = slotState(i);
           const warning = !affordAp ? 'Not enough action points' : !afford ? 'Not enough mana' : undefined;
           const armed = armedSlot === i && !!ability;
           const card = ability && (slot === 'weapon-attack' && weapon ? { ...ability, name: weapon.name } : ability);
@@ -113,11 +143,12 @@ export default function ActionDock({ member, stats, mp, slots, onSlotsChange, ar
                   style={tint ? ({ '--tint': tint } as CSSProperties) : undefined}
                   aria-pressed={armed} aria-disabled={!usable}
                   aria-label={ability ? `${card?.name}, ${ability.apCost} AP${ability.mpCost ? `, ${ability.mpCost} MP` : ''}${warning ? `, ${warning.toLowerCase()}` : ''}` : `Empty slot ${i + 1}`}
-                  onClick={() => usable && onArmedSlotChange(armed ? null : i)}
+                  onClick={() => toggleSlot(i)}
                   onContextMenu={(e: MouseEvent) => { e.preventDefault(); setMenuSlot(menuSlot === i ? null : i); }}>
                   {slot === 'weapon-attack' && weapon && <ItemIcon item={weapon} className="w-10 h-10" />}
                   {slot && slot !== 'weapon-attack' && slot.icon && createElement(slot.icon, { className: 'w-7 h-7' })}
                   {ability && <ApDots count={ability.apCost} />}
+                  {i < SLOT_KEYS && <span aria-hidden="true" className="rf-aslot-key">{i + 1}</span>}
                   {!ability && (
                     <svg aria-hidden="true" width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round"><path d="M9 4v10M4 9h10" /></svg>
                   )}

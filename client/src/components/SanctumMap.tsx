@@ -3,10 +3,10 @@ import type { TargetType } from '../data/combat/abilities';
 import { gameObjectGlow, gameObjectModel } from '../data/world/gameObjects';
 import { isAdjacent, posKey, type Pos } from '../data/world/grid';
 import { yawFromGridMove } from '../forge/core/facing';
-import type { DungeonKey } from '../data/world/dungeonPresets';
+import { DUNGEON_PRESETS, type DungeonKey } from '../data/world/dungeonPresets';
 import { SANCTUM_FLOOR_COLOR, SANCTUM_WALL_COLOR } from '../data/constants';
 import { SANCTUM, isSanctumWall, sanctumPortalAt } from '../data/world/sanctum';
-import { Board, FloorGrid, FloorTile, MoveLineOverlay, TileHighlight, UsableGlow, toMapMember, useBoard, useHoveredTile, useStableHandler, type PartyTokenData } from './mapParts';
+import { Board, FloorGrid, FloorTile, HoverEdgeGlow, MoveLineOverlay, ObjectTag, PORTAL_TAG_HEIGHT, TileHighlight, UsableGlow, portalTag, toMapMember, useBoard, useHoveredTile, useStableHandler, type PartyTokenData } from './mapParts';
 
 // 3D party models over the tile grid. Lazy: it pulls in three.js (GameScreen preloads it on mount).
 const ModelLayer = lazy(() => import('./ModelLayer'));
@@ -38,6 +38,7 @@ interface Props {
 
 export default function SanctumMap({ playerPos, activeMoverPos, party, moveTargets, onMove, onEnterDungeon, activeTarget, onAbilityUse, onAbilityDeselect, onMemberSelect, aims, onReady }: Props) {
   const hover = useHoveredTile();
+  const hoveredPortal = hover.hovered ? sanctumPortalAt(hover.hovered) : undefined;
   const board = useBoard(SANCTUM.width, SANCTUM.height);
 
   const memberByKey = useMemo(() => new Map(party.map(m => [posKey(m.pos), m])), [party]);
@@ -77,8 +78,11 @@ export default function SanctumMap({ playerPos, activeMoverPos, party, moveTarge
         color={isWall ? SANCTUM_WALL_COLOR : SANCTUM_FLOOR_COLOR}
         brighten={!isWall && !activeTarget && canMoveTo(p) && hover.isHovered(p)}>
         {allyTarget && <TileHighlight kind="ally" />}
-        {/* A portal (a model, see SANCTUM_OBJECTS) glows on its tile while the leader can use it */}
-        {portal && isAdjacent(playerPos, portal.pos) && <UsableGlow color={gameObjectGlow(portal.object)} hovered={hover.isHovered(p)} />}
+        {/* A portal (a model, see SANCTUM_OBJECTS) glows on its tile while the leader can use it; hovered from
+            farther away, its edges glow faintly */}
+        {portal && (isAdjacent(playerPos, portal.pos)
+          ? <UsableGlow color={gameObjectGlow(portal.object)} hovered={hover.isHovered(p)} />
+          : hover.isHovered(p) && <HoverEdgeGlow color={gameObjectGlow(portal.object)} />)}
       </FloorTile>
     );
   };
@@ -98,6 +102,8 @@ export default function SanctumMap({ playerPos, activeMoverPos, party, moveTarge
       <Suspense fallback={null}>
         <ModelLayer board={board} party={modelParty} objects={SANCTUM_OBJECTS} aims={aims} onReady={onReady} />
       </Suspense>
+      {/* Where a hovered portal leads, at once, wherever the party stands */}
+      {hoveredPortal && <ObjectTag board={board} x={hoveredPortal.pos.x} y={hoveredPortal.pos.y} height={PORTAL_TAG_HEIGHT} text={portalTag(DUNGEON_PRESETS[hoveredPortal.dungeon].name)} />}
     </Board>
   );
 }

@@ -28,9 +28,9 @@ export const CONTAINER_LOOT: Record<string, ContainerLoot> = {
  * Fill a container: its items, of item `level`, by its CONTAINER_LOOT entry. Items the party can use
  * (`usable`) are favoured, as with drops (generateLootItem).
  */
-export function rollContainerLoot(objectId: string, level: number, usable?: (item: Item) => boolean): Item[] {
+export function rollContainerLoot(objectId: string, level: number, partyLevel: number, usable?: (item: Item) => boolean): Item[] {
   const loot = CONTAINER_LOOT[objectId];
   if (!loot) throw new Error(`no loot for container '${objectId}' (data/gear/containers.ts)`);
   const count = Math.min(CONTAINER_SIZE, randInt(loot.items[0], loot.items[1]));
-  return Array.from({ length: count }, () => generateLootItem(level, { usable, rarityWeights: loot.rarityWeights }));
+  return Array.from({ length: count }, () => generateLootItem(level, { usable, rarityWeights: loot.rarityWeights, partyLevel }));
 }

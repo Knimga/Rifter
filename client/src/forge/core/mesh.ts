@@ -1,6 +1,6 @@
 import type { Vec3, RGB } from './vec';
 import type { Rng } from './rng';
-import type { MeshData } from './types';
+import type { Halo, MeshData } from './types';
 
 export type ColorFn = (centroid: Vec3, normal: Vec3) => RGB;
 export interface FaceOpts {
@@ -32,6 +32,8 @@ export class Mesh {
   partNames: string[] = ['body'];
   pivots: Record<string, Vec3> = {};
   anchors: Record<string, Vec3> = {};
+  /** Halos so far (Mesh.halo); their color in 0..255 until bake. */
+  halos: { p: Vec3; r: number; c: RGB; part: number }[] = [];
   private cur = 0;
 
   constructor(readonly R: Rng) {}
@@ -49,6 +51,15 @@ export class Mesh {
 
   anchor(name: string, p: Vec3): void {
     this.anchors[name] = p;
+  }
+
+  /**
+   * A soft glow of color `c` around `p`, out to radius `r` (a halo: see Halo), moving with the current part. Put it
+   * on the model's own lights (eyes, cores, spores), usually over an emissive face. Placed where given: `xf`
+   * doesn't move it (`xfAll` does), so give it its final position.
+   */
+  halo(p: Vec3, r: number, c: RGB): void {
+    this.halos.push({ p: [p[0], p[1], p[2]], r, c, part: this.cur });
   }
 
   /**
@@ -97,11 +108,12 @@ export class Mesh {
     }
   }
 
-  /** Transform everything, including anchors and pivots. */
-  xfAll(fn: (p: Vec3) => Vec3): void {
+  /** Transform everything, including anchors, pivots and halos (`scale`: how much `fn` scales, for halo radii). */
+  xfAll(fn: (p: Vec3) => Vec3, scale = 1): void {
     this.xf(0, fn);
     for (const k of Object.keys(this.anchors)) this.anchors[k] = fn(this.anchors[k]);
     for (const k of Object.keys(this.pivots)) this.pivots[k] = fn(this.pivots[k]);
+    for (const h of this.halos) { h.p = fn(h.p); h.r *= scale; }
   }
 
   bounds(): { min: Vec3; max: Vec3 } {
@@ -145,6 +157,7 @@ export function bake(m: Mesh): MeshData {
     partNames: [...m.partNames],
     pivots: { ...m.pivots },
     anchors: { ...m.anchors },
+    halos: m.halos.map((h): Halo => ({ p: h.p, r: h.r, c: [h.c[0] / 255, h.c[1] / 255, h.c[2] / 255], part: h.part })),
     bounds: m.bounds(),
   };
 }

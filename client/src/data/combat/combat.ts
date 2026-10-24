@@ -1,9 +1,8 @@
-import type { EnemyInstance } from '../units/enemies';
-import { withEnemyBuffs } from '../units/enemies';
+import { isAlly, withEnemyBuffs, type EnemyInstance } from '../units/enemies';
 import type { ActiveDot, ActiveHot, Stats } from '../units/stats';
-import type { Pos } from '../world/grid';
+import { chebyshev, hasLineOfSight, type Pos } from '../world/grid';
 import { tickDots, tickDurations, tickHots, type ActionOutcome } from './abilityExecution';
-import { COMBAT_TEXT_COLOR } from '../constants';
+import { AGGRO_RANGE, COMBAT_TEXT_COLOR } from '../constants';
 import { randInt } from '../random';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -30,9 +29,31 @@ export interface CombatState {
   threat: Record<string, number>;
 }
 
+/** No fight going on. */
+export const INITIAL_COMBAT: CombatState = {
+  active: false,
+  turnOrder: [],
+  currentTurnIndex: 0,
+  round: 0,
+  apSpent: 0,
+  paidTiles: 0,
+  threat: {},
+};
+
 // ─── Functions ───────────────────────────────────────────────────────────────
 
 const d20 = () => randInt(1, 20);
+
+/**
+ * The enemies a party member at `pos` stirs: every unaggroed group with a living member within AGGRO_RANGE of it
+ * and in sight, whole (`zoneEnemies`: the creatures of its zone; `floors`: the zone's floor, for sight).
+ */
+export function aggroedBy(pos: Pos, zoneEnemies: EnemyInstance[], floors: ReadonlySet<string>): EnemyInstance[] {
+  const spotted = new Set(zoneEnemies
+    .filter(e => e.currentHp > 0 && !e.aggroed && chebyshev(pos, e.pos) <= AGGRO_RANGE && hasLineOfSight(pos, e.pos, floors))
+    .map(e => e.groupId));
+  return spotted.size ? zoneEnemies.filter(e => e.currentHp > 0 && !e.aggroed && spotted.has(e.groupId)) : [];
+}
 
 export function startCombat(
   partyMembers: Array<{ stats: Stats; name: string }>,
@@ -88,10 +109,10 @@ export const apLeft = (apMax: number, state: Pick<CombatState, 'apSpent'>) => Ma
 
 /**
  * Farthest a unit can move this turn (steps): the tiles already paid for, plus `movement` per AP left. None
- * while it is rooted (Stats.rooted).
+ * while it is rooted (isRooted).
  */
-export const moveBudget = (paidTiles: number, ap: number, stats: Pick<Stats, 'movement' | 'rooted'>) =>
-  stats.rooted ? 0 : paidTiles + ap * stats.movement;
+export const moveBudget = (paidTiles: number, ap: number, movement: number, rooted: boolean) =>
+  rooted ? 0 : paidTiles + ap * movement;
 
 /** What a move of `steps` costs: the AP to pay (only once the paid tiles run out) and the paid tiles left after. */
 export function moveCost(steps: number, paidTiles: number, movement: number): { apSpent: number; tilesLeft: number } {
@@ -99,7 +120,7 @@ export function moveCost(steps: number, paidTiles: number, movement: number): { 
   return { apSpent, tilesLeft: paidTiles + apSpent * movement - steps };
 }
 
-/** Insert creatures into an ongoing combat's turn order: newly-aggroed enemies, or newly summoned allies. */
+/** Insert creatures into an ongoing combat's turn order: newly-aggroed enemies, or newly summoned creatures (either side). */
 export function joinCombat(state: CombatState, newEnemies: EnemyInstance[]): CombatState {
   if (newEnemies.length === 0) return state;
 
@@ -108,7 +129,7 @@ export function joinCombat(state: CombatState, newEnemies: EnemyInstance[]): Com
     name: e.classData.name,
     initiativeRoll: d20() + e.stats.initiative,
     isPlayer: false,
-    ...(e.ally ? { isAlly: true } : {}),
+    ...(isAlly(e) ? { isAlly: true } : {}),
   }));
 
   // Build new turn order: merge existing + new, sorted by initiative
@@ -204,19 +225,20 @@ export interface EnemyTickEvent {
 }
 
 /**
- * Apply all top-of-round effects to creatures: buff expiry, regen, HoT and DoT ticks. A summoned ally's time
- * runs down too: one whose rounds run out vanishes (removed, listed in `vanished`).
+ * Apply all top-of-round effects to the creatures of zone `zoneId` (where the party is; the others wait, untouched):
+ * buff expiry, regen, HoT and DoT ticks. A summoned creature's time runs down too (either side's): one whose
+ * rounds run out vanishes (removed, listed in `vanished`).
  */
-export function applyTopOfRound(enemies: EnemyInstance[]): { enemies: EnemyInstance[]; events: EnemyTickEvent[]; vanished: EnemyInstance[] } {
+export function applyTopOfRound(enemies: EnemyInstance[], zoneId: number): { enemies: EnemyInstance[]; events: EnemyTickEvent[]; vanished: EnemyInstance[] } {
   const events: EnemyTickEvent[] = [];
-  const vanished = enemies.filter(e => e.ally && e.currentHp > 0 && e.ally.roundsLeft <= 1);
+  const vanished = enemies.filter(e => e.zoneId === zoneId && e.summon && e.currentHp > 0 && e.summon.roundsLeft <= 1);
 
   let changed = vanished.length > 0;
   const updated = enemies.filter(e => !vanished.includes(e)).map(e => {
-    if (e.currentHp <= 0) return e;
-    if (e.ally) {
+    if (e.zoneId !== zoneId || e.currentHp <= 0) return e;
+    if (e.summon) {
       changed = true;
-      e = { ...e, ally: { ...e.ally, roundsLeft: e.ally.roundsLeft - 1 } };
+      e = { ...e, summon: { ...e.summon, roundsLeft: e.summon.roundsLeft - 1 } };
     }
 
     // Buff expiry first so regen/DR use the post-expiry stats

@@ -10,20 +10,20 @@ import { characterLookKey, characterModel } from '../characterModel';
 // Rendered portraits by look (class + held gear)
 const cache = new Map<string, string>();
 
-export default function Portrait({ classKey, weapon, shield, size }: {
+export default function Portrait({ classKey, weapon, offhand, size }: {
   classKey: ClassKey;
   weapon?: HeldWeapon;
-  shield?: ModelLink;
+  offhand?: ModelLink;
   /** Box size, px. */
   size: number;
 }) {
-  const key = characterLookKey(classKey, weapon, shield);
+  const key = characterLookKey(classKey, weapon, offhand);
   const url = cache.get(key);
   const [, setReady] = useState(0);
 
   useEffect(() => {
     if (url) return;
-    const model = characterModel(classKey, weapon, shield);
+    const model = characterModel(classKey, weapon, offhand);
     if (!model) return;
     let live = true;
     import('../../viewEngine/three/icons').then(({ renderPortrait }) => {

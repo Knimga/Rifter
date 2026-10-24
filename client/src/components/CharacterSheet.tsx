@@ -8,9 +8,9 @@ import { lazy, Suspense, useEffect, useMemo, useState, type ComponentType, type 
 import { Crown, Shirt, Hand, Footprints, Sword, Shield } from 'lucide-react';
 import { CLASSES } from '../data/units/classes';
 import { ATTACK_CATEGORY_COLOR } from '../data/constants';
-import { ATTRIBUTE_KEYS, SKILL_KEYS, recomputeStats, formatStat, type Stats } from '../data/units/stats';
-import { GEAR_SLOTS, getGearBuffs, type GearSlot, type Item } from '../data/gear';
-import { hasPointsToSpend, memberStatInput, noPendingPoints, pointsLeft, type PartyMemberConfig, type PendingPoints } from '../data/units/party';
+import { ATTRIBUTE_KEYS, SKILL_KEYS, recomputeStats, formatStat, type ActiveBuff, type Stats } from '../data/units/stats';
+import { GEAR_SLOTS, type GearSlot, type Item } from '../data/gear';
+import { hasPointsToSpend, memberStatInput, memberStats, noPendingPoints, pointsLeft, type PartyMemberConfig, type PendingPoints } from '../data/units/party';
 import { xpToNext, type PartyProgress } from '../data/units/xp';
 import { INVENTORY_COLS, INVENTORY_SIZE, canEquip, canUnequip, isFull, isProficient, type Inventory } from '../data/gear/inventory';
 import { AttributeTooltips, SkillTooltips, ATTR_LABEL, SLOT_LABEL, capitalize } from '../data/detailStrings';
@@ -31,6 +31,8 @@ interface Props {
   partyHp: number[];
   partyMp: number[];
   partyStats: Stats[];
+  /** Each member's active buffs and debuffs (effects, not gear): what colors their stats red. */
+  partyBuffs: ActiveBuff[][];
   inventory: Inventory;
   onClose: () => void;
   onEquipItem?: (inventoryIdx: number, charIdx: number) => void;
@@ -78,7 +80,7 @@ const OFFENSE = [
   { key: 'magic', icon: 'M9 16c-3 0-5-2.2-5-5 0-2.5 1.7-4 2.5-6 1 1 1.5 2 1.5 3 1.5-1 2-3 1.5-5 2.5 1.5 4.5 4 4.5 7 0 3.3-2 6-5 6z' },
 ] as const;
 
-/** A value, green with an up arrow when a buff raised it, red with a down arrow when a debuff lowered it. */
+/** A value, green with an up arrow when gear or an effect raised it, red with a down arrow when an effect lowers it. */
 function Val({ delta, children, className = '' }: { delta: number; children: ReactNode; className?: string }) {
   return (
     <span className={`inline-flex items-center gap-1 ${delta > 0 ? 'text-rift-up' : delta < 0 ? 'text-rift-down' : 'text-rift-ink'} ${className}`}>
@@ -88,7 +90,7 @@ function Val({ delta, children, className = '' }: { delta: number; children: Rea
         </svg>
       )}
       {children}
-      {delta !== 0 && <span className="sr-only">{delta > 0 ? ' (raised by a buff)' : ' (lowered by a debuff)'}</span>}
+      {delta !== 0 && <span className="sr-only">{delta > 0 ? ' (raised by gear or an effect)' : ' (lowered by an effect)'}</span>}
     </span>
   );
 }
@@ -174,7 +176,7 @@ function useFitScale(): number {
   return scale;
 }
 
-export default function CharacterSheet({ party, partyHp, partyMp, partyStats, inventory, onClose, onEquipItem, onUnequipItem, progress, pending: pendingAll, onPendingChange, onConfirmPoints }: Props) {
+export default function CharacterSheet({ party, partyHp, partyMp, partyStats, partyBuffs, inventory, onClose, onEquipItem, onUnequipItem, progress, pending: pendingAll, onPendingChange, onConfirmPoints }: Props) {
   const [selectedIdx, setSelectedIdx] = useState(0);
   const scale = useFitScale();
 
@@ -185,14 +187,19 @@ export default function CharacterSheet({ party, partyHp, partyMp, partyStats, in
   const hp = partyHp[selectedIdx] ?? stats.hp;
   const mp = partyMp[selectedIdx] ?? stats.mp;
 
-  // Stats without combat buffs (gear affixes and spent points included, at the party's level): what buffs and
-  // debuffs are compared against
-  const baseStats = recomputeStats(memberStatInput(member, stats.level), getGearBuffs(gear));
+  // What colors a stat: its base (class, level, spent points, class passives and the gear's armor values, with
+  // what they feed like glancing blow: no affixes, implicits or effects) and the stats without the effects lowering
+  // them. Green: raised above the base (by an affix, implicit or effect); red: an effect is lowering it now, even if
+  // it is still above its base.
+  const baseStats = recomputeStats(memberStatInput(member, stats.level), []);
+  const unlowered = memberStats(member, stats.level, (partyBuffs[selectedIdx] ?? []).filter(b => b.amount >= 0 && (b.percent ?? 0) >= 0));
+  /** How a stat stands: −1 an effect lowers it, 1 gear or an effect raises it above its base, 0 neither (Val's colors). */
+  const shift = (get: (s: Stats) => number): number => (get(stats) < get(unlowered) ? -1 : get(stats) > get(baseStats) ? 1 : 0);
 
-  // The member's model, holding their equipped weapon and shield
+  // The member's model, holding their equipped weapon and offhand
   const held = heldGear(gear);
-  const lookKey = characterLookKey(selectedClass, held.weapon, held.shield);
-  const model = useMemo(() => characterModel(selectedClass, held.weapon, held.shield), [lookKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  const lookKey = characterLookKey(selectedClass, held.weapon, held.offhand);
+  const model = useMemo(() => characterModel(selectedClass, held.weapon, held.offhand), [lookKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const invFull = isFull(inventory);
 
@@ -318,8 +325,9 @@ export default function CharacterSheet({ party, partyHp, partyMp, partyStats, in
                 </div>
                 <ItemGrid items={inventory} cols={INVENTORY_COLS} size={INVENTORY_SIZE} stats={stats}
                   canUse={(item) => isProficient(classData, item)}
-                  action={(item) => (onEquipItem && canEquip(classData, item) ? 'Equip' : null)}
-                  onAction={(i) => onEquipItem?.(i, selectedIdx)} unusableNote=", not proficient" />
+                  action={(item) => (onEquipItem && canEquip(classData, item, inventory, gear) ? 'Equip' : null)}
+                  onAction={(i) => onEquipItem?.(i, selectedIdx)} unusableNote=", not proficient"
+                  equippedFor={(item) => gear[item.slot]} />
               </section>
             </div>
 
@@ -334,7 +342,7 @@ export default function CharacterSheet({ party, partyHp, partyMp, partyStats, in
                   <div className="flex-1 min-h-0 grid grid-cols-1 auto-rows-fr gap-1 mt-2">
                     {ATTRIBUTE_KEYS.map(attr => (
                       <TipRow key={attr} label={ATTR_LABEL[attr]} tip={AttributeTooltips[attr]} caps points={attrPoints(attr)}
-                        value={stats.attributes[attr] + pending.attr[attr]} delta={stats.attributes[attr] - baseStats.attributes[attr]} />
+                        value={stats.attributes[attr] + pending.attr[attr]} delta={shift(s => s.attributes[attr])} />
                     ))}
                   </div>
                 </section>
@@ -346,7 +354,7 @@ export default function CharacterSheet({ party, partyHp, partyMp, partyStats, in
                   <div className="grid grid-cols-1 gap-1 mt-2">
                     {SKILL_KEYS.map(skill => (
                       <TipRow key={skill} label={capitalize(skill)} tip={SkillTooltips[skill]} points={skillPoints(skill)}
-                        value={stats.skills[skill] + pending.skill[skill]} delta={stats.skills[skill] - baseStats.skills[skill]} />
+                        value={stats.skills[skill] + pending.skill[skill]} delta={shift(s => s.skills[skill])} />
                     ))}
                   </div>
                 </section>
@@ -355,12 +363,12 @@ export default function CharacterSheet({ party, partyHp, partyMp, partyStats, in
               <section aria-label="Stats" className="rf-panel p-3">
                 <PanelTitle variant="heading">Stats</PanelTitle>
                 <ul className="list-none mt-1.5 mb-0 p-0 text-xs">
-                  <StatLine label="HP" delta={stats.hp - baseStats.hp}>{hp} / {stats.hp}</StatLine>
-                  <StatLine label="HP Regen" delta={stats.hpRegen - baseStats.hpRegen}>{formatStat('hpRegen', stats.hpRegen)}</StatLine>
-                  <StatLine label="MP" delta={stats.mp - baseStats.mp}>{mp} / {stats.mp}</StatLine>
-                  <StatLine label="MP Regen" delta={stats.mpRegen - baseStats.mpRegen}>{formatStat('mpRegen', stats.mpRegen)}</StatLine>
+                  <StatLine label="HP" delta={shift(s => s.hp)}>{hp} / {stats.hp}</StatLine>
+                  <StatLine label="HP Regen" delta={shift(s => s.hpRegen)}>{formatStat('hpRegen', stats.hpRegen)}</StatLine>
+                  <StatLine label="MP" delta={shift(s => s.mp)}>{mp} / {stats.mp}</StatLine>
+                  <StatLine label="MP Regen" delta={shift(s => s.mpRegen)}>{formatStat('mpRegen', stats.mpRegen)}</StatLine>
                   {STAT_ROWS.map(([label, key]) => (
-                    <StatLine key={key} label={label} delta={stats[key] - baseStats[key]} tip={statTip(key, stats)}>{formatStat(key, stats[key])}</StatLine>
+                    <StatLine key={key} label={label} delta={shift(s => s[key])} tip={statTip(key, stats)}>{formatStat(key, stats[key])}</StatLine>
                   ))}
                 </ul>
               </section>
@@ -376,7 +384,7 @@ export default function CharacterSheet({ party, partyHp, partyMp, partyStats, in
                     </span>
                   ))}
                   {(['hit', 'damage', 'crit'] as const).map(row => (
-                    <OffenseRow key={row} row={row} stats={stats} baseStats={baseStats} />
+                    <OffenseRow key={row} row={row} stats={stats} shift={shift} />
                   ))}
                 </div>
               </section>
@@ -418,7 +426,7 @@ function statTip(key: StatRowKey, stats: Stats): string | undefined {
   return undefined;
 }
 
-function OffenseRow({ row, stats, baseStats }: { row: 'hit' | 'damage' | 'crit'; stats: Stats; baseStats: Stats }) {
+function OffenseRow({ row, stats, shift }: { row: 'hit' | 'damage' | 'crit'; stats: Stats; shift: (get: (s: Stats) => number) => number }) {
   return (
     <>
       <span className="flex items-center h-5 text-rift-muted">{capitalize(row)}</span>
@@ -426,7 +434,7 @@ function OffenseRow({ row, stats, baseStats }: { row: 'hit' | 'damage' | 'crit';
         const v = stats[key][row];
         return (
           <span key={key} className="flex items-center justify-end h-5">
-            <Val delta={v - baseStats[key][row]} className="gap-[5px]">
+            <Val delta={shift(s => s[key][row])} className="gap-[5px]">
               {row === 'damage' ? `+${v}` : formatStat(`${key}${capitalize(row)}`, v)}
             </Val>
           </span>

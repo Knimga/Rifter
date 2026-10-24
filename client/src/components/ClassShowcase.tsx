@@ -25,8 +25,8 @@ const scaleFor = (it: ShowcaseItem) => (it.focused ? 1.3 : it.active ? 1.18 : 1)
 
 /** A class's character, holding its starting gear, as in the game. */
 function classModel(key: ClassKey): Model | null {
-  const { weapon, shield } = heldGear(startingGear(key));
-  return characterModel(key, weapon, shield);
+  const { weapon, offhand } = heldGear(startingGear(key));
+  return characterModel(key, weapon, offhand);
 }
 
 export default function ClassShowcase({ hostRef, items }: { hostRef: RefObject<HTMLElement | null>; items: ShowcaseItem[] }) {

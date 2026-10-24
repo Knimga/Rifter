@@ -32,9 +32,9 @@ export interface PartyTokenData {
   partyIndex: number;
   /** The member whose turn it is (in combat) or whose action bar is shown (out of combat). */
   active: boolean;
-  /** Equipped weapon and shield, as the member's 3D model holds them (none = nothing in that hand). */
+  /** Equipped weapon and offhand, as the member's 3D model holds them (none = nothing). */
   weapon?: HeldWeapon;
-  shield?: ModelLink;
+  offhand?: ModelLink;
 }
 
 /** The 3D model layer's view of a party member, with its over-head status (effect markers, HP/MP bars). */
@@ -44,7 +44,7 @@ export function toMapMember(m: PartyTokenData, markers: StatusMarker[] = []): Ma
     classKey: m.classKey,
     pos: m.pos,
     weapon: m.weapon,
-    shield: m.shield,
+    offhand: m.offhand,
     active: m.active,
     overlay: <UnitStatus markers={markers} hp={m.hp} maxHp={m.maxHp} mp={m.mp} maxMp={m.maxMp} />,
   };
@@ -115,6 +115,41 @@ export function UsableGlow({ color, hovered }: { color: string; hovered: boolean
     />
   );
 }
+
+/**
+ * A faint, steady glow at a floor tile's edges: the thing on it (a portal) is under the mouse but can't be used
+ * from here (UsableGlow is the one that pulses, when it can). Goes inside the tile, on the floor layer.
+ */
+export function HoverEdgeGlow({ color }: { color: string }) {
+  return (
+    <div
+      className="absolute inset-0 pointer-events-none"
+      style={{ boxShadow: `inset 0 0 8px 1px color-mix(in srgb, ${color} 45%, transparent)` }}
+    />
+  );
+}
+
+/**
+ * A game object's name tag while it is hovered (e.g. a portal's "To the Crypt"): a small tooltip box, upright
+ * over its tile with its bottom edge at `height` world tiles (so it sits above anything that tall), shown at once
+ * (no delay).
+ */
+export function ObjectTag({ board, x, y, height, text }: { board: BoardLayout; x: number; y: number; height: number; text: string }) {
+  return (
+    <UprightAt board={board} x={x} y={y} height={height} className="z-30">
+      <div role="tooltip" className="rf-tip px-2.5 py-1.5 whitespace-nowrap font-tech text-xs text-rift-soft -translate-y-1/2">{text}</div>
+    </UprightAt>
+  );
+}
+
+/**
+ * How high (world tiles) a portal's tag sits: clear of its top (portals stand 1.5 tall; the far side of the ring
+ * shows higher on screen under the camera's tilt, so with some room to spare).
+ */
+export const PORTAL_TAG_HEIGHT = 1.95;
+
+/** The tag text of a portal to a place: "To the Crypt" (a name starting "The" reads lower-case after "To"). */
+export const portalTag = (placeName: string) => `To ${placeName.replace(/^The /, 'the ')}`;
 
 /**
  * Floor glow under the active party member: a faint disc on the floor plane, beneath the model (ModelLayer

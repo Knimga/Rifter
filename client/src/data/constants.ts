@@ -10,9 +10,7 @@ export const SANCTUM_WALL_COLOR = '#0d0e18';
 
 /** Each damage element's color (text, floating damage, ability washes). */
 export const DAMAGE_ELEMENT_COLOR: Record<DamageElement, string> = {
-  slashing:    'var(--el-physical)',
-  piercing:    'var(--el-physical)',
-  bludgeoning: 'var(--el-physical)',
+  physical:    'var(--el-physical)',
   fire:        'var(--el-fire)',
   ice:         'var(--el-ice)',
   lightning:   'var(--el-lightning)',

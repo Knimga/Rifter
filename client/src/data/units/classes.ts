@@ -9,7 +9,7 @@ import { FaExplosion } from 'react-icons/fa6';
 import { RiTargetFill } from 'react-icons/ri';
 
 import type { IconType } from 'react-icons';
-import type { DamageElement, WeaponType } from '../gear';
+import type { DamageElement, OffhandKind, WeaponType } from '../gear';
 import type { AttributeKey, SkillKey } from './stats';
 import { warnIgnoredEffects, type Ability } from '../combat/abilities';
 import type { ModelLink } from '../../forge/core/types';
@@ -33,7 +33,7 @@ export type WeaponProficiency =
   | '2h Axes' | '1h Axes'
   | 'Daggers'
   | 'Bows' | 'Crossbows'
-  | 'Shields'
+  | 'Shields' | 'Quivers' | 'Foci'
   | 'Staves' | 'Wands';
 
 export interface Passive {
@@ -77,6 +77,7 @@ export interface StartingGear {
   weapon: WeaponType;
   weaponElement?: DamageElement;    // fixed element for magic weapons (otherwise the weapon type's default)
   shield?: ArmorProficiency;        // starting shield type, if any
+  offhand?: OffhandKind;            // starts with that kind's starting offhand (Worn Quiver, Cracked Amethyst)
 }
 
 export const CLASSES: Record<ClassKey, ClassData> = {
@@ -165,7 +166,7 @@ export const CLASSES: Record<ClassKey, ClassData> = {
         attackCategory: 'melee',
         useWeapon: true,
         effects: [
-          { type: 'damage', appliesTo: 'target', damageElement: 'piercing', minDamage: 10, maxDamage: 12 },
+          { type: 'damage', appliesTo: 'target', damageElement: 'physical', minDamage: 10, maxDamage: 12 },
         ],
       },
       {
@@ -264,7 +265,7 @@ export const CLASSES: Record<ClassKey, ClassData> = {
       magicHit:        { name: 'Well-Trained', flat: 3 }
     },
     armorProficiencies: ['Cloth'],
-    weaponProficiencies: ['Staves', 'Daggers', 'Wands'],
+    weaponProficiencies: ['Staves', 'Daggers', 'Wands', 'Foci'],
     startingGear: { chest: 'Cloth', boots: 'Cloth', weapon: 'Staves', weaponElement: 'fire' },
     model: 'character.arcanist',
     abilities: [
@@ -326,8 +327,8 @@ export const CLASSES: Record<ClassKey, ClassData> = {
       magicResistance: { name: 'Seasoned Hunter', flat: 10 }
     },
     armorProficiencies: ['Light'],
-    weaponProficiencies: ['Bows', 'Crossbows'],
-    startingGear: { chest: 'Light', boots: 'Light', weapon: 'Bows' },
+    weaponProficiencies: ['Bows', 'Crossbows', 'Quivers'],
+    startingGear: { chest: 'Light', boots: 'Light', weapon: 'Bows', offhand: 'quiver' },
     model: 'character.archer',
     abilities: [
       {
@@ -337,11 +338,11 @@ export const CLASSES: Record<ClassKey, ClassData> = {
         apCost: 3,
         range: 5,
         target: 'enemy',
-        displayElement: 'piercing',
+        displayElement: 'physical',
         attackCategory: 'ranged',
         useWeapon: true,
         effects: [
-          { type: 'damage', appliesTo: 'target', damageElement: 'piercing', minDamage: 7, maxDamage: 7 },
+          { type: 'damage', appliesTo: 'target', damageElement: 'physical', minDamage: 7, maxDamage: 7 },
         ],
       },
       {
@@ -353,7 +354,7 @@ export const CLASSES: Record<ClassKey, ClassData> = {
         attackCategory: 'ranged',
         effects: [
           { type: 'root', appliesTo: 'target', rounds: 3 },
-          { type: 'dot', appliesTo: 'target', damageElement: 'piercing', damagePerRound: 4, rounds: 3 }
+          { type: 'dot', appliesTo: 'target', damageElement: 'physical', damagePerRound: 4, rounds: 3 }
         ]
       },
       {
@@ -384,9 +385,10 @@ export const CLASSES: Record<ClassKey, ClassData> = {
     passives: {
       healing:      { name: 'Verdant', flat: 3 },
       natureDamage: { name: 'Thorns',  flat: 3 },
+      armor:        { name: 'Stoneskin', flat: 10 }
     },
     armorProficiencies: ['Light', 'Medium'],
-    weaponProficiencies: ['Daggers', '1h Maces', 'Wands', 'Staves', 'Shields'],
+    weaponProficiencies: ['Daggers', '1h Maces', '1h Axes', 'Wands', 'Staves', 'Shields'],
     startingGear: { chest: 'Medium', boots: 'Medium', weapon: '1h Maces', shield: 'Medium' },
     model: 'character.primalist',
     abilities: [
@@ -445,8 +447,8 @@ export const CLASSES: Record<ClassKey, ClassData> = {
       magicHit:     { name: 'Spite',     flat: 5 },
     },
     armorProficiencies: ['Cloth'],
-    weaponProficiencies: ['Staves', 'Daggers', 'Wands'],
-    startingGear: { chest: 'Cloth', boots: 'Cloth', weapon: 'Wands', weaponElement: 'shadow' },
+    weaponProficiencies: ['Staves', 'Daggers', 'Wands', 'Foci'],
+    startingGear: { chest: 'Cloth', boots: 'Cloth', weapon: 'Wands', weaponElement: 'shadow', offhand: 'focus' },
     model: 'character.occultist',
     abilities: [
       {
@@ -481,8 +483,8 @@ export const CLASSES: Record<ClassKey, ClassData> = {
         icon: GiSparkSpirit,
         mpCost: 12,
         apCost: 2,
-        range: 0,
-        target: 'self',
+        range: 1,
+        target: 'tile',
         displayElement: 'shadow',
         effects: [
           { type: 'summon', appliesTo: 'caster', creature: 'void-wisp', rounds: 3 },
@@ -504,7 +506,7 @@ export const CLASSES: Record<ClassKey, ClassData> = {
       threatMultiplier: { name: 'Unassuming', percent: -15 }
     },
     armorProficiencies: ['Cloth'],
-    weaponProficiencies: ['Staves', 'Wands'],
+    weaponProficiencies: ['Staves', 'Wands', 'Foci'],
     startingGear: { chest: 'Cloth', boots: 'Cloth', weapon: 'Staves', weaponElement: 'holy' },
     model: 'character.acolyte',
     abilities: [

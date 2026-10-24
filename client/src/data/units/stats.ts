@@ -6,8 +6,10 @@ import type { ClassKey, ClassData, Passive, ScalingPassive } from './classes';
 
 export const ATTRIBUTE_KEYS = ['strength', 'toughness', 'finesse', 'mind', 'spirit', 'speed'] as const;
 export const SKILL_KEYS = ['perception', 'stealth', 'expertise', 'spellcraft', 'evasion', 'redoubt', 'devotion'] as const;
-export const DAMAGE_ELEMENTS = ['slashing', 'piercing', 'bludgeoning', 'fire', 'ice', 'lightning', 'shadow', 'poison', 'holy', 'nature'] as const;
-const ELEMENT_STAT_SUFFIXES = ['Hit', 'Crit', 'Damage', 'Resistance', 'Penetration'] as const;
+export const DAMAGE_ELEMENTS = ['physical', 'fire', 'ice', 'lightning', 'shadow', 'poison', 'holy', 'nature'] as const;
+/** The stats every damage element has: e.g. fireHit, fireCrit, fireDamage, fireResistance, firePenetration. */
+export const ELEMENT_STAT_SUFFIXES = ['Hit', 'Crit', 'Damage', 'Resistance', 'Penetration'] as const;
+export type ElementStatSuffix = typeof ELEMENT_STAT_SUFFIXES[number];
 
 export type AttributeKey = typeof ATTRIBUTE_KEYS[number];
 export type SkillKey = typeof SKILL_KEYS[number];
@@ -80,8 +82,6 @@ export interface Stats {
   magic:           AttackCategoryStats;
   threatMultiplier: number;
   elementalStats:  Partial<Record<DamageElement, ElementStats>>;
-  /** Rooted in place (a root on it: ActiveBuff.roots): in combat it can't move at all (moveBudget). */
-  rooted:          boolean;
 }
 
 export interface ActiveBuff {
@@ -92,9 +92,12 @@ export interface ActiveBuff {
   amount: number;          // flat delta — positive = buff, negative = debuff (0 if percent-only)
   percent?: number;        // percentage delta applied after flats — e.g. 10 = +10%, -20 = -20%
   roundsRemaining: number;
-  /** A root (Effect 'root'): while it lasts the unit can't move (Stats.rooted). Its stat change is none. */
+  /** A root (Effect 'root'): while it lasts the unit can't move (isRooted). Its stat change is none. */
   roots?: boolean;
 }
+
+/** Whether a root is on the unit (a condition, not a stat): in combat it can't move at all (moveBudget). */
+export const isRooted = (buffs: ActiveBuff[]) => buffs.some(b => b.roots);
 
 export interface ActiveHot {
   name?: string;
@@ -250,6 +253,8 @@ export interface EnemyClassStats {
   skills?: Partial<Record<SkillKey, number>>;
   baseArmor: number;
   armorPerLevel: number;
+  /** Inherent damage type resistances (%): flat, like a passive on `${element}Resistance`. */
+  resistances?: Partial<Record<DamageElement, number>>;
   passives?: Record<string, Passive>;
   scalingPassives?: ScalingPassive[];
 }
@@ -335,7 +340,6 @@ function buildRawStats(
     },
     threatMultiplier: 1 - (stealth * 0.05), // floored at MIN_THREAT_MULTIPLIER (applyStatMinimums)
     elementalStats:  {},
-    rooted:          false,
   };
 }
 
@@ -385,7 +389,13 @@ export function calculateStats(input: PlayerStatInput | EnemyStatInput): Stats {
   const apMax = input.mode === 'player' ? PLAYER_AP_MAX : ENEMY_AP_MAX;
   const skillPointsSpent = input.mode === 'player' ? input.skillPointsSpent : undefined;
 
-  const passives = classData.passives ?? {};
+  // A creature's inherent resistances count as flat passives on its element resistances
+  const resistances = input.mode === 'enemy' ? input.classData.resistances ?? {} : {};
+  const passives: Record<string, Passive> = { ...classData.passives };
+  for (const [el, v] of Object.entries(resistances)) {
+    const key = `${el}Resistance`;
+    passives[key] = { ...passives[key], name: passives[key]?.name ?? 'Inherent', flat: (passives[key]?.flat ?? 0) + (v ?? 0) };
+  }
   const scalingPassives = classData.scalingPassives ?? [];
 
   // A base stat: its innate value, plus the flat bonuses on it (class passives, buffs, gear), then the
@@ -441,11 +451,9 @@ export function applyStatBuffs(stats: Stats, buffs: ActiveBuff[]): Stats {
     if (buff.amount)  flatMap.set(buff.stat, (flatMap.get(buff.stat) ?? 0) + buff.amount);
     if (buff.percent) pctMap.set(buff.stat,  (pctMap.get(buff.stat)  ?? 0) + buff.percent);
   }
-  const rooted = buffs.some(b => b.roots);
-  if (flatMap.size === 0 && pctMap.size === 0 && rooted === stats.rooted) return stats;
+  if (flatMap.size === 0 && pctMap.size === 0) return stats;
 
   const s = cloneStats(stats);
-  s.rooted = rooted;
   for (const a of STAT_ACCESSORS) {
     const f = flatMap.get(a.key) ?? 0;
     const p = pctMap.get(a.key)  ?? 0;

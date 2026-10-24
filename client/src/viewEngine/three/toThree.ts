@@ -21,22 +21,48 @@ export function partialGlowShader(shader: THREE.WebGLProgramParametersWithUnifor
     .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>\n\ttotalEmissiveRadiance += glowColor * vGlow * ${GLOW_BOOST.toFixed(2)};`);
 }
 
+/**
+ * Halos (MeshData.halos): each a quad turned to face the camera in the vertex shader (`haloCorner` -1..1 times
+ * `haloRadius`, in view space), brought forward by its radius so the surface it sits on doesn't cut it, then
+ * faded from its center like the forge's handoff glow (0.5 at the center, 0.16 at 40%, 0 at the edge) and
+ * added to what is behind it. Depth-tested, so a body in front hides it.
+ */
+export function haloShader(shader: THREE.WebGLProgramParametersWithUniforms): void {
+  shader.vertexShader = shader.vertexShader
+    .replace('#include <common>', '#include <common>\nattribute vec2 haloCorner;\nattribute float haloRadius;\nvarying vec2 vHaloCorner;')
+    .replace('#include <project_vertex>', `#include <project_vertex>
+\tfloat haloScale = length((modelViewMatrix * vec4(1.0, 0.0, 0.0, 0.0)).xyz);
+\tmvPosition.xy += haloCorner * haloRadius * haloScale;
+\tmvPosition.z += haloRadius * haloScale;
+\tgl_Position = projectionMatrix * mvPosition;
+\tvHaloCorner = haloCorner;`);
+  shader.fragmentShader = shader.fragmentShader
+    .replace('#include <common>', '#include <common>\nvarying vec2 vHaloCorner;')
+    .replace('#include <color_fragment>', `#include <color_fragment>
+\tfloat haloD = length(vHaloCorner);
+\tif (haloD > 1.0) discard;
+\tdiffuseColor.a *= haloD < 0.4 ? mix(0.5, 0.16, haloD / 0.4) : mix(0.16, 0.0, (haloD - 0.4) / 0.6);`);
+}
+
 function withPartialGlow<T extends THREE.Material>(material: T): T {
   material.onBeforeCompile = partialGlowShader;
   return material;
 }
 
-/** The three kinds of model material: lit (with partial glow), unlit (full glow), glass (lit, translucent). */
+/** The kinds of model material: lit (with partial glow), unlit (full glow), glass (lit, translucent), halo (additive glow). */
 export const makeLit = () => new THREE.MeshLambertMaterial({ vertexColors: true });
 export const makeUnlit = () => new THREE.MeshBasicMaterial({ vertexColors: true });
 export const makeGlass = () => new THREE.MeshLambertMaterial({ vertexColors: true, transparent: true, depthWrite: false });
+export const makeHalo = () => new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending });
 
-// Shared materials: every model reuses these three, so draw calls stay at <= 3 per model. (The map renderer
-// swaps in fogged versions of them: viewEngine/three/fog.ts.)
+// Shared materials: every model reuses these, so draw calls stay at <= 4 per model (3 meshes and its halos).
+// (The map renderer swaps in fogged versions of them: viewEngine/three/fog.ts.)
 const lit = withPartialGlow(makeLit());
 const unlit = makeUnlit();
 const glass = withPartialGlow(makeGlass());
-export const sharedMaterials = { lit, unlit, glass };
+const halo = makeHalo();
+halo.onBeforeCompile = haloShader;
+export const sharedMaterials = { lit, unlit, glass, halo };
 
 const srgbToLinear = (v: number) => (v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
 
@@ -85,6 +111,34 @@ function sub(model: Model, idx: Uint32Array, withAlpha: boolean, boost = 1, orig
   return geo;
 }
 
+/** The halos (MeshData.halos) of the part `partIdx` as one mesh of quads, positioned relative to `origin`, added to `g`. */
+function addHalos(g: THREE.Object3D, model: Model, partIdx: (part: number) => boolean, origin: readonly number[] = [0, 0, 0]): void {
+  const halos = model.mesh.halos.filter((h) => partIdx(h.part));
+  if (!halos.length) return;
+  // Two triangles per halo, each corner at its center (the shader moves it out to its corner)
+  const CORNERS = [[-1, -1], [1, -1], [1, 1], [-1, -1], [1, 1], [-1, 1]];
+  const n = halos.length * 6;
+  const pos = new Float32Array(n * 3), col = new Float32Array(n * 3), corner = new Float32Array(n * 2), radius = new Float32Array(n);
+  halos.forEach((h, i) => {
+    const c = h.c.map(srgbToLinear);
+    CORNERS.forEach(([cx, cy], k) => {
+      const v = i * 6 + k;
+      for (let a = 0; a < 3; a++) { pos[v * 3 + a] = h.p[a] - origin[a]; col[v * 3 + a] = c[a]; }
+      corner[v * 2] = cx; corner[v * 2 + 1] = cy;
+      radius[v] = h.r;
+    });
+  });
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  geo.setAttribute('haloCorner', new THREE.BufferAttribute(corner, 2));
+  geo.setAttribute('haloRadius', new THREE.BufferAttribute(radius, 1));
+  const m = new THREE.Mesh(geo, halo);
+  m.renderOrder = 2; // after the translucent faces
+  m.frustumCulled = false; // its bounds are the halo centers only
+  g.add(m);
+}
+
 /** Up to 3 meshes (solid, glowing, translucent) for the triangles `tris`, positioned relative to `origin`, added to `g`. */
 function addMeshes(g: THREE.Object3D, model: Model, tris: number[], origin?: readonly number[]): void {
   const { emissive, alpha } = model.mesh;
@@ -130,12 +184,14 @@ export function toThree(model: Model): THREE.Group {
   g.name = model.name;
   g.userData.model = { designId: model.designId, seed: model.seed, anchors: model.mesh.anchors, partNames, pivots };
   addMeshes(g, model, groups[0]);
+  addHalos(g, model, (p) => !moving.includes(partNames[p]));
   const parts: PartObject[] = moving.map((name, k) => {
     const pivot = pivots[name] ?? [0, 0, 0];
     const obj = new THREE.Group();
     obj.matrixAutoUpdate = false;
     obj.matrix.makeTranslation(pivot[0], pivot[1], pivot[2]);
     addMeshes(obj, model, groups[k + 1], pivot);
+    addHalos(obj, model, (p) => partNames[p] === name, pivot);
     g.add(obj);
     return {
       obj, part: name, pivot,

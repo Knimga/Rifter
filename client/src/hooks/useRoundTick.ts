@@ -5,12 +5,12 @@ import { COMBAT_TEXT_COLOR, OUT_OF_COMBAT_REGEN_INTERVAL_MS } from '../data/cons
 import { applyTopOfRound, tickChangesNothing, tickRound, type CombatState, type RoundTick } from '../data/combat/combat';
 import { applyThreatChange, tickDurations, unitKey } from '../data/combat/abilityExecution';
 import type { Pos } from '../data/world/grid';
-import type { EnemyInstance } from '../data/units/enemies';
+import { isAlly, type EnemyInstance } from '../data/units/enemies';
 import type { MemberState } from '../data/units/party';
 import type { Stats } from '../data/units/stats';
 import type { SpawnFloat } from './useFloatingText';
 
-export function useRoundTick({ combatActive, round, membersRef, updateMembers, partyStatsRef, partyPosRef, enemiesRef, setEnemies, setCombat, spawnFloat }: {
+export function useRoundTick({ combatActive, round, membersRef, updateMembers, partyStatsRef, partyPosRef, enemiesRef, currentZoneRef, setEnemies, setCombat, spawnFloat }: {
   combatActive: boolean;
   /** The combat round: each new one (after the first) ticks. */
   round: number;
@@ -19,6 +19,8 @@ export function useRoundTick({ combatActive, round, membersRef, updateMembers, p
   partyStatsRef: MutableRefObject<Stats[]>;
   partyPosRef: MutableRefObject<Pos[]>;
   enemiesRef: MutableRefObject<EnemyInstance[]>;
+  /** The zone the party is in: only its creatures tick (the rest wait, untouched). */
+  currentZoneRef: MutableRefObject<number>;
   setEnemies: Dispatch<SetStateAction<EnemyInstance[]>>;
   setCombat: Dispatch<SetStateAction<CombatState>>;
   spawnFloat: SpawnFloat;
@@ -58,9 +60,10 @@ export function useRoundTick({ combatActive, round, membersRef, updateMembers, p
       };
     });
 
-    // Unchanged enemies come back as the same array, which React ignores. Summoned allies whose time is up vanish.
+    // The current zone's creatures (the others wait). Unchanged, they come back as the same array, which React
+    // ignores. Summoned creatures (either side's) whose time is up vanish.
     const creatures = enemiesRef.current;
-    const { enemies: updated, events, vanished } = applyTopOfRound(creatures);
+    const { enemies: updated, events, vanished } = applyTopOfRound(creatures, currentZoneRef.current);
     for (const { pos, tick } of events) showTick(pos, tick);
     for (const e of vanished) spawnFloat(e.pos.x, e.pos.y, 'Vanished', COMBAT_TEXT_COLOR.stopped);
     setEnemies(updated);
@@ -70,7 +73,7 @@ export function useRoundTick({ combatActive, round, membersRef, updateMembers, p
       // Gains scale by the unit's own threatMultiplier: a party member's, or a summon's (by its threatKey)
       const multipliers = new Map<string, number>([
         ...partyStatsRef.current.map((s, i) => [unitKey({ side: 'party', idx: i }), s.threatMultiplier] as const),
-        ...creatures.filter(e => e.ally).map(e => [e.id, e.stats.threatMultiplier] as const),
+        ...creatures.filter(isAlly).map(e => [e.id, e.stats.threatMultiplier] as const),
       ]);
       setCombat(prev => {
         if (!prev.active) return prev;

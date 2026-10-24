@@ -1,15 +1,17 @@
-// Creatures the party can summon (an ability's 'summon' effect, by id). Configured like enemy classes
-// (CreatureClassData: attributes, armor, abilities, passives, model) and run by the same AI, on the party's
-// side. Their level is their summoner's.
-import { generateEnemyInstance, type CreatureClassData, type EnemyInstance } from './enemies';
+// Summoned creatures (an ability's 'summon' effect, by id): the creatures only summoned (SUMMON_CLASSES), and any
+// enemy class too (e.g. a spore that also roams in packs). Configured like enemy classes (CreatureClassData:
+// attributes, armor, abilities, passives, model) and run by the same AI, on their summoner's side. Their level
+// is their summoner's.
+import { BOSS_CLASSES, ENEMY_CLASSES, generateEnemyInstance, type CreatureClassData, type EnemyInstance } from './enemies';
 import type { Pos } from '../world/grid';
 import { warnIgnoredEffects } from '../combat/abilities';
 
 /** A creature an action summons (executeAction's outcome; placed where the outcome lands). */
 export interface SummonRequest {
-  creature: string;  // SUMMON_CLASSES id
+  creature: string;  // a creature class id (summonClass)
   rounds: number;
-  ability: string;   // the ability that summons it (casting it again replaces the creature)
+  max: number;       // at most this many out from its ability at once: casting it again replaces the oldest
+  ability: string;   // the ability that summons it
   at?: Pos;          // the tile it appears on (a 'tile' ability's aim); none = beside the caster
 }
 
@@ -23,8 +25,8 @@ export const SUMMON_CLASSES: CreatureClassData[] = [
     baseHp: 10,
     baseArmor: 0,
     armorPerLevel: 2,
+    resistances: { shadow: 30 },
     passives: {
-      shadowResistance: { name: 'Shadowborn', flat: 30 },
       dodge: { name: 'Ethereal', flat: 10 }
     },
     abilities: [
@@ -46,26 +48,27 @@ export const SUMMON_CLASSES: CreatureClassData[] = [
 // Effects an ability would silently ignore: warned at load
 for (const c of SUMMON_CLASSES) warnIgnoredEffects(`summons › ${c.id}`, c.abilities);
 
-/** A summonable creature's class, by id. */
-export const summonClass = (id: string): CreatureClassData | undefined => SUMMON_CLASSES.find((c) => c.id === id);
+/** A summonable creature's class, by id: a summon-only creature, else an enemy class. */
+export const summonClass = (id: string): CreatureClassData | undefined =>
+  [...SUMMON_CLASSES, ...ENEMY_CLASSES, ...BOSS_CLASSES].find((c) => c.id === id);
 
 let summonCounter = 0;
 
 /**
- * A summoned creature, on the party's side: party member `ownerIdx`'s, at `level` (its summoner's), on `pos`
- * in zone `zoneId`. In the fight from the start (aggroed). Null for an unknown creature id.
+ * A summoned creature: `owner`'s (its unitKey), on the party's side if `allied`, else the enemies'; at `level`
+ * (its summoner's), on `pos` in zone `zoneId`. In the fight from the start (aggroed). Null for an unknown id.
  */
-export function createSummon(req: SummonRequest, ownerIdx: number, level: number, pos: Pos, zoneId: number): EnemyInstance | null {
+export function createSummon(req: SummonRequest, owner: string, allied: boolean, level: number, pos: Pos, zoneId: number): EnemyInstance | null {
   const classData = summonClass(req.creature);
   if (!classData) return null;
   const id = `summon-${Date.now().toString(36)}-${(summonCounter++).toString(36)}`;
   return {
     ...generateEnemyInstance(classData, level, id, pos, zoneId, -1),
     aggroed: true,
-    ally: { ownerIdx, ability: req.ability, roundsLeft: req.rounds },
+    summon: { owner, ability: req.ability, roundsLeft: req.rounds, allied },
   };
 }
 
-/** Whether a creature is party member `ownerIdx`'s summon from `ability` (casting it again replaces it). */
-export const isSummonOf = (e: EnemyInstance, ownerIdx: number, ability: string) =>
-  e.ally?.ownerIdx === ownerIdx && e.ally.ability === ability;
+/** The living creatures `owner` (a unitKey) has out from `ability`, oldest first (the order they were added in). */
+export const summonsOf = (creatures: EnemyInstance[], owner: string, ability: string) =>
+  creatures.filter(e => e.currentHp > 0 && e.summon?.owner === owner && e.summon.ability === ability);

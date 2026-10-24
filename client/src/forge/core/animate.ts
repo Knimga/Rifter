@@ -1,7 +1,7 @@
 // One-time part animations (PartAnimation) as plain math, shared by every renderer: the easing, and a
 // model's triangle positions posed at given progress (for renderers without a scene graph, e.g. forge:sheet).
 // three.js renderers pose the same turns as matrices (viewEngine/three/toThree.ts animateParts).
-import type { Model } from './types';
+import type { Halo, Model } from './types';
 
 /** How far along each animation is, by name: 0 = rest (or not played), 1 = done (its end pose). */
 export type AnimationProgress = Record<string, number>;
@@ -19,25 +19,39 @@ function rotateAbout(p: number[], pivot: readonly number[], axis: 'x' | 'y' | 'z
   return [r[0] + pivot[0], r[1] + pivot[1], r[2] + pivot[2]];
 }
 
+/** Each turn the model's animations make at `progress`: the part (index), its pivot, axis and angle. */
+function turnsAt(model: Model, progress: AnimationProgress) {
+  const { partNames, pivots } = model.mesh;
+  return (model.animations ?? []).flatMap((anim) => {
+    const k = easeAnimation(progress[anim.name] ?? 0);
+    return k <= 0 ? [] : anim.turns.map((turn) => ({
+      idx: partNames.indexOf(turn.part), pivot: pivots[turn.part] ?? [0, 0, 0], axis: turn.axis, rad: (turn.angleDeg * Math.PI / 180) * k,
+    }));
+  });
+}
+
 /** The model's triangle positions (9 floats per triangle) with its animated parts posed at `progress`. */
 export function posedPositions(model: Model, progress: AnimationProgress): Float32Array {
-  const { positions, part, partNames, pivots, triCount } = model.mesh;
+  const { positions, part, triCount } = model.mesh;
   const out = new Float32Array(positions);
-  for (const anim of model.animations ?? []) {
-    const k = easeAnimation(progress[anim.name] ?? 0);
-    if (k <= 0) continue;
-    for (const turn of anim.turns) {
-      const idx = partNames.indexOf(turn.part);
-      const pivot = pivots[turn.part] ?? [0, 0, 0];
-      const rad = (turn.angleDeg * Math.PI / 180) * k;
-      for (let t = 0; t < triCount; t++) {
-        if (part[t] !== idx) continue;
-        for (let v = 0; v < 3; v++) {
-          const o = t * 9 + v * 3;
-          out.set(rotateAbout([out[o], out[o + 1], out[o + 2]], pivot, turn.axis, rad), o);
-        }
+  for (const { idx, pivot, axis, rad } of turnsAt(model, progress)) {
+    for (let t = 0; t < triCount; t++) {
+      if (part[t] !== idx) continue;
+      for (let v = 0; v < 3; v++) {
+        const o = t * 9 + v * 3;
+        out.set(rotateAbout([out[o], out[o + 1], out[o + 2]], pivot, axis, rad), o);
       }
     }
   }
   return out;
+}
+
+/** The model's halos with its animated parts posed at `progress` (they move with their part). */
+export function posedHalos(model: Model, progress: AnimationProgress): Halo[] {
+  const turns = turnsAt(model, progress);
+  return model.mesh.halos.map((h) => {
+    let p = [...h.p];
+    for (const { idx, pivot, axis, rad } of turns) if (h.part === idx) p = rotateAbout(p, pivot, axis, rad);
+    return { ...h, p: [p[0], p[1], p[2]] };
+  });
 }

@@ -34,7 +34,7 @@ export function bresenham(a: Pos, b: Pos): Pos[] {
 }
 
 /** True if every tile strictly between a and b is floor. */
-export function hasLineOfSight(a: Pos, b: Pos, floors: Set<string>): boolean {
+export function hasLineOfSight(a: Pos, b: Pos, floors: ReadonlySet<string>): boolean {
   return bresenham(a, b).slice(0, -1).every(p => floors.has(posKey(p)));
 }
 

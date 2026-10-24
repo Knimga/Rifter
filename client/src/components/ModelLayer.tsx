@@ -32,14 +32,14 @@ export interface MapObject {
   played?: string[];
 }
 
-/** A party member drawn as their class model, holding their equipped weapon and shield. */
+/** A party member drawn as their class model, holding their equipped weapon and offhand. */
 export interface MapPartyMember {
   /** Stable per member (e.g. 'party-0'). The body's look is seeded by its class (classInstanceId). */
   id: string;
   classKey: ClassKey;
   pos: Pos;
   weapon?: HeldWeapon;
-  shield?: ModelLink;
+  offhand?: ModelLink;
   /** DOM drawn just above the model's head (HP/MP bars, effect dots). */
   overlay: ReactNode;
   /** The active member stands on a floor glow (it follows the model as it moves). */
@@ -90,16 +90,16 @@ export default function ModelLayer({ board, party = [], enemies = [], loot = [],
   };
 
   // Party members: rebuilt when their class or held items change (the body's pose follows the weapon)
-  const partyKey = party.map((m) => `${m.id}:${m.classKey}:${m.weapon?.link ?? '-'}:${m.shield ?? '-'}:${m.pos.x},${m.pos.y}`).join('|');
+  const partyKey = party.map((m) => `${m.id}:${m.classKey}:${m.weapon?.link ?? '-'}:${m.offhand ?? '-'}:${m.pos.x},${m.pos.y}`).join('|');
   const partyUnits: MapUnit[] = useMemo(() => {
     const out: MapUnit[] = [];
     for (const m of party) {
       const body = linkedDesign(designs, CLASSES[m.classKey].model);
       if (!body) continue;
-      const used = [body, m.weapon ? linkedDesign(designs, m.weapon.link) : null, m.shield ? linkedDesign(designs, m.shield) : null];
-      const look = `${m.classKey}:${m.weapon?.link ?? '-'}:${m.shield ?? '-'}`;
+      const used = [body, m.weapon ? linkedDesign(designs, m.weapon.link) : null, m.offhand ? linkedDesign(designs, m.offhand) : null];
+      const look = `${m.classKey}:${m.weapon?.link ?? '-'}:${m.offhand ?? '-'}`;
       // Seeded by class (classInstanceId), so the member looks as it did on character select
-      const model = cached(m.id, look, used, () => buildCharacter(designs, body, instanceSeed(body, classInstanceId(m.classKey)), m.weapon, m.shield));
+      const model = cached(m.id, look, used, () => buildCharacter(designs, body, instanceSeed(body, classInstanceId(m.classKey)), m.weapon, m.offhand));
       out.push({ id: m.id, model, pos: m.pos, viewer: true });
     }
     return out;

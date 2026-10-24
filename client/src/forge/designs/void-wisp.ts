@@ -1,7 +1,7 @@
 import type { Design } from '../core/types';
 import { blob, frustum } from '../core/primitives';
 import { add, mul, norm, type RGB, type Vec3 } from '../core/vec';
-import { floorGlow } from '../designs/_glow';
+import { floorGlow } from './_glow';
 
 // Identity: the Occultist's Void Wisp, a small crystalline star of black and violet floating at about waist height
 // (a character's, CHARACTER_HEIGHT 1.12) over a faint violet pool of its own light. A dark faceted core,

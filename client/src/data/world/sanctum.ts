@@ -19,6 +19,7 @@ export const SANCTUM = {
   portals: [
     { pos: { x: 5, y: 2 }, object: 'necrotic-portal', dungeon: 'crypt', facing: [0, 1] },
     { pos: { x: 2, y: 5 }, object: 'fire-portal', dungeon: 'firelands', facing: [1, 0] },
+    { pos: { x: 8, y: 5 }, object: 'fungal-portal', dungeon: 'fungal', facing: [-1, 0] },
   ] satisfies SanctumPortal[] as SanctumPortal[],
   playerStart: { x: 5, y: 5 },
   followerStarts: [{ x: 6, y: 5 }, { x: 7, y: 5 }],
@@ -27,6 +28,13 @@ export const SANCTUM = {
 /** The outer ring of the sanctum is wall. */
 export const isSanctumWall = (p: Pos) =>
   p.x <= 0 || p.y <= 0 || p.x >= SANCTUM.width - 1 || p.y >= SANCTUM.height - 1;
+
+/** Keys of the sanctum's floor tiles (everything inside the wall ring): for sight and ability areas there. */
+export const SANCTUM_FLOORS: ReadonlySet<string> = new Set(
+  Array.from({ length: SANCTUM.width * SANCTUM.height }, (_, i) => ({ x: i % SANCTUM.width, y: Math.floor(i / SANCTUM.width) }))
+    .filter((p) => !isSanctumWall(p))
+    .map((p) => `${p.x},${p.y}`),
+);
 
 /** The portal standing on `p`, if any. */
 export const sanctumPortalAt = (p: Pos): SanctumPortal | undefined => SANCTUM.portals.find((portal) => samePos(portal.pos, p));

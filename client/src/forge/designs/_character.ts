@@ -52,6 +52,22 @@ export interface Leg {
  */
 export const TORSO = { hip: 0.86, waist: 1.0, chest: 1.18, shoulder: 1.34, collar: 1.43 };
 
+/**
+ * A reference length (design units) every offhand held dangling (a focus) marks below its grip (anchor
+ * 'dangle_unit'), so equip.ts can size it by how it was built (DANGLE_SCALE) rather than by its total length.
+ */
+export const DANGLE_UNIT = 0.1;
+
+/**
+ * Where a quiver sits on the back (body units): its bottom by the left hip, its mouth over the right shoulder.
+ * Every body marks these (anchors 'quiver_bottom' / 'quiver_top'); a quiver design marks the same two points
+ * on itself, and equip.ts lines them up (a worn quiver: drafts/leather-quiver.ts).
+ */
+export const QUIVER_ON_BACK = {
+  bottom: [0.08, TORSO.waist - 0.04, -0.13] as Vec3,
+  top: [-0.13, TORSO.shoulder + 0.09, -0.16] as Vec3,
+};
+
 /** Left (+1) or right (-1) leg of the standard pose: spread a little, knee slightly bent forward. */
 export function legJoints(sx: 1 | -1): Leg {
   return { hip: [sx * 0.1, TORSO.hip, 0], knee: [sx * 0.13, 0.47, 0.05], ankle: [sx * 0.16, 0.1, 0] };
@@ -280,9 +296,12 @@ export function buildBody(m: Mesh, look: BodyLook, build: BodyBuild = {}): void 
   }
   const right = armJoints(-1, build), left = armJoints(1, build);
   m.anchor('hand_r', right.fist);
+  m.anchor('quiver_bottom', QUIVER_ON_BACK.bottom);
+  m.anchor('quiver_top', QUIVER_ON_BACK.top);
   m.anchor('elbow_r', right.elbow);
   m.anchor('forearm_l', lerp(left.elbow, left.wrist, 0.5));
   m.anchor('elbow_l', left.elbow);
+  m.anchor('fist_l', left.fist); // where an offhand held dangling hangs from (a focus)
   if (build.hold === 'bow' || build.hold === 'crossbow') m.anchor('hand_l', left.fist);
   if (build.hold === 'shoulderCarry') m.anchor('shoulder_rest_r', carryRest(right.shoulder, build));
 

@@ -21,7 +21,7 @@ import { loadDesigns } from './load-designs';
 import { buildPreview } from '../src/forge/equip';
 import type { WeaponType } from '../src/data/gear/types';
 import { encodePNG } from './png';
-import { posedPositions } from '../src/forge/core/animate';
+import { posedHalos, posedPositions } from '../src/forge/core/animate';
 
 const args = process.argv.slice(2);
 const flag = (n: string) => args.includes(`--${n}`);
@@ -142,6 +142,20 @@ function renderCell(model: Model, design: Design, yaw: number): Uint8Array {
   };
   for (const t of opaque) draw(t, true);
   for (const t of clear) draw(t, false);
+
+  // Halos (MeshData.halos), like the game's halo shader: a round glow at each, brought forward by its radius,
+  // hidden where a nearer surface is, faded from its center (0.5, 0.16 at 40%, 0 at the edge) and added on
+  for (const h of anim ? posedHalos(model, { [anim]: 1 }) : model.mesh.halos) {
+    const [hx, hy, hz] = toScreen(view(rot([h.p[0], h.p[1], h.p[2]])));
+    const R = h.r * k, z = hz + h.r;
+    for (let y = Math.max(0, Math.floor(hy - R)); y <= Math.min(S - 1, Math.ceil(hy + R)); y++)
+      for (let x = Math.max(0, Math.floor(hx - R)); x <= Math.min(S - 1, Math.ceil(hx + R)); x++) {
+        const d = Math.hypot(x + 0.5 - hx, y + 0.5 - hy) / R, i = y * S + x;
+        if (d > 1 || zbuf[i] > z) continue;
+        const a = d < 0.4 ? 0.5 + (0.16 - 0.5) * (d / 0.4) : 0.16 * (1 - (d - 0.4) / 0.6);
+        for (let ch = 0; ch < 3; ch++) color[i * 3 + ch] = Math.min(255, color[i * 3 + ch] + h.c[ch] * 255 * a);
+      }
+  }
 
   // downsample
   const outc = new Uint8Array(CELL * CELL * 3);

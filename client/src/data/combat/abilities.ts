@@ -31,10 +31,11 @@ export type Effect =
   // The caster's threat: `amount` flat, `percent` of their current threat; negative reduces it (to 0 at
   // least). Gains are scaled by the caster's threatMultiplier, reductions aren't (see applyThreatChange).
   | { type: 'threat'; appliesTo: EffectTarget; damageElement?: DamageElement; amount?: number; percent?: number }
-  // Calls up a creature (units/summons.ts SUMMON_CLASSES, by id), fighting on the caster's side for `rounds`
-  // rounds (combat only; it vanishes when combat ends). On a 'tile' ability it appears on the aimed tile;
-  // otherwise beside the caster. Casting it again replaces the last one.
-  | { type: 'summon'; appliesTo: 'caster'; damageElement?: DamageElement; creature: string; rounds: number }
+  // Calls up a creature (by id: units/summons.ts SUMMON_CLASSES, or an enemy class), fighting on the caster's
+  // side for `rounds` rounds (combat only; it vanishes when combat ends; no XP or loot). On a 'tile' ability it
+  // appears on the aimed tile; otherwise beside the caster. At most `max` of them out at once (default 1):
+  // casting it with that many out replaces the oldest.
+  | { type: 'summon'; appliesTo: 'caster'; damageElement?: DamageElement; creature: string; rounds: number; max?: number }
   // Roots the unit in place for `rounds` rounds: it can't move (it can still attack and use abilities).
   // Lands like a debuff (on an enemy-targeting ability, only on a hit), and shows as one.
   | { type: 'root'; appliesTo: EffectTarget; damageElement?: DamageElement; rounds: number };
@@ -50,6 +51,8 @@ export interface Ability {
   area?: AreaType;                  // defaults to 'single'
   attackCategory?: AttackCategory;  // how the hit roll is resolved
   useWeapon?: boolean;              // use equipped weapon for damage
+  /** Its caster dies once it lands (e.g. an exploding spore), whatever its HP (UnitChange.slain). */
+  selfDestruct?: boolean;
   effects: Effect[];
 }
 

@@ -7,8 +7,8 @@ import { applyThreatChange, changesThreat, threatKey, unitKey, type ActionOutcom
 import { joinCombat, type CombatState } from '../data/combat/combat';
 import { findOpenTilesNear, posKey, samePos, type Pos } from '../data/world/grid';
 import { isFreeFloor, type DungeonData } from '../data/world/dungeonGen';
-import { withEnemyBuffs, type EnemyInstance } from '../data/units/enemies';
-import { createSummon, isSummonOf } from '../data/units/summons';
+import { isAlly, withEnemyBuffs, type EnemyInstance } from '../data/units/enemies';
+import { createSummon, summonsOf } from '../data/units/summons';
 import type { MemberState } from '../data/units/party';
 import type { Stats } from '../data/units/stats';
 import type { UnitAim } from '../components/ModelLayer';
@@ -26,7 +26,7 @@ export function useActionOutcomes({ spawnFloat, updateMembers, partyStatsRef, pa
   updateMembers: (fn: (m: MemberState, i: number) => MemberState, only?: (i: number) => boolean) => void;
   partyStatsRef: MutableRefObject<Stats[]>;
   partyPosRef: MutableRefObject<Pos[]>;
-  /** The party's level: a summoned creature's. */
+  /** The party's level: the level of a creature a party member summons. */
   partyLevelRef: MutableRefObject<number>;
   enemiesRef: MutableRefObject<EnemyInstance[]>;
   dungeonRef: MutableRefObject<DungeonData | null>;
@@ -55,7 +55,7 @@ export function useActionOutcomes({ spawnFloat, updateMembers, partyStatsRef, pa
       if (c.ref.side === 'party') partyChanges.set(c.ref.idx, c);
       else enemyChanges.set(c.ref.id, c);
     }
-    const nextHp = (hp: number, c: UnitChange, maxHp: number) => Math.max(0, Math.min(maxHp, hp - c.damage + c.heal));
+    const nextHp = (hp: number, c: UnitChange, maxHp: number) => (c.slain ? 0 : Math.max(0, Math.min(maxHp, hp - c.damage + c.heal)));
 
     if (partyChanges.size > 0) {
       const add = <T,>(list: T[], more: T[]) => (more.length ? [...list, ...more] : list);
@@ -96,23 +96,32 @@ export function useActionOutcomes({ spawnFloat, updateMembers, partyStatsRef, pa
         : prev);
     }
 
-    // Summoned creatures: each replaces the caster's last one from the same ability, appears on its aimed tile
-    // (or the free tile nearest the caster) and joins the turn order (party members summon, in a dungeon fight)
+    // Summoned creatures (in a dungeon fight), on the caster's side: a party member's or its ally's fight for the
+    // party, an enemy's against it. With the ability's max already out, the oldest of them goes. Each appears on
+    // its aimed tile (or the free tile nearest the caster) and joins the turn order.
     const d = dungeonRef.current;
-    if (outcome.summons && caster.ref.side === 'party' && d) {
-      const ownerIdx = caster.ref.idx;
+    if (outcome.summons && d) {
+      const owner = unitKey(caster.ref);
+      const casterRef = caster.ref;
+      const casterCreature = casterRef.side === 'enemy' ? enemiesRef.current.find(e => e.id === casterRef.id) : undefined;
+      // A party member's, or a summoned ally's; an enemy's stays hostile even if it is gone by now
+      const allied = casterRef.side === 'party' || (!!casterCreature && isAlly(casterCreature));
+      const level = casterCreature?.level ?? partyLevelRef.current;
       const zone = d.zones[currentZoneRef.current];
       let creatures = enemiesRef.current;
       const added: EnemyInstance[] = [];
       for (const req of outcome.summons) {
-        creatures = creatures.filter(e => !isSummonOf(e, ownerIdx, req.ability));
+        const out = summonsOf([...creatures, ...added], owner, req.ability);
+        const gone = new Set(out.slice(0, Math.max(0, out.length - req.max + 1)));
+        creatures = creatures.filter(e => !gone.has(e));
+        for (let i = added.length - 1; i >= 0; i--) if (gone.has(added[i])) added.splice(i, 1);
         const partyTiles = new Set(partyPosRef.current.map(posKey));
         const free = isFreeFloor(d, zone, [...creatures, ...added]);
         const isOpen = (p: Pos) => free(p) && !partyTiles.has(posKey(p));
         // On the aimed tile (a 'tile' ability), or the nearest free one to it if something moved there meanwhile;
         // otherwise beside the caster
         const pos = req.at && isOpen(req.at) ? req.at : findOpenTilesNear(req.at ?? caster.pos, isOpen, 1, SUMMON_MAX_RADIUS)[0];
-        const summon = pos && createSummon(req, ownerIdx, partyLevelRef.current, pos, zone.id);
+        const summon = pos && createSummon(req, owner, allied, level, pos, zone.id);
         if (summon) added.push(summon);
       }
       const replaced = new Set(enemiesRef.current.filter(e => !creatures.includes(e)).map(e => e.id));

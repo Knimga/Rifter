@@ -7,7 +7,7 @@
 // Read smoothly and shaped so each tile's fog starts at its edge with the visible tile (visible tiles stay
 // clear to their edges), warped and textured by drifting cloud noise.
 import * as THREE from 'three';
-import { makeGlass, makeLit, makeUnlit, partialGlowShader, sharedMaterials } from './toThree';
+import { haloShader, makeGlass, makeHalo, makeLit, makeUnlit, partialGlowShader, sharedMaterials } from './toThree';
 
 /** The fog of a zone (the game's: hooks/useFogOfWar FogState): its size, and the tiles seen now and before ('x,y'). */
 export interface FogInput {
@@ -105,14 +105,18 @@ export class FogOfWar {
       fogOn: { value: 0 },
     };
     const u = this.uniforms;
-    const withFog = <T extends THREE.Material>(m: T, glow: boolean): T => {
-      m.onBeforeCompile = (shader) => { if (glow) partialGlowShader(shader); fogShader(shader, u); };
+    // Each fogged material: its own shader changes (partial glow, halo), then the fog
+    const withFog = <T extends THREE.Material>(m: T, own?: (shader: THREE.WebGLProgramParametersWithUniforms) => void): T => {
+      m.onBeforeCompile = (shader) => { own?.(shader); fogShader(shader, u); };
+      // three.js caches programs by onBeforeCompile's source, the same for every fogged material: key each by its own shader
+      m.customProgramCacheKey = () => `fog:${own?.name ?? 'plain'}`;
       return m;
     };
     this.materials = new Map<THREE.Material, THREE.Material>([
-      [sharedMaterials.lit, withFog(makeLit(), true)],
-      [sharedMaterials.unlit, withFog(makeUnlit(), false)],
-      [sharedMaterials.glass, withFog(makeGlass(), true)],
+      [sharedMaterials.lit, withFog(makeLit(), partialGlowShader)],
+      [sharedMaterials.unlit, withFog(makeUnlit())],
+      [sharedMaterials.glass, withFog(makeGlass(), partialGlowShader)],
+      [sharedMaterials.halo, withFog(makeHalo(), haloShader)],
     ]);
     // The sheet: fog color, its alpha the fog amount (drawn after the opaque models, so they hide it where in front)
     const sheetMat = new THREE.MeshBasicMaterial({ color, transparent: true, depthWrite: false });

@@ -29,7 +29,7 @@ export default function PartyRows({ rows, selectedIdx, canSelect, onSelect }: {
             onClick={() => canSelect && onSelect(t.partyIndex)}>
             {/* On the top edge, overlapping the border, so the panel doesn't grow */}
             {levelUp && <span className="rf-levelup-tag">Level up</span>}
-            <Portrait classKey={t.classKey} weapon={t.weapon} shield={t.shield} size={44} />
+            <Portrait classKey={t.classKey} weapon={t.weapon} offhand={t.offhand} size={44} />
             <span className="flex-1 min-w-0 flex flex-col gap-[5px]">
               <span className="flex items-baseline justify-between gap-2">
                 <span className="font-display text-[15px] tracking-[0.04em] text-rift-ink truncate">{name}</span>

@@ -6,7 +6,7 @@ import { COMBAT_TEXT_COLOR, DAMAGE_ELEMENT_COLOR } from '../constants';
 import { applyDR, CRIT_MULTIPLIER, getOffense, rollCrit, rollDamage, rollHit, type HitOutcome, type Offense } from './attackResolution';
 import { randInt } from '../random';
 import type { Pos } from '../world/grid';
-import type { EnemyInstance } from '../units/enemies';
+import { isAlly, type EnemyInstance } from '../units/enemies';
 import type { SummonRequest } from '../units/summons';
 
 // ─── Shared resolution for every ability used by a party member OR an enemy ──────
@@ -45,7 +45,7 @@ export const creatureUnit = (e: EnemyInstance): CombatUnit => ({
   name: `${e.classData.name} (lv${e.level})`,
   stats: e.stats,
   pos: e.pos,
-  ...(e.ally ? { allied: true } : {}),
+  ...(isAlly(e) ? { allied: true } : {}),
 });
 
 /** Accumulated changes to one unit from a single action. */
@@ -57,6 +57,8 @@ export interface UnitChange {
   buffs: ActiveBuff[];
   hots: ActiveHot[];
   dots: ActiveDot[];
+  /** Dies now, whatever its HP: the caster of a selfDestruct ability. */
+  slain?: boolean;
 }
 
 export interface FloatEvent { pos: Pos; text: string; color: string }
@@ -100,7 +102,7 @@ export function effectToBuffs(eff: BuffEffect, idPrefix: string, source: string)
   ];
 }
 
-/** A root (Effect 'root') as an ActiveBuff: no stat change, it just holds the unit in place (Stats.rooted). */
+/** A root (Effect 'root') as an ActiveBuff: no stat change, it just holds the unit in place (isRooted). */
 export const rootToBuff = (eff: Extract<Effect, { type: 'root' }>, idPrefix: string, source: string): ActiveBuff => ({
   id: `${idPrefix}-root`, source, damageElement: eff.damageElement,
   stat: 'movement', amount: 0, roots: true, roundsRemaining: eff.rounds,
@@ -269,7 +271,7 @@ export function executeAction(caster: CombatUnit, action: Ability, targets: Comb
       }
       case 'summon':
         summons.push({
-          creature: eff.creature, rounds: eff.rounds, ability: action.name,
+          creature: eff.creature, rounds: eff.rounds, max: eff.max ?? 1, ability: action.name,
           ...(action.target === 'tile' && aimAt ? { at: { ...aimAt } } : {}),
         });
         break;
@@ -290,7 +292,7 @@ export function executeAction(caster: CombatUnit, action: Ability, targets: Comb
     const rootEffects   = targetEffects.filter((e): e is Extract<Effect, { type: 'root' }> => e.type === 'root');
     const category = action.attackCategory ?? 'melee';
     // The primary element (first damage component, else the first DoT) drives the hit roll and DoT scaling.
-    const primaryElement: DamageElement = damageEffects[0]?.damageElement ?? dotEffects[0]?.damageElement ?? 'slashing';
+    const primaryElement: DamageElement = damageEffects[0]?.damageElement ?? dotEffects[0]?.damageElement ?? 'physical';
     const offense = getOffense(caster.stats, category, primaryElement);
     const offenseFor = (el: DamageElement): Offense => el === primaryElement ? offense : getOffense(caster.stats, category, el);
 
@@ -362,6 +364,11 @@ export function executeAction(caster: CombatUnit, action: Ability, targets: Comb
   // Caster effects. Heals on an enemy-targeting ability scale with targets damaged (e.g. drain life).
   const healMultiplier = action.target === 'enemy' ? Math.max(1, targetsDamaged) : 1;
   for (const eff of casterEffects) applySupport(caster, eff, healMultiplier);
+
+  if (action.selfDestruct) {
+    changeFor(caster).slain = true;
+    float(caster, '💀', COMBAT_TEXT_COLOR.damage);
+  }
 
   return {
     changes: [...changes.values()], floats,

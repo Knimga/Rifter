@@ -138,7 +138,12 @@ export function describeEffect(eff: Effect, damageBonus = 0): EffectLine[] {
         case 'root':
             return [{ label: `Root${self}`, value: `Can't move × ${eff.rounds}r`, tone: 'debuff' }];
         case 'summon':
-            // The creature's id, which is its name (data/units/summons.ts; not imported here: it imports this module's)
-            return [{ label: 'Summon', value: `${capitalize(eff.creature)} × ${eff.rounds}r`, tone: 'buff' }];
+            // The creature's id, which is its name ('fungal-spore' → 'Fungal Spore'; data/units/summons.ts, not
+            // imported here: it imports this module's), and how many can be out at once when more than one
+            return [{
+                label: 'Summon',
+                value: `${capitalizeWords(eff.creature.replace(/-/g, ' '))} × ${eff.rounds}r${(eff.max ?? 1) > 1 ? ` (max ${eff.max})` : ''}`,
+                tone: 'buff',
+            }];
     }
 }

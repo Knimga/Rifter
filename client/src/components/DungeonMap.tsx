@@ -1,7 +1,7 @@
 import { useMemo, lazy, Suspense } from 'react';
 import type { AreaType, TargetType } from '../data/combat/abilities';
 import type { ActiveBuff, ActiveHot, ActiveDot } from '../data/units/stats';
-import type { EnemyInstance } from '../data/units/enemies';
+import { isAlly, type EnemyInstance } from '../data/units/enemies';
 import type { DungeonChest, ZoneData } from '../data/world/dungeonGen';
 import type { FogState } from '../hooks/useFogOfWar';
 import { yawFromGridMove } from '../forge/core/facing';
@@ -12,7 +12,7 @@ import { unitKey } from '../data/combat/abilityExecution';
 import FloatingCombatText, { type FloatingText } from './FloatingCombatText';
 import { MoveCostPips } from './MoveLine';
 import { gameObjectGlow, gameObjectModel } from '../data/world/gameObjects';
-import { Board, FloorGrid, FloorTile, MoveLineOverlay, TileHighlight, UprightAt, UsableGlow, facingOpenSide, toMapMember, useBoard, useHoveredTile, useStableHandler, type PartyTokenData, TILE_HIGHLIGHT } from './mapParts';
+import { Board, FloorGrid, FloorTile, HoverEdgeGlow, MoveLineOverlay, ObjectTag, PORTAL_TAG_HEIGHT, TileHighlight, UprightAt, UsableGlow, facingOpenSide, portalTag, toMapMember, useBoard, useHoveredTile, useStableHandler, type PartyTokenData, TILE_HIGHLIGHT } from './mapParts';
 import UnitStatus, { statusMarkers } from './hud/UnitStatus';
 import type { MapLoot, MapObject, UnitAim } from './ModelLayer';
 
@@ -96,6 +96,22 @@ export default function DungeonMap({ playerPos, activeMoverPos, party, moveTarge
   // Fog of war: tiles the party has seen at all (now or before), and tiles it sees now (no fog: everything)
   const isKnown = (key: string) => !fog || fog.visible.has(key) || fog.explored.has(key);
   const isSeenNow = (key: string) => !fog || fog.visible.has(key);
+  // Tiles deep in the fog: unseen, and no tile around them seen either. The HTML floor draws them in the fog's
+  // color, so the zone's layout never shows through, even before the 3D layer (and its fog) has drawn. The fog is
+  // fully dark over them anyway; the tiles at its edge keep their colors, so its soft edge looks as it should.
+  const deepFog = useMemo(() => {
+    const deep = new Set<string>();
+    if (!fog) return deep;
+    const known = (x: number, y: number) => fog.visible.has(`${x},${y}`) || fog.explored.has(`${x},${y}`);
+    for (let x = 0; x < width; x++) {
+      for (let y = 0; y < height; y++) {
+        let near = false;
+        for (let dx = -1; dx <= 1 && !near; dx++) for (let dy = -1; dy <= 1 && !near; dy++) near = known(x + dx, y + dy);
+        if (!near) deep.add(`${x},${y}`);
+      }
+    }
+    return deep;
+  }, [fog, width, height]);
 
   const isAoE = isArea({ area: activeAbilityArea });
   const canAct = !inCombat || isPlayerTurn;
@@ -142,7 +158,8 @@ export default function DungeonMap({ playerPos, activeMoverPos, party, moveTarge
 
   // AoE preview tiles (computed from hover position)
   const aoeTiles = useMemo(() => {
-    if (!activeTarget || !isAoE || !hoveredTile || !inCombat || !isPlayerTurn || !inRangeWithLOS(hoveredTile)) return new Set<string>();
+    // Enemy abilities only in combat (on the party's turn); ally ones out of combat too
+    if (!activeTarget || !isAoE || !hoveredTile || !canAct || (activeTarget === 'enemy' && !inCombat) || !inRangeWithLOS(hoveredTile)) return new Set<string>();
     return affectedKeys(activeMoverPos, hoveredTile, activeAbilityArea, floors);
   }, [activeTarget, isAoE, hoveredTile, inCombat, isPlayerTurn, activeMoverPos, actionRange, floors, activeAbilityArea]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -171,9 +188,9 @@ export default function DungeonMap({ playerPos, activeMoverPos, party, moveTarge
       // Fires on a valid target for the ability's kind, else deselects ('self' fires only on the mover's own
       // tile: the handler deselects elsewhere)
       const valid = activeTarget === 'self' ? true
-        : activeTarget === 'ally' ? !!member || !!enemy?.ally
+        : activeTarget === 'ally' ? isAoE || !!member || (!!enemy && isAlly(enemy)) // an area can be aimed at any tile; range is checked on use
         : activeTarget === 'tile' ? !!tileTargets?.has(key)
-        : isAoE || (!!enemy && !enemy.ally);
+        : isAoE || (!!enemy && !isAlly(enemy));
       if (valid) onAbilityUse(p);
       else onAbilityDeselect();
       return;
@@ -207,9 +224,9 @@ export default function DungeonMap({ playerPos, activeMoverPos, party, moveTarge
     const member = memberByKey.get(key);
     const enemy = floor && !member ? enemyByKey.get(key) : undefined;
     const door = doorByKey.get(key);
-    const targetable = enemy && !enemy.ally && activeTarget === 'enemy' && !isAoE && inCombat && isPlayerTurn && inRangeWithLOS(enemy.pos);
+    const targetable = enemy && !isAlly(enemy) && activeTarget === 'enemy' && !isAoE && inCombat && isPlayerTurn && inRangeWithLOS(enemy.pos);
     // A summoned ally takes the party's helpful abilities
-    const isAllyUnit = !!member || !!enemy?.ally;
+    const isAllyUnit = !!member || (!!enemy && isAlly(enemy));
     const isMoverTile = samePos(p, activeMoverPos);
     const isSelfTile = activeTarget === 'self' && inCombat && isPlayerTurn && isMoverTile;
     const isDoorAdjacent = !!door && isAdjacent(playerPos, p);
@@ -225,17 +242,17 @@ export default function DungeonMap({ playerPos, activeMoverPos, party, moveTarge
     // Overlay on the tile (the floor stays visible under its muted tint)
     const highlight: keyof typeof TILE_HIGHLIGHT | null =
       enemy && enemy.id === activeCombatantId ? 'acting'
-      : isSelfTile || (activeTarget === 'ally' && isAllyUnit) || (isTileTarget && hover.isHovered(p)) ? 'ally'
+      : isSelfTile || (activeTarget === 'ally' && isAllyUnit && inRangeWithLOS(p)) || (isTileTarget && hover.isHovered(p)) ? 'ally'
       : targetable || isEnemyTargeted ? 'enemy'
       : isTileTarget ? 'areaHelp'
-      : aoeTiles.has(key) ? (areaTone === 'help' || (areaTone === 'mixed' && !(enemy && !enemy.ally)) ? 'areaHelp' : 'areaHarm')
+      : aoeTiles.has(key) ? (areaTone === 'help' || (areaTone === 'mixed' && !(enemy && !isAlly(enemy))) ? 'areaHelp' : 'areaHarm')
       : inCombat && isPlayerTurn && isMoverTile ? 'mover'
       : null;
     const isHighlightedUnit = !!highlightUnitId && (enemy?.id === highlightUnitId || (!!member && `player-${member.partyIndex}` === highlightUnitId));
 
     return (
       <FloorTile key={key} p={p} hover={hover} onClick={onTileClick}
-        color={floor && !door ? floorColor : wallColor}
+        color={deepFog.has(key) ? 'var(--rift-fog)' : floor && !door ? floorColor : wallColor}
         brighten={floor && !door && !activeTarget && !highlight && moveTargets.has(key) && hover.isHovered(p)}>
         {tileItems?.[0] && (
           // The pile is drawn by ModelLayer; a glow on the floor under it shows it can be picked up
@@ -245,6 +262,8 @@ export default function DungeonMap({ playerPos, activeMoverPos, party, moveTarge
           </div>
         )}
         {/* A door, the portal or a chest the leader can use now: a soft pulsing glow on its tile (stronger on hover) */}
+        {/* The portal, hovered from farther away: its edges glow faintly */}
+        {isPortal && !isAdjacentToPortal && hover.isHovered(p) && <HoverEdgeGlow color={gameObjectGlow(portalObject)} />}
         {((door && isDoorAdjacent && !inCombat) || (isPortal && isAdjacentToPortal)) && (
           <UsableGlow color={gameObjectGlow(door ? doorObject : portalObject)} hovered={hover.isHovered(p)} />
         )}
@@ -293,6 +312,11 @@ export default function DungeonMap({ playerPos, activeMoverPos, party, moveTarge
           </UprightAt>
         );
       })}
+
+      {/* Where the exit portal leads, at once while it is hovered, wherever the party stands */}
+      {portalPos && hoveredTile && samePos(hoveredTile, portalPos) && isKnown(posKey(portalPos)) && (
+        <ObjectTag board={board} x={portalPos.x} y={portalPos.y} height={PORTAL_TAG_HEIGHT} text={portalTag('The Sanctum')} />
+      )}
 
       {/* Floating combat text */}
       {floatingTexts.filter(ft => isSeenNow(posKey({ x: ft.gridX, y: ft.gridY }))).map(ft => (

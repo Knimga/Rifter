@@ -4,16 +4,16 @@
 // class is built posed for whatever it holds. The forge view and forge:sheet show each class holding each
 // weapon type it can use; the game will build the same from a member's equipped items.
 import type { Design, Model, ModelLink } from './core/types';
-import { norm, rotZ, type Vec3 } from './core/vec';
+import { norm, rotZ, sub, type Vec3 } from './core/vec';
 import { WEAPON_ROLL } from './designs/_weapon';
-import { BOW_ARROW, BOW_LIMBS, CROSSBOW_AXIS, CROSSBOW_UP, HOLD_FOR, type Hold } from './designs/_character';
+import { BOW_ARROW, BOW_LIMBS, CROSSBOW_AXIS, CROSSBOW_UP, DANGLE_UNIT, HOLD_FOR, type Hold } from './designs/_character';
 import { buildModel } from './core/build';
 import { ITEM_SEED, linkedDesign } from './core/link';
 import { CHARACTER_HEIGHT } from './core/stage-config';
 import { extentAlong, holdItems, type PlacedItem } from './core/hold';
 import { CLASSES, type ClassKey } from '../data/units/classes';
-import { WEAPON_SERIES } from '../data/gear/weapons';
-import { SHIELDS } from '../data/gear/offhands';
+import { WEAPON_SERIES, WEAPON_TYPE_DATA } from '../data/gear/weapons';
+import { OFFHANDS, OFFHAND_PROFICIENCIES, SHIELDS } from '../data/gear/offhands';
 import type { WeaponType } from '../data/gear/types';
 
 /** Held length (pommel to tip) of each weapon type, as a fraction of CHARACTER_HEIGHT. Tune by eye. */
@@ -39,6 +39,14 @@ const WALKING_STICK: ReadonlySet<WeaponType> = new Set(['Staves']);
 /** Direction of a planted walking stick: upright, its top leaning very slightly back. */
 const WALKING_STICK_AXIS: Vec3 = [0, 1, -0.06];
 const DEFAULT_HELD_LENGTH = 0.5;
+
+/**
+ * An offhand held dangling (a focus) that marks 'dangle_unit' is shown at this size: world units (tiles) per
+ * unit of its design, so its length shows as designed (the first Keen Amethyst's size in hand).
+ */
+const DANGLE_SCALE = 0.957;
+/** One without that mark: its length from where it is held to its tip, as a fraction of CHARACTER_HEIGHT. */
+export const HELD_DANGLE_LENGTH = 0.22;
 
 /** Held shield height, as a fraction of CHARACTER_HEIGHT. */
 export const HELD_SHIELD_HEIGHT = 0.39;
@@ -155,7 +163,43 @@ export function holdGear(body: Model, gear: HeldGear): Model {
     });
   }
 
-  if (gear.offhand && a[HAND_ANCHORS.offhand]) {
+  const off = gear.offhand?.model.mesh;
+  if (off && off.anchors.quiver_bottom && off.anchors.quiver_top && a.quiver_bottom && a.quiver_top) {
+    // A quiver, worn on the back: its two ends (quiver_bottom, quiver_top) on the body's, at the size it was
+    // built (the item is scaled to fit its icon, so it is scaled back by the ratio of its ends' distance)
+    const iAxis = sub(off.anchors.quiver_top, off.anchors.quiver_bottom), wAxis = sub(a.quiver_top, a.quiver_bottom);
+    items.push({
+      part: 'offhand',
+      mesh: off,
+      placement: {
+        itemAxis: iAxis, itemSecond: [0, 0, 1], // built in the body's frame: its back is toward -z, as the body's
+        worldAxis: wAxis, worldSecond: [0, 0, 1],
+        scale: Math.hypot(...wAxis) / Math.hypot(...iAxis),
+        itemPin: off.anchors.quiver_bottom,
+        worldPin: a.quiver_bottom,
+      },
+    });
+  } else if (off && off.anchors.dangle_grip && off.anchors.dangle_tip && a.fist_l) {
+    // Held dangling from the left fist (a focus): its grip (dangle_grip) in the fist, hanging straight down to
+    // its tip (dangle_tip), whatever the arm does. Sized as built (DANGLE_SCALE, by its 'dangle_unit' mark), so
+    // a shorter or longer design shows so; one without the mark is HELD_DANGLE_LENGTH long
+    const iAxis = sub(off.anchors.dangle_tip, off.anchors.dangle_grip);
+    const unit = off.anchors.dangle_unit;
+    const scale = unit
+      ? (DANGLE_SCALE * DANGLE_UNIT) / Math.hypot(...sub(unit, off.anchors.dangle_grip))
+      : (HELD_DANGLE_LENGTH * CHARACTER_HEIGHT) / Math.hypot(...iAxis);
+    items.push({
+      part: 'offhand',
+      mesh: off,
+      placement: {
+        itemAxis: iAxis, itemSecond: [0, 0, 1],
+        worldAxis: [0, -1, 0], worldSecond: [0, 0, 1],
+        scale,
+        itemPin: off.anchors.dangle_grip,
+        worldPin: a.fist_l,
+      },
+    });
+  } else if (gear.offhand && a[HAND_ANCHORS.offhand]) {
     const s = gear.offhand.model.mesh;
     const height = HELD_SHIELD_HEIGHT * CHARACTER_HEIGHT;
     const scale = height / (s.bounds.max[1] - s.bounds.min[1]);
@@ -202,7 +246,7 @@ export const classOf = (design: Design): ClassKey | null =>
  */
 export function classHolds(classKey: ClassKey): { hold: Hold; weaponTypes: WeaponType[] }[] {
   const c = CLASSES[classKey];
-  const types = (c.weaponProficiencies.filter((p) => p !== 'Shields') as WeaponType[])
+  const types = (c.weaponProficiencies.filter((p) => !OFFHAND_PROFICIENCIES.includes(p)) as WeaponType[])
     .sort((a, b) => (a === c.startingGear.weapon ? -1 : b === c.startingGear.weapon ? 1 : 0));
   const groups = new Map<Hold, WeaponType[]>();
   for (const t of types) groups.set(HOLD_FOR[t], [...(groups.get(HOLD_FOR[t]) ?? []), t]);
@@ -227,17 +271,18 @@ export interface HeldWeapon {
 
 /**
  * A character: the class design's body (built with `seed`) posed for the weapon's hold (HOLD_FOR; no
- * weapon = the class's default hold), holding the weapon and shield, each built from its own design. The
- * one function the game (a member's equipped items) and the forge (sample gear) both build characters
- * with. Items whose design isn't approved (`designs`) are left out.
+ * weapon = the class's default hold), holding the weapon and wearing the offhand (a shield strapped on, a
+ * quiver on the back), each built from its own design. The one function the game (a member's equipped
+ * items) and the forge (sample gear) both build characters with. Items whose design isn't approved
+ * (`designs`) are left out.
  */
-export function buildCharacter(designs: Record<string, Design>, bodyDesign: Design, seed: number, weapon?: HeldWeapon, shield?: ModelLink): Model {
+export function buildCharacter(designs: Record<string, Design>, bodyDesign: Design, seed: number, weapon?: HeldWeapon, offhand?: ModelLink): Model {
   const body = buildModel(bodyDesign, seed, weapon ? HOLD_FOR[weapon.weaponType] : undefined);
   const build = (link: ModelLink | undefined) => {
     const d = link ? linkedDesign(designs, link) : null;
     return d ? itemModel(d) : null;
   };
-  const main = build(weapon?.link), off = build(shield);
+  const main = build(weapon?.link), off = build(offhand);
   return holdGear(body, {
     mainhand: main && weapon ? { model: main, weaponType: weapon.weaponType } : undefined,
     offhand: off ? { model: off } : undefined,
@@ -246,8 +291,9 @@ export function buildCharacter(designs: Record<string, Design>, bodyDesign: Desi
 
 /**
  * Any design's preview model, for the forge (forge view, forge:sheet). A class (character) design is posed
- * for and holds a sample weapon of `weaponType` (default: its starting weapon), with its starting shield
- * when that hold leaves the left arm free for one; everything else is built as-is.
+ * for and holds a sample weapon of `weaponType` (default: its starting weapon), with its starting offhand:
+ * its shield when that hold leaves the left arm free for one, its other offhand (a quiver) with a one-handed
+ * weapon; everything else is built as-is.
  */
 export function buildPreview(design: Design, seed: number, designs: Record<string, Design>, weaponType?: WeaponType): Model {
   const cls = classOf(design);
@@ -255,6 +301,8 @@ export function buildPreview(design: Design, seed: number, designs: Record<strin
   const kit = CLASSES[cls].startingGear;
   const type = weaponType ?? kit.weapon;
   const weaponLink = sampleWeaponLink(type);
-  const shieldLink = HOLD_FOR[type] === 'oneHand' && kit.shield ? SHIELDS.find((s) => s.armorType === kit.shield)?.model : undefined;
-  return buildCharacter(designs, design, seed, weaponLink ? { link: weaponLink, weaponType: type } : undefined, shieldLink);
+  const offhandLink = HOLD_FOR[type] === 'oneHand' && kit.shield ? SHIELDS.find((s) => s.armorType === kit.shield)?.model
+    : kit.offhand && !WEAPON_TYPE_DATA[type].twoHanded ? OFFHANDS[kit.offhand].drops[0]?.model
+    : undefined;
+  return buildCharacter(designs, design, seed, weaponLink ? { link: weaponLink, weaponType: type } : undefined, offhandLink || undefined);
 }

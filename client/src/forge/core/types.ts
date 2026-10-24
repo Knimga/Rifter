@@ -83,6 +83,21 @@ export interface Design {
   build(c: BuildCtx): string;
 }
 
+/**
+ * A soft glow around a point of light the model carries (an eye, a spore, a gem): drawn by the renderer as a
+ * round additive halo facing the camera, fading from its center to `r`, hidden by whatever is in front of it.
+ */
+export interface Halo {
+  /** Its center (model space). */
+  p: Vec3;
+  /** Its radius (model units). */
+  r: number;
+  /** Its color, sRGB 0..1. */
+  c: [number, number, number];
+  /** Index into partNames: the part it moves with. */
+  part: number;
+}
+
 /** Renderer-agnostic, non-indexed triangle data. Nothing in here depends on three.js. */
 export interface MeshData {
   triCount: number;
@@ -101,6 +116,8 @@ export interface MeshData {
   pivots: Record<string, Vec3>;
   /** Named attach points: feet, overhead, hand_l, hand_r, grip, tip... */
   anchors: Record<string, Vec3>;
+  /** Soft glows around its lights (Mesh.halo). Not part of the bounds. */
+  halos: Halo[];
   bounds: { min: Vec3; max: Vec3 };
 }
 

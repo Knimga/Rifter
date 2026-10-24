@@ -1,8 +1,9 @@
-// Offhand data: shields (one per armor type, from that type's armor data: ARMOR_TYPE_DATA). Later: foci for
-// casters, quivers for archers.
-import type { ArmorProficiency } from '../units/classes';
+// Offhand data: shields (one per armor type, from that type's armor data: ARMOR_TYPE_DATA), quivers (archers)
+// and foci (casters).
+import type { ArmorProficiency, WeaponProficiency } from '../units/classes';
+import type { BuffableStat } from '../units/stats';
 import type { ModelLink } from '../../forge/core/types';
-import type { ImplicitDef } from './types';
+import { damageTypeAffixes, meleeStats, rangedStats, type ImplicitDef, type OffhandKind } from './types';
 
 export interface ShieldTemplate {
   id: string;                 // stable key; the forge design for this shield names it (offhands table)
@@ -34,4 +35,83 @@ export const SHIELD_IMPLICIT: ImplicitDef = {
   stat: 'block',
   baseValue: 5,
   growthPerLevel: 0.2,
+};
+
+// ─── Quivers and foci ─────────────────────────────────────────────────────────
+// Offhands that aren't shields (OffhandKind): no armor type and no armor, an implicit of their own. Each kind
+// needs its own proficiency (OFFHAND_PROFICIENCY) and has its drops and its starting version (OFFHANDS).
+
+/** One quiver, focus or other non-shield offhand. */
+export interface OffhandTemplate {
+  id: string;                 // stable key; the forge design for it names it (offhands table)
+  name: string;
+  requiredLevel: number;
+  implicit: ImplicitDef;
+  /** Affixes it never rolls. */
+  invalidAffixes: BuffableStat[];
+  model: ModelLink;           // its forge design: how it is drawn (icon and loot); '' while it has none
+}
+
+/** The proficiency each kind of offhand needs. */
+export const OFFHAND_PROFICIENCY: Record<OffhandKind, WeaponProficiency> = { quiver: 'Quivers', focus: 'Foci' };
+/** Each kind's name, as items show it (tooltips). */
+export const OFFHAND_KIND_NAME: Record<OffhandKind, string> = { quiver: 'Quiver', focus: 'Focus' };
+/** Proficiencies for offhands rather than weapons: shields, and every kind above. */
+export const OFFHAND_PROFICIENCIES: readonly WeaponProficiency[] = ['Shields', ...Object.values(OFFHAND_PROFICIENCY)];
+
+const QUIVER_INVALID_AFFIXES: BuffableStat[] = [
+  ...meleeStats,
+  'magicHit', 'magicCrit',  ...damageTypeAffixes(['magic'], { only: ['Hit', 'Crit'] }),
+  'parry', 'healing', 'block', 'spellcraft', 'strength'
+];
+
+const FOCUS_INVALID_AFFIXES: BuffableStat[] = [
+  ...meleeStats, ...rangedStats, 'strength', 'finesse', 'toughness',
+  'redoubt', 'expertise', 'parry', 'block', ...damageTypeAffixes(['physical','poison']),
+];
+
+/** Quivers that drop as loot. */
+export const QUIVERS: OffhandTemplate[] = [
+  {
+    id: 'leather-quiver', name: 'Leather Quiver', requiredLevel: 1,
+    implicit: { stat: 'rangedDamage', baseValue: 2, growthPerLevel: 0 },
+    invalidAffixes: QUIVER_INVALID_AFFIXES,
+    model: 'offhand.leather-quiver',
+  },
+];
+
+/** Starting gear only: never drops, so even a common first drop is an upgrade (+1 ranged damage, not +2). */
+export const STARTER_QUIVERS: OffhandTemplate[] = [
+  {
+    id: 'worn-quiver', name: 'Worn Quiver', requiredLevel: 1,
+    implicit: { stat: 'rangedDamage', baseValue: 1, growthPerLevel: 0 },
+    invalidAffixes: QUIVER_INVALID_AFFIXES,
+    model: 'offhand.leather-quiver', // the Leather Quiver's (starting gear borrows the model of what it is a worn version of)
+  },
+];
+
+/** Foci that drop as loot. */
+export const FOCI: OffhandTemplate[] = [
+  {
+    id: 'keen-amethyst', name: 'Keen Amethyst', requiredLevel: 1,
+    implicit: { stat: 'spellcraft', baseValue: 2, growthPerLevel: 0 },
+    invalidAffixes: FOCUS_INVALID_AFFIXES,
+    model: 'offhand.keen-amethyst',
+  },
+];
+
+/** Starting gear only: never drops, so even a common first drop is an upgrade (+1 spellcraft, not +2). */
+export const STARTER_FOCI: OffhandTemplate[] = [
+  {
+    id: 'cracked-amethyst', name: 'Cracked Amethyst', requiredLevel: 1,
+    implicit: { stat: 'spellcraft', baseValue: 1, growthPerLevel: 0 },
+    invalidAffixes: [],
+    model: 'offhand.keen-amethyst', // the Keen Amethyst's (starting gear borrows the model of what it is a worn version of)
+  },
+];
+
+/** Each kind of non-shield offhand: the ones that drop, and the starting gear version (its starting offhand). */
+export const OFFHANDS: Record<OffhandKind, { drops: OffhandTemplate[]; starter: OffhandTemplate[] }> = {
+  quiver: { drops: QUIVERS, starter: STARTER_QUIVERS },
+  focus: { drops: FOCI, starter: STARTER_FOCI },
 };
