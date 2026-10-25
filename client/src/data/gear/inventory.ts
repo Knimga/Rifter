@@ -33,13 +33,14 @@ export function takeIntoInventory(inventory: Inventory, items: Item[]): { invent
 
 export function isProficient(classData: ClassData, item: Item): boolean {
   if (isWeaponItem(item)) return (classData.weaponProficiencies as string[]).includes(item.weaponType);
-  if (isShieldItem(item)) return classData.weaponProficiencies.includes('Shields');
+  // A shield also needs its armor type: a Heavy shield takes Heavy armor proficiency
+  if (isShieldItem(item)) return classData.weaponProficiencies.includes('Shields') && classData.armorProficiencies.includes(item.armorType);
   if (isOffhandItem(item)) return classData.weaponProficiencies.includes(OFFHAND_PROFICIENCY[item.offhandKind]);
   if (isArmorItem(item)) return classData.armorProficiencies.includes(item.armorType);
   return false;
 }
 
-/** Whether someone in the party (their classes) can use the item: loot favours such items, and windows fade the rest. */
+/** Whether someone in the party (their classes) can use the item: loot favours such items, and windows tint the rest red. */
 export const partyCanUseItem = (party: { selectedClass: ClassKey }[], item: Item): boolean =>
   party.some((m) => isProficient(CLASSES[m.selectedClass], item));
 

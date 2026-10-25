@@ -62,7 +62,7 @@ export const OFFHAND_PROFICIENCIES: readonly WeaponProficiency[] = ['Shields', .
 const QUIVER_INVALID_AFFIXES: BuffableStat[] = [
   ...meleeStats,
   'magicHit', 'magicCrit',  ...damageTypeAffixes(['magic'], { only: ['Hit', 'Crit'] }),
-  'parry', 'healing', 'block', 'spellcraft', 'strength'
+  'parry', 'healing', 'block', 'spellcraft', 'strength', 'healingReceived'
 ];
 
 const FOCUS_INVALID_AFFIXES: BuffableStat[] = [

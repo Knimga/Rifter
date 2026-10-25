@@ -198,7 +198,7 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
   {
     id: 'skeleton',
     name: 'Skeleton',
-    attributes: { strength: 2, toughness: 2, finesse: 2 },
+    attributes: { toughness: 2, finesse: 2 },
     highAttributes: ['strength', 'finesse'],
     lowAttributes: ['mind', 'spirit'],
     baseHp: 15,
@@ -268,13 +268,13 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
     name: 'Specter',
     attributes: { mind: 4, spirit: 4 },
     highAttributes: ['mind', 'spirit'],
-    lowAttributes: ['strength', 'speed'],
-    baseHp: 20,
+    lowAttributes: ['strength', 'toughness'],
+    baseHp: 15,
     baseArmor: 10,
-    armorPerLevel: 4,
+    armorPerLevel: 2,
     resistances: { shadow: 20, ice: 20 },
     passives: {
-      dodge: { name: 'Ethereal', flat: 20 },
+      dodge: { name: 'Ethereal', flat: 10 },
       magicHit: { name: 'Vengeful', flat: 5 }
     },
     abilities: [
@@ -287,8 +287,8 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
         displayElement: 'ice',
         attackCategory: 'magic',
         effects: [
-          { type: 'damage', appliesTo: 'target', damageElement: 'shadow', minDamage: 2, maxDamage: 4 },
-          { type: 'damage', appliesTo: 'target', damageElement: 'ice', minDamage: 2, maxDamage: 4 }
+          { type: 'damage', appliesTo: 'target', damageElement: 'shadow', minDamage: 1, maxDamage: 1 },
+          { type: 'damage', appliesTo: 'target', damageElement: 'ice', minDamage: 1, maxDamage: 1 }
         ]
       },
       {
@@ -301,12 +301,12 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
         displayElement: 'ice',
         attackCategory: 'magic',
         effects: [
-          { type: 'damage', appliesTo: 'target', damageElement: 'shadow', minDamage:5, maxDamage: 9 },
+          { type: 'damage', appliesTo: 'target', damageElement: 'shadow', minDamage: 4, maxDamage: 7 },
           { type: 'debuff', appliesTo: 'target', damageElement: 'ice', stats: { movement: -1 }, rounds: 3 }
         ]
       }
     ],
-    xpMultiplier: 1.2,
+    xpMultiplier: 1.3,
     model: 'creature.specter'
   },
   {
@@ -328,7 +328,7 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
         target: 'enemy',
         attackCategory: 'melee',
         effects: [
-          { type: 'damage', appliesTo: 'target', damageElement: 'fire', minDamage: 1, maxDamage: 3 }
+          { type: 'damage', appliesTo: 'target', damageElement: 'fire', minDamage: 3, maxDamage: 6 }
         ],
       },
       {
@@ -424,20 +424,21 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
     armorPerLevel: 2,
     resistances: { nature: 30 },
     passives: {
-      natureHit: { name: 'Potent', flat: 5 }
+      natureHit: { name: 'Potent', flat: 10 },
+      naturePenetration: { name: 'Potent', flat: 10 }
     },
     abilities: [
       {
         name: 'Sporeburst',
         mpCost: 0,
-        apCost: 2,
+        apCost: 1,
         range: 0,
         target: 'enemy',
         area: 'blast1',
         attackCategory: 'magic',
         selfDestruct: true,
         effects: [
-          { type: 'damage', appliesTo: 'target', damageElement: 'nature', minDamage: 10, maxDamage: 10 }
+          { type: 'damage', appliesTo: 'target', damageElement: 'nature', minDamage: 12, maxDamage: 15 }
         ]
       }
     ],
@@ -452,7 +453,7 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
     lowAttributes: ['speed', 'strength'],
     baseHp: 30,
     baseArmor: 15,
-    armorPerLevel: 3,
+    armorPerLevel: 5,
     resistances: { nature: 30, poison: 30 },
     passives: {
       mpRegen: { name: 'Renewal', flat: 1 },
@@ -633,12 +634,12 @@ export const BOSS_CLASSES: EnemyClassData[] = [
   {
     id: 'necromancer',
     name: 'Necromancer',
-    attributes: { toughness: 8, mind: 8 },
+    attributes: { toughness: 4, mind: 8, spirit: 4 },
     highAttributes: ['mind', 'toughness'],
-    lowAttributes: ['spirit', 'speed'],
-    baseHp: 30,
-    baseArmor: 20,
-    armorPerLevel: 1,
+    lowAttributes: ['finesse', 'speed'],
+    baseHp: 25,
+    baseArmor: 15,
+    armorPerLevel: 3,
     resistances: { shadow: 20 },
     abilities: [
       {
@@ -649,18 +650,18 @@ export const BOSS_CLASSES: EnemyClassData[] = [
         target: 'enemy',
         attackCategory: 'melee',
         effects: [
-          { type: 'damage', appliesTo: 'target', damageElement: 'physical', minDamage: 8, maxDamage: 10 }
+          { type: 'damage', appliesTo: 'target', damageElement: 'physical', minDamage: 8, maxDamage: 8 }
         ]
       },
       {
-        name: 'Necrotic Bolt',
-        mpCost: 8,
-        apCost: 2,
+        name: 'Necrotize',
+        mpCost: 7,
+        apCost: 1,
         range: 5,
         target: 'enemy',
         attackCategory: 'magic',
         effects: [
-          { type: 'damage', appliesTo: 'target', damageElement: 'shadow', minDamage: 10, maxDamage: 12 }
+          { type: 'dot', appliesTo: 'target', damageElement: 'shadow', damagePerRound: 8, rounds: 2 }
         ]
       },
       {
@@ -681,12 +682,12 @@ export const BOSS_CLASSES: EnemyClassData[] = [
   {
     id: 'burning-spirit',
     name: 'Burning Spirit',
-    attributes: { toughness: 4, mind: 6, spirit: 6 },
+    attributes: { finesse: 6, mind: 8, spirit: 6 },
     highAttributes: ['mind', 'spirit'],
-    lowAttributes: ['speed', 'finesse'],
-    baseHp: 35,
-    baseArmor: 10,
-    armorPerLevel: 4,
+    lowAttributes: ['speed', 'strength'],
+    baseHp: 40,
+    baseArmor: 20,
+    armorPerLevel: 5,
     resistances: { fire: 30, physical: 20 },
     passives: {
       dodge: { name: 'Ethereal', flat: 10 },
@@ -695,7 +696,7 @@ export const BOSS_CLASSES: EnemyClassData[] = [
     abilities: [
       {
         name: 'Conflagrate',
-        mpCost: 20,
+        mpCost: 15,
         apCost: 3,
         range: 5,
         target: 'enemy',
@@ -722,7 +723,7 @@ export const BOSS_CLASSES: EnemyClassData[] = [
         apCost: 1,
         range: 1,
         target: 'enemy',
-        attackCategory: 'melee',
+        attackCategory: 'magic',
         displayElement: 'fire',
         effects: [
           { type: 'damage', appliesTo: 'target', damageElement: 'fire', minDamage: 5, maxDamage: 7 }
@@ -732,6 +733,61 @@ export const BOSS_CLASSES: EnemyClassData[] = [
     dropChance: 1,
     xpMultiplier: 6,
     model: 'creature.burning-spirit',
+  },
+  {
+    id: 'sporemother',
+    name: 'Sporemother',
+    attributes: { toughness: 6, mind: 8, spirit: 8 },
+    highAttributes: ['toughness', 'spirit'],
+    lowAttributes: ['speed', 'finesse'],
+    baseHp: 40,
+    baseArmor: 15,
+    armorPerLevel: 5,
+    resistances: { nature: 30, poison: 30 },
+    passives: {
+      hpRegen: { name: 'Mycoblood', flat: 2 },
+      mpRegen: { name: 'Mycomind', flat: 2 },
+
+    },
+    abilities: [
+      {
+        name: 'Summon Spore',
+        mpCost: 10,
+        apCost: 1,
+        range: 1,
+        target: 'tile',        
+        effects: [
+          { type: 'summon', appliesTo: 'caster', creature: 'fungal-spore', rounds: 3, max: 3 }
+        ]
+      },
+      {
+        name: 'Chitin Bloom',
+        mpCost: 10,
+        apCost: 2,
+        range: 5,
+        target: 'ally',
+        area: 'blast2',
+        displayElement: 'nature',
+        effects: [
+          { type: 'hot', appliesTo: 'allies', damageElement: 'nature', healPerRound: 6, rounds: 3 },
+          { type: 'buff', appliesTo: 'allies', stats: { armor: 20 }, rounds: 3 }
+        ]
+      },
+      {
+        name: 'Toxin Spray',
+        mpCost: 5,
+        apCost: 1,
+        range: 4,
+        target: 'enemy',
+        area: 'line',
+        displayElement: 'poison',
+        effects: [
+          { type: 'damage', appliesTo: 'target', damageElement: 'poison', minDamage: 6, maxDamage: 8 }
+        ]
+      }
+    ],
+    xpMultiplier: 6,
+    model: 'creature.sporemother'
   }
 ];
 

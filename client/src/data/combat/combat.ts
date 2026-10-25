@@ -198,7 +198,7 @@ export interface RoundTick {
 }
 
 export function tickRound(stats: Stats, hp: number, mp: number, hots: ActiveHot[], dots: ActiveDot[]): RoundTick {
-  const heal = tickHots(hots);
+  const heal = tickHots(hots, stats);
   const { damage, mpDamage, threatBySource } = tickDots(dots, stats);
   return {
     hp: Math.max(0, Math.min(stats.hp, hp + stats.hpRegen + heal) - damage),

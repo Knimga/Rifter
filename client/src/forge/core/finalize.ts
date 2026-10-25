@@ -21,9 +21,11 @@ export function finalize(m: Mesh, fit: FitSpec): void {
         if (d2 > far2) { far2 = d2; fx = dx; fz = dz; }
       }
     const rad = Math.hypot(fx, fz);
-    const h = max[1] - min[1];
+    // The floor: its lowest point, or (a floating creature: fit.floor 'origin') its own y = 0
+    const floorY = fit.floor === 'origin' ? Math.min(0, min[1]) : min[1];
+    const h = max[1] - floorY;
     const s = Math.min(fit.height / h, fit.maxRadius / Math.max(rad, 1e-6));
-    m.xfAll((p) => [(p[0] - cx) * s, (p[1] - min[1]) * s, (p[2] - cz) * s], s);
+    m.xfAll((p) => [(p[0] - cx) * s, (p[1] - floorY) * s, (p[2] - cz) * s], s);
     m.anchor('feet', [0, 0, 0]);
     m.anchor('overhead', [0, h * s + 0.12, 0]);
   } else {

@@ -85,7 +85,7 @@ export function computeEnemyTurn(
   floors: Set<string>,
   /** Foes' threat, by key (CombatState.threat); none = 0. Enemies hold none, so a summon picks the closest. */
   threat: Record<string, number> = {},
-  /** Floor tiles a game object stands on (the portal): it can't walk onto or through them (sight isn't blocked). */
+  /** Floor tiles a game object stands on (the rift): it can't walk onto or through them (sight isn't blocked). */
   objectTiles: ReadonlySet<string> = new Set(),
   /** What it has left this turn: AP, and tiles already paid for (combat.ts moveCost). Default: a fresh turn. */
   budget: { ap: number; paidTiles: number } = { ap: enemy.stats.apMax, paidTiles: 0 },

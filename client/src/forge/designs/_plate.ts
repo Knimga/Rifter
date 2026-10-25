@@ -19,7 +19,9 @@ export function helmDesign(seriesId: string): Design {
   return {
     id, label, source,
     category: 'armor',
-    fit: { kind: 'item', size: 0.6, groundPitchDeg: -55 }, // as loot it rests tipped back, not flat: the open underside stays out of view
+    // As loot it lies dropped on its side (rolled onto its right cheek), not propped up facing the camera, at
+    // about the size of the other helms on the floor (icons frame themselves, so the size only matters there)
+    fit: { kind: 'item', size: 0.48, groundRollDeg: 90, groundPitchDeg: 0 },
     budget: 500,
     build(c) {
       const m = c.mesh;

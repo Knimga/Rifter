@@ -104,7 +104,7 @@ export function facingOpenSide(pos: Pos, isOpen: (p: Pos) => boolean): number {
 }
 
 /**
- * A soft pulsing glow filling a floor tile: something there (a door, a portal) can be used now. `color` is
+ * A soft pulsing glow filling a floor tile: something there (a door, a rift) can be used now. `color` is
  * any CSS color (a palette variable); it brightens on hover. Goes inside the tile, on the floor layer.
  */
 export function UsableGlow({ color, hovered }: { color: string; hovered: boolean }) {
@@ -117,7 +117,7 @@ export function UsableGlow({ color, hovered }: { color: string; hovered: boolean
 }
 
 /**
- * A faint, steady glow at a floor tile's edges: the thing on it (a portal) is under the mouse but can't be used
+ * A faint, steady glow at a floor tile's edges: the thing on it (a rift) is under the mouse but can't be used
  * from here (UsableGlow is the one that pulses, when it can). Goes inside the tile, on the floor layer.
  */
 export function HoverEdgeGlow({ color }: { color: string }) {
@@ -130,7 +130,7 @@ export function HoverEdgeGlow({ color }: { color: string }) {
 }
 
 /**
- * A game object's name tag while it is hovered (e.g. a portal's "To the Crypt"): a small tooltip box, upright
+ * A game object's name tag while it is hovered (e.g. a rift's "To the Crypt"): a small tooltip box, upright
  * over its tile with its bottom edge at `height` world tiles (so it sits above anything that tall), shown at once
  * (no delay).
  */
@@ -143,13 +143,13 @@ export function ObjectTag({ board, x, y, height, text }: { board: BoardLayout; x
 }
 
 /**
- * How high (world tiles) a portal's tag sits: clear of its top (portals stand 1.5 tall; the far side of the ring
+ * How high (world tiles) a rift's tag sits: clear of its top (rifts stand 1.5 tall; the far side of the ring
  * shows higher on screen under the camera's tilt, so with some room to spare).
  */
-export const PORTAL_TAG_HEIGHT = 1.95;
+export const RIFT_TAG_HEIGHT = 1.95;
 
-/** The tag text of a portal to a place: "To the Crypt" (a name starting "The" reads lower-case after "To"). */
-export const portalTag = (placeName: string) => `To ${placeName.replace(/^The /, 'the ')}`;
+/** The tag text of a rift to a place: "To the Crypt" (a name starting "The" reads lower-case after "To"). */
+export const riftTag = (placeName: string) => `To ${placeName.replace(/^The /, 'the ')}`;
 
 /**
  * Floor glow under the active party member: a faint disc on the floor plane, beneath the model (ModelLayer

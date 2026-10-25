@@ -1,9 +1,9 @@
-// Fungus shared by the fungal creatures (Sporetender, Mirehulk): mushroom caps on stalks and bracket (shelf)
-// fungus, after the handoff's builders (handoff/Fungal Forest Forge.html).
+// Fungus shared by the fungal creatures (Sporetender, Mirehulk, Gloomtoad, Sporemother): mushroom caps on stalks and bracket (shelf)
+// fungus, after an external designer's builders (their "Fungal Forest Forge" example).
 // Files starting with "_" are NOT registered as designs.
 import type { BuildCtx } from '../core/ctx';
 import { blob, frustum, loft } from '../core/primitives';
-import { add, mulC, rotX, rotY, rotZ, type RGB, type Vec3 } from '../core/vec';
+import { add, mul, mulC, norm, rotX, rotY, rotZ, type RGB, type Vec3 } from '../core/vec';
 
 /** A pale stalk, the default under every cap. */
 const STALK: RGB = [206, 196, 172];
@@ -51,4 +51,28 @@ export function shelf(c: BuildCtx, p: Vec3, ang: number, r: number, col: RGB): v
   blob(m, [0, 0, 0], [r, r * 0.2, r * 0.8], 0, 0.16, col, { j: 0.2 });
   blob(m, [0, -r * 0.16, 0], [r * 0.8, r * 0.14, r * 0.65], 0, 0.16, mulC(col, 0.7), { j: 0.2 });
   m.xf(s0, (q) => add(rotY(q, ang), p));
+}
+
+/**
+ * A bone antler from `B` on side `sx` (1 = left, +x), `sc` its size: three segments up and outward, with
+ * `tines` branching off (the first two tipped with a small mushroom, `capTop`/`capGill`), and a halo at its tip
+ * in `glow`. `capSides`: its mushrooms' facets (default 9; fewer to keep many antlers cheap). Returns its tip and
+ * its tines' tips (to hang things from).
+ */
+export function antler(c: BuildCtx, B: Vec3, sx: number, sc: number, tines: number, col: RGB, capTop: RGB, capGill: RGB, glow: RGB, o: { capSides?: number } = {}): { tip: Vec3; tines: Vec3[] } {
+  const m = c.mesh;
+  const p1 = add(B, [sx * 0.16 * sc, 0.26 * sc, -0.06 * sc]), p2 = add(p1, [sx * 0.12 * sc, 0.24 * sc, -0.03 * sc]), p3 = add(p2, [-sx * 0.02 * sc, 0.2 * sc, 0.06 * sc]);
+  const pts = [B, p1, p2, p3];
+  frustum(m, B, p1, 0.03, 0.024, 5, col);
+  frustum(m, p1, p2, 0.024, 0.018, 5, col);
+  frustum(m, p2, p3, 0.018, 0.008, 5, col);
+  const tips: Vec3[] = [];
+  for (let i = 0; i < tines; i++) {
+    const q = pts[1 + (i % 2)], d = norm([sx * c.rf(0.1, 0.5), c.rf(0.4, 1), c.rf(-0.2, 0.8)]), tip = add(q, mul(d, 0.2 * sc * c.rf(0.7, 1.2)));
+    frustum(m, q, tip, 0.016, 0.005, 4, col);
+    if (i < 2) mush(c, tip, 0.04, 0.055, capTop, capGill, { lean: [sx * 0.3, 0], sides: o.capSides });
+    tips.push(tip);
+  }
+  m.halo(p3, 0.16, glow);
+  return { tip: p3, tines: tips };
 }

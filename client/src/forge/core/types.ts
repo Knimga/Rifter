@@ -39,13 +39,17 @@ export interface PartAnimation {
 /**
  * How a finished mesh is scaled and positioned. Units are TILES (1 unit = 1 grid cell).
  * standing: origin at the feet center, y up, scaled so height <= height and footprint radius <= maxRadius.
+ *           floor: 'lowest' (default) sets its lowest point on the floor; 'origin' keeps its own y = 0 as the
+ *           floor (it floats: nothing need touch y = 0), and its height counts from there.
  * item:     origin at the bbox center, scaled so the longest dimension == size.
+ *           groundRollDeg: as loot, first turned this far about its front axis (z), e.g. 90 to rest on its
+ *           side (default 0); then
  *           groundPitchDeg: how far it tips back when lying on the floor as loot (default -90 = flat,
  *           face up; see ITEM_GROUND_PITCH). Less tipped (e.g. -55) hides an open underside like a helm's.
  */
 export type FitSpec =
-  | { kind: 'standing'; height: number; maxRadius: number }
-  | { kind: 'item'; size: number; groundPitchDeg?: number };
+  | { kind: 'standing'; height: number; maxRadius: number; floor?: 'lowest' | 'origin' }
+  | { kind: 'item'; size: number; groundPitchDeg?: number; groundRollDeg?: number };
 
 /**
  * The one game data entry a design is the model for. `key` identifies the entry within its table:
@@ -134,6 +138,8 @@ export interface Model {
   mesh: MeshData;
   /** Items only: the pitch (radians, about x) it lies at on the floor as loot. */
   groundPitch?: number;
+  /** Items only: the roll (radians, about z, before the pitch) it lies at on the floor as loot. */
+  groundRoll?: number;
   /** The design's moving parts (PartSpin), if any: renderers animate them. */
   motion?: PartSpin[];
   /** The design's one-time animations (PartAnimation), if any. */

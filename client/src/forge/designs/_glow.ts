@@ -1,4 +1,4 @@
-// A pool of light on the floor under a glowing model (portals, the Burning Spirit): translucent rings, each
+// A pool of light on the floor under a glowing model (rifts, the Burning Spirit): translucent rings, each
 // fainter than the one inside it, so the pool fades out with no edge. Lies just above the floor (y = 0).
 // Files starting with "_" are NOT registered as designs.
 import type { Mesh } from '../core/mesh';

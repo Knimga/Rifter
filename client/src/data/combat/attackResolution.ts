@@ -10,7 +10,7 @@ const DR_DIVISOR_PER_LEVEL = 5;       // the divisor grows with the defender's l
 const MAGIC_ARMOR_SHARE = 0.25;       // how much of a unit's armor counts toward its magical defense
 const DR_CAP = 0.75;                  // lower value = more threatening endgame damage
 export const CRIT_MULTIPLIER = 2;    // damage and heals
-const GLANCING_MULTIPLIER = 0.7;      // glancing blows deal 30% less damage
+export const GLANCING_MULTIPLIER = 0.7; // glancing blows deal 30% less damage
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -103,7 +103,8 @@ export function applyDR(
 
 /**
  * Roll whether an attack connects. Miss, dodge, parry and block each prevent the hit entirely; only
- * melee attacks can be parried. Glancing blow and crit are only rolled once the attack has landed.
+ * melee attacks can be parried. Glancing blow and crit are only rolled once the attack has landed; magic never
+ * glances (a glancing blow is a weapon or a missile turned aside).
  */
 export function rollHit(offense: Offense, category: AttackCategory, target: Stats): HitRoll {
   const stopped = (outcome: HitOutcome): HitRoll => ({ outcome, crit: false, glancing: false });
@@ -113,7 +114,7 @@ export function rollHit(offense: Offense, category: AttackCategory, target: Stat
   if (roll100() <= target.block) return stopped('block');
   return {
     outcome: 'hit',
-    glancing: roll100() <= target.glancingBlow,
+    glancing: category !== 'magic' && roll100() <= target.glancingBlow,
     crit: rollCrit(offense),
   };
 }

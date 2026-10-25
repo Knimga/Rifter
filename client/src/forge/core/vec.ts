@@ -15,6 +15,22 @@ export const norm = (a: Vec3): Vec3 => {
   const l = len(a) || 1;
   return [a[0] / l, a[1] / l, a[2] / l];
 };
+/** The point `t` of the way from a to b. */
+export const lerp3 = (a: Vec3, b: Vec3, t: number): Vec3 => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+
+/**
+ * The rotation that turns +y onto the unit vector `d` (Rodrigues): build a piece upright along +y, then stand it
+ * along any direction (a leaf, a horn, a strand).
+ */
+export function alignY(d: Vec3): (p: Vec3) => Vec3 {
+  const a = cross([0, 1, 0], d), s = len(a), co = d[1];
+  if (s < 1e-6) return (p) => (co > 0 ? p : [p[0], -p[1], -p[2]]);
+  const k = norm(a);
+  return (p) => {
+    const kp = cross(k, p), kd = dot(k, p);
+    return [p[0] * co + kp[0] * s + k[0] * kd * (1 - co), p[1] * co + kp[1] * s + k[1] * kd * (1 - co), p[2] * co + kp[2] * s + k[2] * kd * (1 - co)];
+  };
+}
 
 /** Rotation about Y. Positive angle turns +z toward +x (same as three.js rotation.y). */
 export const rotY = (p: Vec3, a: number): Vec3 => [

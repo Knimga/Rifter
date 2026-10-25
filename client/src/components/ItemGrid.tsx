@@ -1,6 +1,6 @@
 // A grid of item slots (the party inventory, a chest's window): each item's icon in a cell, with its rarity
 // glow; hover for its tooltip, right-click for its action (equip it, take it). Items the viewer can't use
-// show faded, their tooltip marked "Not proficient". Empty slots fill out the grid. With `equippedFor`, holding
+// show a red tint, their tooltip marked "Not proficient". Empty slots fill out the grid. With `equippedFor`, holding
 // Ctrl over an item shows the equipped item in its slot beside its tooltip, to compare.
 import type { MouseEvent } from 'react';
 import type { Item } from '../data/gear';
@@ -46,8 +46,8 @@ export default function ItemGrid({ items, cols, size, canUse, action, onAction, 
           <Tooltip key={i} gap={10} bare={!!equippedFor} content={equippedFor
             ? <ItemCompareTooltip item={item} stats={stats} proficient={usable} clickAction={act ?? undefined} equipped={equippedFor(item)} comparing={comparing} />
             : <ItemTooltipContent item={item} stats={stats} proficient={usable} clickAction={act ?? undefined} />}>
-            <div className={`rf-cell is-filled ${glow.className}`} style={glow.style} aria-label={`${item.name}${usable ? '' : unusableNote}`} onContextMenu={rightClick}>
-              <ItemIcon item={item} className={`w-[30px] h-[30px] ${usable ? '' : 'opacity-50'}`} />
+            <div className={`rf-cell is-filled ${glow.className} ${usable ? '' : 'is-unusable'}`} style={glow.style} aria-label={`${item.name}${usable ? '' : unusableNote}`} onContextMenu={rightClick}>
+              <ItemIcon item={item} className="w-[30px] h-[30px]" />
             </div>
           </Tooltip>
         );

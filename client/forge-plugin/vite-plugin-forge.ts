@@ -2,8 +2,10 @@
 // and keeps the design registries fresh when design files appear or disappear.
 // Registered in vite.config.ts.
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { normalizePath, type Plugin } from 'vite';
+import { CATEGORY_FOLDER, approvedSource } from '../src/forge/core/folders';
+import type { Category } from '../src/forge/core/types';
 
 const ID = /^[a-z0-9-]+$/;
 
@@ -56,13 +58,18 @@ export function forgePlugin({ forgeDir, snapshotDir }: { forgeDir: string; snaps
             const stem = String(body.stem ?? '');
             const url = req.url ?? '';
             const draft = join(forgeDir, 'drafts', `${stem}.ts`);
-            const live = join(forgeDir, 'designs', `${stem}.ts`);
+            // Approved, it goes in its category's folder (core/folders.ts)
+            const folder = CATEGORY_FOLDER[String(body.category ?? '') as Category];
+            const live = folder ? join(forgeDir, 'designs', folder, `${stem}.ts`) : '';
             if (url.startsWith('/approve') || url.startsWith('/discard')) {
               if (!ID.test(stem)) return send(400, { error: 'bad id' });
               if (!existsSync(draft)) return send(404, { error: 'no such draft' });
-              // Approve: replaces the approved file (git keeps history). A draft reaches the shared helpers as
-              // '../designs/_x'; from designs/ that is './_x', as approved designs write it.
-              if (url.startsWith('/approve')) writeFileSync(live, readFileSync(draft, 'utf8').replaceAll("from '../designs/", "from './"));
+              // Approve: replaces the approved file (git keeps history), its imports fixed for its folder
+              if (url.startsWith('/approve')) {
+                if (!live) return send(400, { error: 'bad category' });
+                mkdirSync(dirname(live), { recursive: true });
+                writeFileSync(live, approvedSource(readFileSync(draft, 'utf8')));
+              }
               unlinkSync(draft);
               onDesignFileAddedOrRemoved(draft);
               return send(200, { ok: true });

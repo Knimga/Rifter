@@ -1,27 +1,26 @@
 // The party window (UI handoff, 04 party modal): party rail, the member's model and equipment, the shared
-// inventory, and their attributes, skills, stats and offense. Values raised or lowered by buffs and debuffs
-// show green / red with an arrow.
+// inventory, and their attributes, skills and stats (StatsPanel). Values raised or lowered by gear, buffs and
+// debuffs show green / red with an arrow.
 // Level-up (UI handoff: level-up and XP tracking): the party's XP bar on the rail; a member with points to
 // spend is marked on the rail, gets a header banner (Reset, Confirm) and + / - on their attribute and skill
 // rows. Placed points stay pending (kept by GameScreen, so closing the window keeps them) until Confirm.
-import { lazy, Suspense, useEffect, useMemo, useState, type ComponentType, type MouseEvent, type ReactNode } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useState, type ComponentType, type MouseEvent } from 'react';
 import { Crown, Shirt, Hand, Footprints, Sword, Shield } from 'lucide-react';
 import { CLASSES } from '../data/units/classes';
-import { ATTACK_CATEGORY_COLOR } from '../data/constants';
-import { ATTRIBUTE_KEYS, SKILL_KEYS, recomputeStats, formatStat, type ActiveBuff, type Stats } from '../data/units/stats';
-import { GEAR_SLOTS, type GearSlot, type Item } from '../data/gear';
-import { hasPointsToSpend, memberStatInput, memberStats, noPendingPoints, pointsLeft, type PartyMemberConfig, type PendingPoints } from '../data/units/party';
+import { ATTRIBUTE_KEYS, SKILL_KEYS, recomputeStats, type ActiveBuff, type Stats } from '../data/units/stats';
+import { GEAR_SLOTS, getGearBuffs, type GearSlot, type Item } from '../data/gear';
+import { hasPointsToSpend, memberStatInput, memberStats, noPendingPoints, pointsLeft, spendPoints, type PartyMemberConfig, type PendingPoints } from '../data/units/party';
 import { xpToNext, type PartyProgress } from '../data/units/xp';
 import { INVENTORY_COLS, INVENTORY_SIZE, canEquip, canUnequip, isFull, isProficient, type Inventory } from '../data/gear/inventory';
 import { AttributeTooltips, SkillTooltips, ATTR_LABEL, SLOT_LABEL, capitalize } from '../data/detailStrings';
 import { Tooltip, ItemTooltipContent, TextTip } from './Tooltip';
-import { damageReduction } from '../data/combat/attackResolution';
 import ItemIcon, { rarityGlow } from './ItemIcon';
 import ItemGrid from './ItemGrid';
 import Portrait from './hud/Portrait';
 import { PanelTitle } from './ui/Panel';
 import { XpBar } from './hud/XpBar';
 import { characterLookKey, characterModel, heldGear } from './characterModel';
+import StatsPanel, { Val, type StatShift } from './StatsPanel';
 
 // The turning model (lazy: it pulls in three.js)
 const ModelTurntable = lazy(() => import('./ModelTurntable'));
@@ -50,14 +49,6 @@ interface Props {
 /** The window's design size (px); it scales down to fit smaller screens. */
 const WIDTH = 1296, HEIGHT = 830;
 
-// Stats panel rows after HP and MP: [label, stat key]. Values go through formatStat (adds % where applicable).
-type StatRowKey = 'hpRegen' | 'mpRegen' | 'initiative' | 'movement' | 'armor' | 'dodge'
-  | 'parry' | 'block' | 'glancingBlow' | 'magicResistance' | 'healing';
-const STAT_ROWS: [string, StatRowKey][] = [
-  ['Initiative', 'initiative'], ['Movement', 'movement'], ['Armor', 'armor'], ['Dodge', 'dodge'], ['Parry', 'parry'],
-  ['Block', 'block'], ['Glancing Blow', 'glancingBlow'], ['Magic Resistance', 'magicResistance'], ['Healing', 'healing'],
-];
-
 const SLOT_ICON: Record<GearSlot, ComponentType<{ className?: string }>> = {
   helm: Crown, chest: Shirt, gloves: Hand, boots: Footprints,
   mainhand: Sword, offhand: Shield,
@@ -72,28 +63,6 @@ const SLOT_POS: Record<GearSlot, { col: number; row: number }> = {
   offhand:  { col: 3, row: 3 },
   boots:    { col: 2, row: 4 },
 };
-
-/** Offense columns, each with a small glyph (sword, bow, flame). */
-const OFFENSE = [
-  { key: 'melee', icon: 'M9 2v10M7 4.5L9 2l2 2.5M6 12h6M9 12v4' },
-  { key: 'ranged', icon: 'M5 2c7 2 7 12 0 14M5 2v14M5 9h9M11 6.5l3 2.5-3 2.5' },
-  { key: 'magic', icon: 'M9 16c-3 0-5-2.2-5-5 0-2.5 1.7-4 2.5-6 1 1 1.5 2 1.5 3 1.5-1 2-3 1.5-5 2.5 1.5 4.5 4 4.5 7 0 3.3-2 6-5 6z' },
-] as const;
-
-/** A value, green with an up arrow when gear or an effect raised it, red with a down arrow when an effect lowers it. */
-function Val({ delta, children, className = '' }: { delta: number; children: ReactNode; className?: string }) {
-  return (
-    <span className={`inline-flex items-center gap-1 ${delta > 0 ? 'text-rift-up' : delta < 0 ? 'text-rift-down' : 'text-rift-ink'} ${className}`}>
-      {delta !== 0 && (
-        <svg aria-hidden="true" width="8" height="8" viewBox="0 0 8 8" fill="currentColor">
-          <path d={delta > 0 ? 'M4 1l3.5 6h-7z' : 'M4 7L.5 1h7z'} />
-        </svg>
-      )}
-      {children}
-      {delta !== 0 && <span className="sr-only">{delta > 0 ? ' (raised by gear or an effect)' : ' (lowered by an effect)'}</span>}
-    </span>
-  );
-}
 
 /** Level-up controls on an attribute or skill row. */
 interface PointControls {
@@ -182,19 +151,33 @@ export default function CharacterSheet({ party, partyHp, partyMp, partyStats, pa
 
   const member = party[selectedIdx];
   const { characterName, selectedClass, gear } = member;
-  const stats = partyStats[selectedIdx];
+  // Level-up: the member's placed points and what's left to place. Every value shows the placed points as if
+  // confirmed (a point in Evasion raises Dodge, Parry and Glancing Blow too); `shown` is the member with them spent.
+  const pending = pendingAll[selectedIdx];
+  const leveling = hasPointsToSpend(member);
+  const left = pointsLeft(member, pending);
+  const placed = left.attr < member.unspentAttributePoints || left.skill < member.unspentSkillPoints;
+  const buffs = partyBuffs[selectedIdx] ?? [];
+  const shown = placed ? spendPoints(member, pending) : member;
+  const stats = placed ? memberStats(shown, partyStats[selectedIdx].level, buffs) : partyStats[selectedIdx];
   const classData = CLASSES[selectedClass];
   const hp = partyHp[selectedIdx] ?? stats.hp;
   const mp = partyMp[selectedIdx] ?? stats.mp;
 
   // What colors a stat: its base (class, level, spent points, class passives and the gear's armor values, with
   // what they feed like glancing blow: no affixes, implicits or effects) and the stats without the effects lowering
-  // them. Green: raised above the base (by an affix, implicit or effect); red: an effect is lowering it now, even if
-  // it is still above its base.
-  const baseStats = recomputeStats(memberStatInput(member, stats.level), []);
-  const unlowered = memberStats(member, stats.level, (partyBuffs[selectedIdx] ?? []).filter(b => b.amount >= 0 && (b.percent ?? 0) >= 0));
-  /** How a stat stands: −1 an effect lowers it, 1 gear or an effect raises it above its base, 0 neither (Val's colors). */
-  const shift = (get: (s: Stats) => number): number => (get(stats) < get(unlowered) ? -1 : get(stats) > get(baseStats) ? 1 : 0);
+  // them. Green: raised above the base by an affix, implicit or effect on that stat itself (not through another:
+  // Subtlety on gear raises crit too, but only Subtlety is green); red: an effect is lowering it now, even if it is
+  // still above its base.
+  const baseStats = recomputeStats(memberStatInput(shown, stats.level), []);
+  const unlowered = memberStats(shown, stats.level, buffs.filter(b => b.amount >= 0 && (b.percent ?? 0) >= 0));
+  const raised = new Set([...getGearBuffs(gear), ...buffs].filter(b => b.amount > 0 || (b.percent ?? 0) > 0).map(b => b.stat));
+  /**
+   * How a stat stands: −1 an effect lowers it, 1 gear or an effect on it (`stat`; none for HP and MP, which only
+   * attributes raise) raises it above its base, 0 neither (Val's colors).
+   */
+  const shift: StatShift = (stat, get) =>
+    get(stats) < get(unlowered) ? -1 : stat && raised.has(stat) && get(stats) > get(baseStats) ? 1 : 0;
 
   // The member's model, holding their equipped weapon and offhand
   const held = heldGear(gear);
@@ -203,11 +186,6 @@ export default function CharacterSheet({ party, partyHp, partyMp, partyStats, pa
 
   const invFull = isFull(inventory);
 
-  // Level-up: the member's placed points and what's left to place
-  const pending = pendingAll[selectedIdx];
-  const leveling = hasPointsToSpend(member);
-  const left = pointsLeft(member, pending);
-  const placed = left.attr < member.unspentAttributePoints || left.skill < member.unspentSkillPoints;
   const ready = leveling && left.attr === 0 && left.skill === 0;
   const setPending = (fn: (p: PendingPoints) => PendingPoints) => onPendingChange(selectedIdx, fn);
   const attrPoints = (k: (typeof ATTRIBUTE_KEYS)[number]): PointControls | undefined => leveling ? {
@@ -331,7 +309,7 @@ export default function CharacterSheet({ party, partyHp, partyMp, partyStats, pa
               </section>
             </div>
 
-            {/* ── Right: attributes, skills, stats, offense ── */}
+            {/* ── Right: attributes, skills, stats ── */}
             <div className="flex-1 min-w-0 flex flex-col gap-2">
               <div className="flex-none flex gap-2 items-stretch">
                 <section aria-label="Attributes" className="rf-panel flex-1 min-w-0 p-3 flex flex-col">
@@ -342,7 +320,7 @@ export default function CharacterSheet({ party, partyHp, partyMp, partyStats, pa
                   <div className="flex-1 min-h-0 grid grid-cols-1 auto-rows-fr gap-1 mt-2">
                     {ATTRIBUTE_KEYS.map(attr => (
                       <TipRow key={attr} label={ATTR_LABEL[attr]} tip={AttributeTooltips[attr]} caps points={attrPoints(attr)}
-                        value={stats.attributes[attr] + pending.attr[attr]} delta={shift(s => s.attributes[attr])} />
+                        value={stats.attributes[attr]} delta={shift(attr, s => s.attributes[attr])} />
                     ))}
                   </div>
                 </section>
@@ -354,92 +332,17 @@ export default function CharacterSheet({ party, partyHp, partyMp, partyStats, pa
                   <div className="grid grid-cols-1 gap-1 mt-2">
                     {SKILL_KEYS.map(skill => (
                       <TipRow key={skill} label={capitalize(skill)} tip={SkillTooltips[skill]} points={skillPoints(skill)}
-                        value={stats.skills[skill] + pending.skill[skill]} delta={shift(s => s.skills[skill])} />
+                        value={stats.skills[skill]} delta={shift(skill, s => s.skills[skill])} />
                     ))}
                   </div>
                 </section>
               </div>
 
-              <section aria-label="Stats" className="rf-panel p-3">
-                <PanelTitle variant="heading">Stats</PanelTitle>
-                <ul className="list-none mt-1.5 mb-0 p-0 text-xs">
-                  <StatLine label="HP" delta={shift(s => s.hp)}>{hp} / {stats.hp}</StatLine>
-                  <StatLine label="HP Regen" delta={shift(s => s.hpRegen)}>{formatStat('hpRegen', stats.hpRegen)}</StatLine>
-                  <StatLine label="MP" delta={shift(s => s.mp)}>{mp} / {stats.mp}</StatLine>
-                  <StatLine label="MP Regen" delta={shift(s => s.mpRegen)}>{formatStat('mpRegen', stats.mpRegen)}</StatLine>
-                  {STAT_ROWS.map(([label, key]) => (
-                    <StatLine key={key} label={label} delta={shift(s => s[key])} tip={statTip(key, stats)}>{formatStat(key, stats[key])}</StatLine>
-                  ))}
-                </ul>
-              </section>
-
-              <section aria-label="Offense" className="rf-panel p-3">
-                <PanelTitle variant="heading">Offense</PanelTitle>
-                <div className="mt-1.5 text-xs grid" style={{ gridTemplateColumns: '56px repeat(3, 1fr)' }}>
-                  <span />
-                  {OFFENSE.map(o => (
-                    <span key={o.key} className="flex items-center justify-end gap-[5px] h-5 text-[10px] tracking-[0.1em] uppercase border-b border-rift-divider" style={{ color: ATTACK_CATEGORY_COLOR[o.key] }}>
-                      <svg aria-hidden="true" width="12" height="12" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d={o.icon} /></svg>
-                      {o.key}
-                    </span>
-                  ))}
-                  {(['hit', 'damage', 'crit'] as const).map(row => (
-                    <OffenseRow key={row} row={row} stats={stats} shift={shift} />
-                  ))}
-                </div>
-              </section>
+              <StatsPanel stats={stats} hp={hp} mp={mp} shift={shift} />
             </div>
           </div>
         </div>
       </div>
     </div>
-  );
-}
-
-function StatLine({ label, delta, tip, children }: { label: string; delta: number; tip?: string; children: ReactNode }) {
-  return (
-    <li className="flex items-center justify-between h-[19px] border-b border-rift-divider">
-      {tip ? (
-        // Hovering or focusing the label explains the value (like the attribute and skill rows)
-        <Tooltip content={<TextTip>{tip}</TextTip>} gap={6}>
-          <span tabIndex={0} className="rf-tiplabel text-rift-muted">{label}</span>
-        </Tooltip>
-      ) : <span className="text-rift-muted">{label}</span>}
-      <Val delta={delta} className="gap-[5px]">{children}</Val>
-    </li>
-  );
-}
-
-/** A DR fraction as a percentage, e.g. 0.173 -> '17.3%'. */
-const drPct = (dr: number) => `${(dr * 100).toFixed(1)}%`;
-
-/** What a defensive stat's value does, as damage reduction (the same formula combat uses: attackResolution). */
-function statTip(key: StatRowKey, stats: Stats): string | undefined {
-  if (key === 'armor') {
-    return `Reduces physical damage taken by ${drPct(damageReduction(stats, true))}. `
-      + 'A quarter of it also counts toward magical defense.';
-  }
-  if (key === 'magicResistance') {
-    return `Reduces magical damage taken by ${drPct(damageReduction(stats, false))} (with a quarter of your armor). `
-      + 'Fire, ice, lightning, shadow, poison, holy and nature.';
-  }
-  return undefined;
-}
-
-function OffenseRow({ row, stats, shift }: { row: 'hit' | 'damage' | 'crit'; stats: Stats; shift: (get: (s: Stats) => number) => number }) {
-  return (
-    <>
-      <span className="flex items-center h-5 text-rift-muted">{capitalize(row)}</span>
-      {OFFENSE.map(({ key }) => {
-        const v = stats[key][row];
-        return (
-          <span key={key} className="flex items-center justify-end h-5">
-            <Val delta={shift(s => s[key][row])} className="gap-[5px]">
-              {row === 'damage' ? `+${v}` : formatStat(`${key}${capitalize(row)}`, v)}
-            </Val>
-          </span>
-        );
-      })}
-    </>
   );
 }

@@ -231,7 +231,7 @@ export class MapModelRenderer {
     let viewerMoving = false;
     for (const [id, e] of this.entries) {
       if (e.viewer && e.move) viewerMoving = true;
-      // Moving parts (e.g. a portal's swirl) keep the loop running while the unit is on the map
+      // Moving parts (e.g. a rift's swirl) keep the loop running while the unit is on the map
       // Spinning parts keep the loop running while the unit is on the map; a one-time animation while it plays
       const playing = Object.values(e.anims).some((a) => a.t < a.ms);
       for (const a of Object.values(e.anims)) a.t = Math.min(a.ms, a.t + dt);

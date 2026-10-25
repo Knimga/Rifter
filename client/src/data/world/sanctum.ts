@@ -1,26 +1,26 @@
 import { samePos, type Pos } from './grid';
-import type { DungeonKey } from './dungeonPresets';
+import type { DungeonKey } from './dungeons';
 
 // ─── The Sanctum: fixed, hand-authored hub map (never procedurally generated) ──
 
-/** A portal in the Sanctum: where it stands, its look (GAME_OBJECTS id), the dungeon it leads to, and the open side it faces. */
-export interface SanctumPortal {
+/** A rift in the Sanctum: where it stands, its look (GAME_OBJECTS id), the dungeon it leads to, and the open side it faces. */
+export interface SanctumRift {
   pos: Pos;
   object: string;
   dungeon: DungeonKey;
-  /** Grid direction the portal faces (toward the room), e.g. [0, 1] = south. */
+  /** Grid direction the rift faces (toward the room), e.g. [0, 1] = south. */
   facing: readonly [number, number];
 }
 
 export const SANCTUM = {
   width: 11,
   height: 11,
-  // One portal per dungeon, each near its own wall, facing into the room
-  portals: [
-    { pos: { x: 5, y: 2 }, object: 'necrotic-portal', dungeon: 'crypt', facing: [0, 1] },
-    { pos: { x: 2, y: 5 }, object: 'fire-portal', dungeon: 'firelands', facing: [1, 0] },
-    { pos: { x: 8, y: 5 }, object: 'fungal-portal', dungeon: 'fungal', facing: [-1, 0] },
-  ] satisfies SanctumPortal[] as SanctumPortal[],
+  // One rift per dungeon, each near its own wall, facing into the room
+  rifts: [
+    { pos: { x: 5, y: 2 }, object: 'necrotic-rift', dungeon: 'crypt', facing: [0, 1] },
+    { pos: { x: 2, y: 5 }, object: 'fire-rift', dungeon: 'firelands', facing: [1, 0] },
+    { pos: { x: 8, y: 5 }, object: 'fungal-rift', dungeon: 'fungal', facing: [-1, 0] },
+  ] satisfies SanctumRift[] as SanctumRift[],
   playerStart: { x: 5, y: 5 },
   followerStarts: [{ x: 6, y: 5 }, { x: 7, y: 5 }],
 } as const;
@@ -36,8 +36,8 @@ export const SANCTUM_FLOORS: ReadonlySet<string> = new Set(
     .map((p) => `${p.x},${p.y}`),
 );
 
-/** The portal standing on `p`, if any. */
-export const sanctumPortalAt = (p: Pos): SanctumPortal | undefined => SANCTUM.portals.find((portal) => samePos(portal.pos, p));
+/** The rift standing on `p`, if any. */
+export const sanctumRiftAt = (p: Pos): SanctumRift | undefined => SANCTUM.rifts.find((rift) => samePos(rift.pos, p));
 
-/** Walls block the way, and so do the portals (each occupies its tile: nobody walks onto or through it). */
-export const isSanctumWalkable = (p: Pos) => !isSanctumWall(p) && !sanctumPortalAt(p);
+/** Walls block the way, and so do the rifts (each occupies its tile: nobody walks onto or through it). */
+export const isSanctumWalkable = (p: Pos) => !isSanctumWall(p) && !sanctumRiftAt(p);

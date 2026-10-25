@@ -21,11 +21,16 @@ export function usePartyMembers(party: PartyMemberConfig[], progress: PartyProgr
 
   /**
    * Apply `fn` to the listed members' state (others unchanged). When `fn` returns every member as it was,
-   * the state stays the same array: React skips the redraw.
+   * the state stays the same array: React skips the redraw. A member it leaves at 0 HP (dead, whatever killed
+   * it) loses every buff, debuff, HoT and DoT on it at once: it comes back from the dead clean.
    */
   const updateMembers = useCallback((fn: (m: MemberState, i: number) => MemberState, only?: (i: number) => boolean) =>
     setMembers(prev => {
-      const next = prev.map((m, i) => (!only || only(i) ? fn(m, i) : m));
+      const next = prev.map((m, i) => {
+        if (only && !only(i)) return m;
+        const n = fn(m, i);
+        return n.hp <= 0 && (n.buffs.length || n.hots.length || n.dots.length) ? { ...n, buffs: [], hots: [], dots: [] } : n;
+      });
       return next.every((m, i) => m === prev[i]) ? prev : next;
     }), []);
 
@@ -52,7 +57,7 @@ export function usePartyMembers(party: PartyMemberConfig[], progress: PartyProgr
     });
   }, [maxKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  /** Bring any member at 0 HP/MP back to 10% (portal return, end of combat, out of combat). */
+  /** Bring any member at 0 HP/MP back to 10% (rift return, end of combat, out of combat). */
   const reviveDowned = useCallback(() => {
     const tenPercent = (max: number | undefined) => Math.max(1, Math.floor((max ?? 10) * 0.1));
     updateMembers((m, i) => m.hp > 0 && m.mp > 0 ? m : {

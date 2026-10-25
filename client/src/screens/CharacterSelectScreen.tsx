@@ -25,8 +25,8 @@ type Slot = { classKey: ClassKey | null; name: string };
 
 const CLASS_KEYS = Object.keys(CLASSES) as ClassKey[];
 const ARMOR_TYPES: ArmorProficiency[] = ['Cloth', 'Light', 'Medium', 'Heavy'];
-const ROLE_ORDER: Role[] = ['tank', 'healer', 'damage', 'caster'];
-const ROLE_LABEL: Record<Role, string> = { tank: 'Tank', healer: 'Healer', damage: 'Damage', caster: 'Caster' };
+const ROLE_ORDER: Role[] = ['tank', 'healer', 'melee', 'ranged', 'caster'];
+const ROLE_LABEL: Record<Role, string> = { tank: 'Tank', healer: 'Healer', melee: 'Melee', ranged: 'Ranged', caster: 'Caster' };
 const MARCH_LABEL = ['1 · Front', '2 · Middle', '3 · Rear'];
 const ORDINAL = ['1st', '2nd', '3rd'];
 const EMPTY: Slot[] = [{ classKey: null, name: '' }, { classKey: null, name: '' }, { classKey: null, name: '' }];

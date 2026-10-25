@@ -12,17 +12,16 @@ import { xpToNext, type PartyProgress } from '../data/units/xp';
 import { isAlly, isHostile, type EnemyInstance } from '../data/units/enemies';
 import { areaTone } from '../data/combat/areas';
 import { aimPartyAction } from '../data/combat/targeting';
-import type { Ability } from '../data/combat/abilities';
 import { findOpenTilesNear, posKey, samePos, type Pos } from '../data/world/grid';
 import { partyWalk, findFollowerSpawns, spreadOut, trailFollowers } from '../data/world/movement';
 import { SANCTUM, SANCTUM_FLOORS, isSanctumWalkable } from '../data/world/sanctum';
 import { gameObjectName } from '../data/world/gameObjects';
 import { generateDungeon, isFreeFloor, objectTilesOf, spawnDungeonEnemies, zoneWalkable, type DungeonData, type ZoneData } from '../data/world/dungeonGen';
-import { DUNGEON_PRESETS, type DungeonKey } from '../data/world/dungeonPresets';
+import { DUNGEONS, type DungeonKey } from '../data/world/dungeons';
 import { INITIAL_COMBAT, aggroedBy, startCombat, joinCombat, advanceTurn, apLeft, moveBudget, moveCost, stunnedOutcome, getCurrentCombatant, deadPartyIndices, type CombatState } from '../data/combat/combat';
 import { isRooted } from '../data/units/stats';
 import { creatureUnit, executeAction, memberUnit, toAction, type CombatUnit } from '../data/combat/abilityExecution';
-import { useEnemyTurn, type EnemyAoePreview } from '../hooks/useEnemyTurn';
+import { useEnemyTurn, type EnemyActivity, type EnemyAoePreview } from '../hooks/useEnemyTurn';
 import { useFloatingText } from '../hooks/useFloatingText';
 import { useLatest } from '../hooks/useLatest';
 import { usePartyMembers } from '../hooks/usePartyMembers';
@@ -73,14 +72,17 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
   const { floatingTexts, spawnFloat, removeFloat, clearFloats } = useFloatingText();
   const [showCharSheet, setShowCharSheet] = useState(false);
   const [dungeon, setDungeon] = useState<DungeonData | null>(null);
-  // Which dungeon the party is in (or last entered): its preset gives the map's colors, doors and exit portal
+  // Which dungeon the party is in (or last entered): its preset gives the map's colors, doors and exit rift
   const [dungeonKey, setDungeonKey] = useState<DungeonKey>('crypt');
-  const preset = DUNGEON_PRESETS[dungeonKey];
+  const preset = DUNGEONS[dungeonKey];
   const [enemyAoePreview, setEnemyAoePreview] = useState<EnemyAoePreview | null>(null);
   // The unit (unitKey) a creature is about to hit, highlighted on the map
   const [enemyTargetKey, setEnemyTargetKey] = useState<string | null>(null);
   // The ability the acting creature is using: named in the status box at the bottom
-  const [enemyAbility, setEnemyAbility] = useState<Ability | null>(null);
+  // What the acting creature is doing (moving, using an ability): the status box at the bottom says it. `seq`
+  // counts activities, so the box can tell a new one from the same (the same ability used again)
+  const [enemyActivity, setEnemyActivity] = useState<{ activity: EnemyActivity; seq: number }>({ activity: null, seq: 0 });
+  const showEnemyActivity = useCallback((activity: EnemyActivity) => setEnemyActivity(prev => ({ activity, seq: prev.seq + 1 })), []);
   const [currentZone, setCurrentZone] = useState(0);
   const [followerPositions, setFollowerPositions] = useState<Pos[]>([...SANCTUM.followerStarts]);
 
@@ -121,7 +123,7 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
   // Every creature of the zone: hostile enemies (summoned ones too), and the party's summoned allies (isAlly)
   const zoneEnemies = enemies.filter(e => e.zoneId === currentZone);
   const zoneSummons = zoneEnemies.filter(e => isAlly(e) && e.currentHp > 0);
-  const portalPos = dungeon && currentZone === dungeon.endZoneId ? dungeon.portalPos : null;
+  const riftPos = dungeon && currentZone === dungeon.endZoneId ? dungeon.riftPos : null;
 
   // Party members as drawn on the maps: the leader always, followers only while alive
   const partyPositions = [playerPos, ...followerPositions].slice(0, party.length);
@@ -184,7 +186,7 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
   const partyLevelRef = useLatest(progress.level);
   const dungeonRef = useLatest(dungeon);
   const leaderPosRef = useLatest(playerPos);
-  // Tiles of the current zone a game object stands on (the portal, chests): enemies can't walk there either
+  // Tiles of the current zone a game object stands on (the rift, chests): enemies can't walk there either
   const zoneObjectsRef = useLatest(dungeon && zone ? objectTilesOf(dungeon, zone) : new Set<string>());
 
   // Preload the 3D model layer (three.js, a separate chunk) while the party is still in the sanctum
@@ -232,7 +234,7 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
     if (!d) return;
     const drops: Record<string, Item[]> = {};
     for (const e of dead) {
-      const item = generateLootDrop(d.baseEnemyLevel, partyLevelRef.current, e.classData.dropChance, partyCanUse);
+      const item = generateLootDrop(d.level, partyLevelRef.current, e.classData.dropChance, partyCanUse);
       if (item) (drops[posKey(e.pos)] ??= []).push(item);
     }
     if (Object.keys(drops).length === 0) return;
@@ -281,9 +283,9 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
     resetFog(); // and it starts unseen
 
     if (next !== 'sanctum') {
-      const config = DUNGEON_PRESETS[next];
+      const config = DUNGEONS[next];
       setDungeonKey(next);
-      const d = generateDungeon(config);
+      const d = generateDungeon(config, progress.level);
       setDungeon(d);
       setCurrentZone(d.startZoneId);
       setPlayerPos(d.playerStart);
@@ -503,7 +505,7 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
   useEnemyTurn(
     combat, currentCombatant,
     enemyTurnRefs,
-    setEnemies, setCombat, setEnemyAoePreview, setEnemyTargetKey, setEnemyAbility,
+    setEnemies, setCombat, setEnemyAoePreview, setEnemyTargetKey, showEnemyActivity,
   );
 
   // ─── Combat end detection ────────────────────────────────────────────────
@@ -587,14 +589,14 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
               floatingTexts={floatingTexts}
               onFloatingTextComplete={removeFloat}
               zone={zone}
-              portalPos={portalPos}
+              riftPos={riftPos}
               partyBuffs={partyBuffs}
               partyHots={partyHots}
               partyDots={partyDots}
               floorColor={preset.floorColor}
               wallColor={preset.wallColor}
               doorObject={preset.doorObject}
-              portalObject={preset.portalObject}
+              riftObject={preset.riftObject}
               enemyAoePreviewTiles={enemyAoePreview?.tiles}
               enemyTargetKey={enemyTargetKey}
               tileTargets={tileTargets}
@@ -646,6 +648,7 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
       <div className="absolute left-6 bottom-6 z-30">
         <PartyRows
           rows={memberTokens.map((t, i) => ({ token: t, name: party[i].characterName, levelUp: hasPointsToSpend(party[i]) }))}
+          level={progress.level}
           selectedIdx={activePartyIdx}
           canSelect={!combat.active}
           onSelect={setBarViewIdx}
@@ -680,7 +683,7 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
       )}
       {aiActing && currentCombatant && (
         <div className="absolute left-1/2 -translate-x-1/2 bottom-6 z-30">
-          <ActingStatus name={currentCombatant.name} ability={enemyAbility} />
+          <ActingStatus name={currentCombatant.name} activity={enemyActivity.activity} seq={enemyActivity.seq} />
         </div>
       )}
 

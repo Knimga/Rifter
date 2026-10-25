@@ -13,13 +13,38 @@ export const AttributeTooltips: Record<AttributeKey, string> = {
 
 export const SkillTooltips: Record<SkillKey, string> = {
     perception: "Increases initiative",
-    stealth: "Reduces threat generated and slightly increases crit chance and initiative",
+    subtlety: "Reduces threat generated and slightly increases crit chance and initiative",
     expertise: "For melee and ranged attacks, increases penetration and slightly increases hit and crit chance",
     spellcraft: "For magic attacks, increases penetration and slightly increases hit and crit chance",
     evasion: "Increases dodge, parry, and glancing blow chance",
     redoubt: "Increases armor gained from gear, and increases armor contribution to glancing blow chance",
     devotion: "Increases MP regen, magic resistance, and healing"
 }
+
+/**
+ * Combat's numbers behind the defensive stats' tooltips, for one unit (computed by combat's own rules,
+ * attackResolution, and passed in: this module can't import it without an import cycle). Fractions, 0..1.
+ */
+export interface DefenseFacts {
+    /** Physical damage its armor stops. */
+    physicalDr: number;
+    /** Magical damage its magic resistance (with a quarter of its armor) stops. */
+    magicDr: number;
+    /** How much less damage a glancing blow deals. */
+    glancingReduction: number;
+}
+
+/** A fraction as a percentage with one decimal: 0.173 → '17.3%'. */
+const pct1 = (f: number) => `${(f * 100).toFixed(1)}%`;
+
+/** What a defensive stat's value does, for its tooltip (the party window's stat rows). */
+export const StatTooltips: Partial<Record<BuffableStat, (f: DefenseFacts) => string>> = {
+    armor: (f) => `Reduces physical damage taken by ${pct1(f.physicalDr)}. A quarter of it also counts toward magical defense.`,
+    magicResistance: (f) => `Reduces magical damage taken by ${pct1(f.magicDr)} (with a quarter of your armor). `
+        + 'Fire, ice, lightning, shadow, poison, holy and nature.',
+    glancingBlow: (f) => `Chance that a hit on you is a glancing blow, dealing ${Math.round(f.glancingReduction * 100)}% less damage. `
+        + 'Magic attacks never glance.',
+};
 
 export const AREA_LABEL: Record<string, string> = {
     single: 'Single', blast1: 'Blast 1', blast2: 'Blast 2', line: 'Line',

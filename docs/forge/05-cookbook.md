@@ -1,0 +1,121 @@
+# Cookbook
+
+How to build models: the toolkit, the construction patterns models share, the pitfalls that cost a redraw, and how
+to check your work. What they should look like: [04-style-guide.md](04-style-guide.md). The rules a design must
+follow: [03-design-contract.md](03-design-contract.md).
+
+Keep this current: a new or changed helper goes into the toolkit, and a mistake that cost a redraw goes into
+Pitfalls, in the same change (code sweeps check it).
+
+## The toolkit
+Reach for these before writing vertex math by hand. All coordinates are pre-fit model units (y up, front +z, left
++x); `finalize` scales the finished mesh to the tile afterwards.
+
+**Vectors and colors** (`core/vec.ts`)
+| | |
+|---|---|
+| `add`, `sub`, `mul`, `dot`, `cross`, `len`, `norm`, `lerp3` | vector arithmetic |
+| `rotX`, `rotY`, `rotZ` | rotate a point about an axis through the origin |
+| `alignY(d)` | the rotation turning +y onto direction `d`: build a piece upright, then stand it along any direction |
+| `hslRGB(h, s, l)` | colors by hue, saturation, lightness: draw variety from narrow ranges (`hslRGB(ri(16, 24), rf(22, 30), rf(17, 22))`) |
+| `mulC`, `mixC` | darken/brighten a color, blend two |
+
+**Shapes** (`core/primitives.ts`)
+| | |
+|---|---|
+| `blob(m, c, r, level, jit, col)` | lumpy ellipsoid: heads, bodies, rocks, knuckles. Level 0 = 20 tris, 1 = 80 |
+| `crackedBlob(..., lava, share, o, vein)` | a blob with connected patches in another color: lava veins (default, glowing), moss or lichen (pass `vein: { j }` for lit) |
+| `frustum(m, p0, p1, r0, r1, sides, col)` | a tapered prism between two points: limb segments, horns, spikes, stalks |
+| `loft(m, rings, col)` | connect a stack of rings: torsos, robes, hoods, blades |
+| `ringPts`, `wobbleRing` | rings to loft: a clean circle around any axis, or an organic, wavy outline in the x-z plane |
+| `box(m, c, s, col, jit)` | jittered boxes: feet, brows, slabs, vertebrae |
+| `bipyr(m, c, r, h, sides, col)` | double-pointed crystal: gems, motes, spores, sparks |
+| `tendril(m, start, dir, len, segs, w0, col, { bend })` | a tapering strand: vines, tatters, tentacles, flame tongues, roots |
+| `fibSphere(n, turn)` | `n` directions spread evenly over a sphere: spikes, needles, motes, warts all around a body |
+| `onEllipsoid(c, r, dir, out)` | the point on a blob's surface in a direction: where to attach things so they sit on it |
+| `alongPath(points, t)` | a point part-way along a polyline: place things along a limb or strand |
+
+**The mesh** (`c.mesh`, `core/mesh.ts`)
+| | |
+|---|---|
+| `tri`, `quad` | custom faces (winding is automatic: away from the center you pass) |
+| `part(name, pivot)` | tag the following faces (torso, head, arm_l...); `motion` and `animations` move parts |
+| `anchor(name, p)` | attach points (`feet` always; `hand_l/hand_r` for creatures that hold things) |
+| `halo(p, r, color)` | a soft additive glow around a light (see Glow and translucency) |
+| `xf(from, fn)` | transform the faces added since index `from`: build a piece at the origin, then move it |
+| `xfAll(fn, scale)` | transform everything (faces, anchors, pivots, halos) |
+
+**Family helpers** (`designs/_*.ts`): shared shape code for a family of designs. `_character` (bodies, holds,
+clothing), `_sword`, `_axe` and the other weapons, `_armor` and the materials, `_shield`, `_rift`, `_object`,
+`_glow` (`floorGlow`), `_fungal` (`cap`, `mush`, `shelf`, `antler`). When two designs need the same shape, it goes in a
+helper, never copied.
+
+## Construction patterns
+- **Limbs:** chains of `frustum`s through named joints (shoulder, elbow, wrist), a `blob` at each joint for bulk.
+  Name the joints as `Vec3` constants first and pose by moving them: the code reads like a pose.
+- **Bodies and robes:** `loft` a stack of rings from bottom to top (`wobbleRing` for organic outlines, or rings
+  you jitter yourself). Shift each ring's center for sway or a hunch (a function of height, `sway(y)`), and color
+  by height with a ColorFn (`(cen) => mixC(bottom, top, (cen[1] - y0) / span)`).
+- **Masses:** overlapping blobs, the big ones `crackedBlob` for patches. To make one feature grow out of another
+  (a spine from a back), sink its pieces mostly inside the mass so only their tops show; tacked-on pieces read as
+  stuck on.
+- **Attach to the surface:** place anything that grows on a body (vines, shelves, spikes, eyes, mushrooms) with
+  `onEllipsoid` from the blob it grows on, not at the blob's center or at a guessed coordinate.
+- **All around a body:** `fibSphere` for the directions, each nudged by a little seeded noise, then
+  `onEllipsoid` (or the center plus a length) to place each piece.
+- **Strands:** `tendril` with a `bend` that adds sag, wind (a shared sideways push) and a ripple
+  (`Math.sin(t * k + phase)`). Keep strands from pointing straight at or away from the camera: sweep them sideways.
+- **Pieces built upright:** model a leaf, horn or cap upright along +y at the origin, then
+  `m.xf(start, p => add(alignY(dir)(p), base))`.
+- **Patches by position:** to color regions (lichen among moss, rust among iron), decide by a slow wave through
+  space (`sin(x * 7 + a) + sin(y * 6 + b) + sin(z * 8 + c) > k`), so neighbouring faces agree and patches form.
+- **Variety:** draw everything from the seed (`c.rf/ri/pick/chance`) within ranges that keep the identity: hue
+  inside a narrow band, sizes within about ±15%, a few discrete choices (`pick`) for the big variants. Things a
+  user fixes become constants.
+
+## Fit and size
+- `finalize` scales the whole model so it fits `fit.height` (from the floor to its top) and `fit.maxRadius` (from
+  the feet anchor, sideways), whichever is tighter. So:
+  - Changing the top changes everything: make the needles shorter and the model scales back up, undoing it.
+    To resize one part, also adjust `fit.height` (or the part that sets the top).
+  - Raising a model (or adding something tall) makes all of it smaller.
+- The floor is the model's lowest point by default. A floating creature sets `fit: { ..., floor: 'origin' }`:
+  its own y = 0 is the floor, so it hovers at the height it was built at.
+- Mark `m.anchor('feet', ...)` at the middle of the stance (between the feet, or under a floating body): that
+  point goes to the tile center.
+- Regular enemies are about 1.0–1.45 tall, bosses up to about 1.7 (see the existing designs' `fit`).
+
+## Glow and translucency
+- `e` (emissive) below 0.5 is a partial glow on a lit face; **0.5 and up is drawn unlit and opaque**: its alpha
+  is ignored in game. A see-through glowing face (a sac, a spirit's body) must stay below 0.5 (0.35–0.45).
+- Translucent faces (`a < 1`) draw after the solid ones; keep them to bodies meant to be see-through.
+- A halo the same color as the glowing face under it disappears into it: make halos hotter (mix toward white or
+  yellow) or larger, so they bloom onto the dark around.
+- Halos are additive: overlapping ones add up fast. A few strong ones beat many weak ones.
+- `xf` moves faces only: halos (and anchors, pivots) placed before an `xf` stay behind. Give halos their final
+  position, or move them yourself.
+
+## Pitfalls
+- **Buried details:** things placed at a blob's center, or inside a mass the eye can't see into, simply vanish.
+  Use `onEllipsoid`.
+- **Too small to see:** at game scale (a tile is about 50 px) anything thinner than about 0.015 model units, or
+  smaller than about 3% of the model, disappears. Thin strands need width; tiny details need contrast or glow.
+- **Toward or away from the camera:** long parts leaning that way collapse to stubs (see the style guide's
+  Camera section). Lean them sideways.
+- **Shapes that read wrong:** a tall cone reads as a dunce cap, a small dark hole as a single eye socket, a round
+  boulder on a back as a separate rock. Check how the silhouette reads, not just what was built.
+- **Density:** clusters of small things (motes, warts) pack to the middle if their distance is drawn uniformly
+  in 0..1; spread them over a shell (`fibSphere`) or draw the distance as `u ** 0.6`.
+- **Budget creep:** small pieces add up (a 9-sided cap is about 100 triangles). Use fewer sides for small or
+  distant parts (`sides` options), and cap-less strands.
+
+## Checking your work
+`npm run forge:lint -- --drafts` (rules, determinism, budget) and then look at `forge:sheet`:
+- **Overview:** `npm run forge:sheet -- --only-drafts --seeds 12 --yaws 0,180 --out forge-sheet.png`.
+- **Detail:** fewer seeds, bigger cells: `--seeds 1,2,3 --cols 3 --cell 400` (or 520 for one or two).
+- **True side profile** (backs, hunches, how far things stick out): `--yaws 90 --elev 5`.
+- **Close three-quarter views:** `--yaws 30,330`.
+- Look at several seeds: a seed-dependent problem (a part buried on some seeds, a color that loses the floor)
+  shows only across a few.
+- When refactoring a design without changing its look (moving code into a helper), check the draft builds
+  identically to the approved design for many seeds (compare `buildModel(...).mesh.positions`).

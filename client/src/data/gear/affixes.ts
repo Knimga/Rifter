@@ -101,12 +101,13 @@ const SKILL: AffixRoll = { min: 1, tierSize: 3 };                  // 1-3 ... 13
 const ARMOR: AffixRoll = { min: 2, tierSize: 4 };                  // 2-5, 6-9 ... 18-21
 const MAGIC_RESISTANCE: AffixRoll = { min: 1, tierSize: 3 };       // 1-3 ... 13-15
 const AVOIDANCE: AffixRoll = { min: 1, tierSize: 2 };              // %: 1-2 ... 9-10 (dodge, parry, block, glancing)
-const INITIATIVE: AffixRoll = { min: 1, tierSize: 2 };             // 1-2 ... 9-10
+const INITIATIVE: AffixRoll = { min: 1, tierSize: 2, weight: 0.75 };             // 1-2 ... 9-10
 const CATEGORY_DAMAGE: AffixRoll = { min: 1, tierSize: 2 };        // 1-2 ... 9-10 (melee / ranged / magic damage)
 const CATEGORY_OFFENSE: AffixRoll = { min: 1, tierSize: 2 };       // %: 1-2 ... 9-10 (their hit, crit, penetration)
 const HEALING: AffixRoll = { min: 1, tierSize: 2 };                // 1-2 ... 9-10
-const HP_REGEN: AffixRoll = { min: 1, tierSize: 1, minLevel: 5 };  // 1 ... 5; too strong this early
-const MP_REGEN: AffixRoll = { min: 1, tierSize: 1 };               // 1 ... 5
+const HEALING_RECEIVED: AffixRoll = { min: 1, tierSize: 1, weight: 0.75 }; // 1 ... 5: on every heal and HoT tick the wearer gets
+const HP_REGEN: AffixRoll = { min: 1, tierSize: 1, minLevel: 5, weight: 0.75 };  // 1 ... 5; too strong this early
+const MP_REGEN: AffixRoll = { min: 1, tierSize: 1, weight: 0.75 };               // 1 ... 5
 
 /** Elemental affixes, the same for every element (e.g. fireResistance, shadowDamage). */
 // Weights: damage and resistance are the common elemental affixes; hit, crit and penetration are rarer
@@ -154,6 +155,7 @@ export const AFFIX_ROLLS: Record<AffixStat, AffixRoll> = {
   magicCrit: CATEGORY_OFFENSE,
   magicPenetration: CATEGORY_OFFENSE,
   healing: HEALING,
+  healingReceived: HEALING_RECEIVED,
   hpRegen: HP_REGEN,
   mpRegen: MP_REGEN,
   ...Object.fromEntries(DAMAGE_ELEMENTS.flatMap((el) =>
@@ -182,8 +184,8 @@ const GROUP_STATS: Record<AffixGroup, AffixStat[]> = {
   2: [
     ...elementStats(['Resistance']),
     'armor', 'dodge', 'parry', 'block', 'glancingBlow',
-    'hpRegen', 'mpRegen', 'magicResistance', 'healing', 'initiative',
-    'redoubt', 'devotion', 'evasion', 'perception', 'stealth',
+    'hpRegen', 'mpRegen', 'magicResistance', 'healing', 'healingReceived', 'initiative',
+    'redoubt', 'devotion', 'evasion', 'perception', 'subtlety',
   ],
 };
 

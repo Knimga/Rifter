@@ -1,5 +1,5 @@
 import type { Mesh, ColorFn, FaceOpts } from './mesh';
-import { type Vec3, type RGB, add, sub, mul, cross, norm } from './vec';
+import { type Vec3, type RGB, add, sub, mul, cross, norm, lerp3 } from './vec';
 
 type Col = RGB | ColorFn;
 export interface PrimOpts extends FaceOpts {
@@ -170,3 +170,72 @@ export function bipyr(m: Mesh, c: Vec3, r: number, h: number, n: number, col: Co
     m.tri(bot, ring[j], ring[i], col, c, o);
   }
 }
+
+// ─── Placement and strands ──────────────────────────────────────────────────
+
+/**
+ * `n` directions spread evenly over a sphere (a Fibonacci spiral), the whole set turned `turn` radians about y:
+ * spikes, needles, motes, warts all around a body. Jitter them yourself (norm(add(d, small noise))) so they
+ * don't look machined.
+ */
+export function fibSphere(n: number, turn = 0): Vec3[] {
+  return Array.from({ length: n }, (_, i) => {
+    const y = 1 - (2 * (i + 0.5)) / n, r = Math.sqrt(1 - y * y), a = i * 2.39996 + turn; // the golden angle
+    return [Math.cos(a) * r, y, Math.sin(a) * r];
+  });
+}
+
+/**
+ * The point on the surface of the ellipsoid at `c` with radii `r` (a blob's) in direction `dir` from its center,
+ * pushed `out` further along that direction: where to attach things to a body (vines, shelves, spikes, eyes)
+ * so they sit on it instead of buried inside it. A jittered blob's surface wobbles a few percent around this.
+ */
+export function onEllipsoid(c: Vec3, r: Vec3, dir: Vec3, out = 0): Vec3 {
+  const d = norm(dir);
+  const t = 1 / Math.hypot(d[0] / r[0], d[1] / r[1], d[2] / r[2]);
+  return add(c, mul(d, t + out));
+}
+
+/**
+ * A ring of `n` points around `c` in the x-z plane, radius `rx` by `rz`, its edge wobbling by up to `jag` (a
+ * share of the radius) with a few slow waves rather than per-point noise: organic outlines for bodies, robes,
+ * hoods, rooms. Loft a stack of them (each with its own `rng` draws) for a flowing column.
+ */
+export function wobbleRing(c: Vec3, rx: number, rz: number, n: number, jag: number, rng: () => number): Vec3[] {
+  const waves = [2, 3, 5].map((k) => ({ k, amp: jag * (0.3 + rng() * 0.7) / k * 2, ph: rng() * Math.PI * 2 }));
+  return Array.from({ length: n }, (_, i) => {
+    const a = (i / n) * Math.PI * 2, w = 1 + waves.reduce((s, v) => s + v.amp * Math.sin(v.k * a + v.ph), 0);
+    return [c[0] + Math.cos(a) * rx * w, c[1], c[2] + Math.sin(a) * rz * w];
+  });
+}
+
+/**
+ * A strand from `start` heading along `dir`, `len` long in `segs` segments, tapering from width `w0` to a point
+ * (vines, tatters, tentacles, flame tongues, hair, roots). `bend(t)` moves each joint (t = 0..1 along it): sag,
+ * a ripple, wind; `col(t)` colors each segment. Few-sided (`sides`, default 3-4) and capless: cheap. Returns
+ * its tip.
+ */
+export function tendril(
+  m: Mesh, start: Vec3, dir: Vec3, len: number, segs: number, w0: number, col: RGB | ((t: number) => RGB),
+  o: PrimOpts & { sides?: number; bend?: (t: number) => Vec3 } = {},
+): Vec3 {
+  const d = norm(dir), color = typeof col === 'function' ? col : () => col;
+  const { sides = 4, bend, ...face } = o;
+  const at = (k: number): Vec3 => {
+    const t = k / segs, p = add(start, mul(d, len * t));
+    return bend ? add(p, bend(t)) : p;
+  };
+  let prev = start;
+  for (let k = 1; k <= segs; k++) {
+    const next = at(k), t0 = (k - 1) / segs, t1 = k / segs;
+    frustum(m, prev, next, w0 * (1 - t0 * 0.92), k === segs ? 0.002 : w0 * (1 - t1 * 0.92), sides, color(t0), { caps: false, ...face });
+    prev = next;
+  }
+  return prev;
+}
+
+/** Points `t` of the way along a polyline (by segment count, not length): place things along a limb or strand. */
+export const alongPath = (pts: Vec3[], t: number): Vec3 => {
+  const f = Math.min(pts.length - 1.000001, Math.max(0, t * (pts.length - 1))), i = Math.floor(f);
+  return lerp3(pts[i], pts[i + 1], f - i);
+};

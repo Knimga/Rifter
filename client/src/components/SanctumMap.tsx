@@ -3,18 +3,18 @@ import type { TargetType } from '../data/combat/abilities';
 import { gameObjectGlow, gameObjectModel } from '../data/world/gameObjects';
 import { isAdjacent, posKey, type Pos } from '../data/world/grid';
 import { yawFromGridMove } from '../forge/core/facing';
-import { DUNGEON_PRESETS, type DungeonKey } from '../data/world/dungeonPresets';
+import { DUNGEONS, type DungeonKey } from '../data/world/dungeons';
 import { SANCTUM_FLOOR_COLOR, SANCTUM_WALL_COLOR } from '../data/constants';
-import { SANCTUM, isSanctumWall, sanctumPortalAt } from '../data/world/sanctum';
-import { Board, FloorGrid, FloorTile, HoverEdgeGlow, MoveLineOverlay, ObjectTag, PORTAL_TAG_HEIGHT, TileHighlight, UsableGlow, portalTag, toMapMember, useBoard, useHoveredTile, useStableHandler, type PartyTokenData } from './mapParts';
+import { SANCTUM, isSanctumWall, sanctumRiftAt } from '../data/world/sanctum';
+import { Board, FloorGrid, FloorTile, HoverEdgeGlow, MoveLineOverlay, ObjectTag, RIFT_TAG_HEIGHT, TileHighlight, UsableGlow, riftTag, toMapMember, useBoard, useHoveredTile, useStableHandler, type PartyTokenData } from './mapParts';
 
 // 3D party models over the tile grid. Lazy: it pulls in three.js (GameScreen preloads it on mount).
 const ModelLayer = lazy(() => import('./ModelLayer'));
 import type { MapObject, UnitAim } from './ModelLayer';
 
-/** The Sanctum's game objects: its portals, one into each dungeon, facing into the room. */
-const SANCTUM_OBJECTS: MapObject[] = SANCTUM.portals.map((p) => ({
-  id: `sanctum-portal-${p.dungeon}`, link: gameObjectModel(p.object), pos: p.pos, facing: yawFromGridMove(...p.facing),
+/** The Sanctum's game objects: its rifts, one into each dungeon, facing into the room. */
+const SANCTUM_OBJECTS: MapObject[] = SANCTUM.rifts.map((p) => ({
+  id: `sanctum-rift-${p.dungeon}`, link: gameObjectModel(p.object), pos: p.pos, facing: yawFromGridMove(...p.facing),
 }));
 
 interface Props {
@@ -24,7 +24,7 @@ interface Props {
   /** Tiles the active mover can move to this turn (tile key -> steps), from GameScreen (partyMoveTargets). */
   moveTargets: Map<string, number>;
   onMove: (pos: Pos) => void;
-  /** A portal was used: enter its dungeon. */
+  /** A rift was used: enter its dungeon. */
   onEnterDungeon: (dungeon: DungeonKey) => void;
   activeTarget: TargetType | null;  // target type of the selected ability (null = none selected)
   onAbilityUse: (pos: Pos) => void;
@@ -38,7 +38,7 @@ interface Props {
 
 export default function SanctumMap({ playerPos, activeMoverPos, party, moveTargets, onMove, onEnterDungeon, activeTarget, onAbilityUse, onAbilityDeselect, onMemberSelect, aims, onReady }: Props) {
   const hover = useHoveredTile();
-  const hoveredPortal = hover.hovered ? sanctumPortalAt(hover.hovered) : undefined;
+  const hoveredRift = hover.hovered ? sanctumRiftAt(hover.hovered) : undefined;
   const board = useBoard(SANCTUM.width, SANCTUM.height);
 
   const memberByKey = useMemo(() => new Map(party.map(m => [posKey(m.pos), m])), [party]);
@@ -57,10 +57,10 @@ export default function SanctumMap({ playerPos, activeMoverPos, party, moveTarge
     }
     // Clicking a party member selects their action bar
     if (member) { onMemberSelect(member.partyIndex); return; }
-    // A portal next to the leader takes the party into its dungeon
-    const portal = sanctumPortalAt(p);
-    if (portal) {
-      if (isAdjacent(playerPos, portal.pos)) onEnterDungeon(portal.dungeon);
+    // A rift next to the leader takes the party into its dungeon
+    const rift = sanctumRiftAt(p);
+    if (rift) {
+      if (isAdjacent(playerPos, rift.pos)) onEnterDungeon(rift.dungeon);
       return;
     }
     if (canMoveTo(p)) onMove(p);
@@ -71,18 +71,18 @@ export default function SanctumMap({ playerPos, activeMoverPos, party, moveTarge
 
   const tile = (p: Pos) => {
     const isWall = isSanctumWall(p);
-    const portal = sanctumPortalAt(p);
+    const rift = sanctumRiftAt(p);
     const allyTarget = !isWall && activeTarget === 'ally' && memberByKey.has(posKey(p));
     return (
       <FloorTile key={posKey(p)} p={p} hover={hover} onClick={onTileClick}
         color={isWall ? SANCTUM_WALL_COLOR : SANCTUM_FLOOR_COLOR}
         brighten={!isWall && !activeTarget && canMoveTo(p) && hover.isHovered(p)}>
         {allyTarget && <TileHighlight kind="ally" />}
-        {/* A portal (a model, see SANCTUM_OBJECTS) glows on its tile while the leader can use it; hovered from
+        {/* A rift (a model, see SANCTUM_OBJECTS) glows on its tile while the leader can use it; hovered from
             farther away, its edges glow faintly */}
-        {portal && (isAdjacent(playerPos, portal.pos)
-          ? <UsableGlow color={gameObjectGlow(portal.object)} hovered={hover.isHovered(p)} />
-          : hover.isHovered(p) && <HoverEdgeGlow color={gameObjectGlow(portal.object)} />)}
+        {rift && (isAdjacent(playerPos, rift.pos)
+          ? <UsableGlow color={gameObjectGlow(rift.object)} hovered={hover.isHovered(p)} />
+          : hover.isHovered(p) && <HoverEdgeGlow color={gameObjectGlow(rift.object)} />)}
       </FloorTile>
     );
   };
@@ -102,8 +102,8 @@ export default function SanctumMap({ playerPos, activeMoverPos, party, moveTarge
       <Suspense fallback={null}>
         <ModelLayer board={board} party={modelParty} objects={SANCTUM_OBJECTS} aims={aims} onReady={onReady} />
       </Suspense>
-      {/* Where a hovered portal leads, at once, wherever the party stands */}
-      {hoveredPortal && <ObjectTag board={board} x={hoveredPortal.pos.x} y={hoveredPortal.pos.y} height={PORTAL_TAG_HEIGHT} text={portalTag(DUNGEON_PRESETS[hoveredPortal.dungeon].name)} />}
+      {/* Where a hovered rift leads, at once, wherever the party stands */}
+      {hoveredRift && <ObjectTag board={board} x={hoveredRift.pos.x} y={hoveredRift.pos.y} height={RIFT_TAG_HEIGHT} text={riftTag(DUNGEONS[hoveredRift.dungeon].name)} />}
     </Board>
   );
 }

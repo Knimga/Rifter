@@ -20,8 +20,11 @@ const TARGET_LABEL: Record<Ability['target'], string> = { enemy: 'Enemy', ally: 
 export function abilityTint(ability: Ability, weapon: WeaponItem | null): string | null {
   const action = toAction(ability, weapon);
   const element = abilityElement(ability) ?? (action ? abilityElement(action) : null);
-  return !element ? null : PHYSICAL_ELEMENTS.has(element) ? PHYSICAL_TINT : DAMAGE_ELEMENT_COLOR[element];
+  return element ? elementTint(element) : null;
 }
+
+/** An element's color as abilities show it: its own, or a light grey for physical damage. */
+export const elementTint = (element: DamageElement): string => (PHYSICAL_ELEMENTS.has(element) ? PHYSICAL_TINT : DAMAGE_ELEMENT_COLOR[element]);
 
 /**
  * `weapon`: the weapon the ability is used with, so weapon-based abilities show its damage.

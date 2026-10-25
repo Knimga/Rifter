@@ -155,8 +155,11 @@ export function tickDots(dots: ActiveDot[], target: Stats): { damage: number; mp
   return { damage, mpDamage, threatBySource };
 }
 
-/** HoT heal for one round. Caster healing is baked into healPerRound when the HoT is created. */
-export const tickHots = (hots: ActiveHot[]) => hots.reduce((sum, h) => sum + h.healPerRound, 0);
+/**
+ * HoT heal for one round on a unit. Caster healing is baked into healPerRound when the HoT is created; half the
+ * unit's own healingReceived (rounded down, as it stands now) is added to each tick.
+ */
+export const tickHots = (hots: ActiveHot[], target: Stats) => hots.reduce((sum, h) => sum + h.healPerRound + Math.floor(target.healingReceived / 2), 0);
 
 // ─── Action normalisation ─────────────────────────────────────────────────────
 
@@ -242,7 +245,9 @@ export function executeAction(caster: CombatUnit, action: Ability, targets: Comb
       case 'heal': {
         // Heals crit like magic damage of their element: magic crit% + that element's crit% (HoTs never crit)
         const crit = rollCrit(getOffense(caster.stats, 'magic', eff.damageElement));
-        const amount = Math.max(0, randInt(eff.minHeal, eff.maxHeal) + caster.stats.healing) * (crit ? CRIT_MULTIPLIER : 1) * healMultiplier;
+        // The recipient's healingReceived is added once, after the crit and multiplier
+        const amount = Math.max(0, randInt(eff.minHeal, eff.maxHeal) + caster.stats.healing) * (crit ? CRIT_MULTIPLIER : 1) * healMultiplier
+          + recipient.stats.healingReceived;
         c.heal += amount;
         log(recipient, `HEAL${crit ? ' CRIT' : ''} ${amount} (${eff.damageElement})`);
         if (amount > 0) float(recipient, `+${amount}${crit ? ' CRIT!' : ''}`, COMBAT_TEXT_COLOR.heal);

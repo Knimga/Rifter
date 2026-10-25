@@ -53,8 +53,9 @@ function renderCell(model: Model, design: Design, yaw: number): Uint8Array {
   // loot in the game: lootYaw), then everything turns by yaw.
   const isItem = design.fit.kind === 'item';
   const pitch = model.groundPitch ?? ITEM_GROUND_PITCH;
-  const lift = isItem ? itemRestLift(model.mesh.positions, pitch) : 0;
-  const place = (p: number[]): number[] => (isItem ? rotY(layItem([p[0], p[1], p[2]], pitch, lift), lootYaw(VIEW)) : p);
+  const roll = model.groundRoll ?? 0;
+  const lift = isItem ? itemRestLift(model.mesh.positions, pitch, roll) : 0;
+  const place = (p: number[]): number[] => (isItem ? rotY(layItem([p[0], p[1], p[2]], pitch, lift, roll), lootYaw(VIEW)) : p);
   const rot = (q: number[]): [number, number, number] => { const p = place(q); return [p[0] * cy + p[2] * sy, p[1], -p[0] * sy + p[2] * cy]; };
   // The game's projection (viewProject). Returns [x, up, depth].
   const view = (p: number[]): [number, number, number] => {

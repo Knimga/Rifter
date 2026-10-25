@@ -40,7 +40,7 @@ export function useChests({ location, dungeon, currentZone, combatActive, player
   const openChestWindow = useCallback((chestId: string) => {
     const chest = zoneChests.find(c => c.id === chestId);
     if (!chest || !dungeon || combatActive) return;
-    setContainers(prev => (prev[chestId] ? prev : { ...prev, [chestId]: rollContainerLoot(chest.object, dungeon.baseEnemyLevel, partyLevel, partyCanUse) }));
+    setContainers(prev => (prev[chestId] ? prev : { ...prev, [chestId]: rollContainerLoot(chest.object, dungeon.level, partyLevel, partyCanUse) }));
     setOpenChestId(chestId);
   }, [zoneChests, dungeon, partyLevel, partyCanUse, combatActive]);
 

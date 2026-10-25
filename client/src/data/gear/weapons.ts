@@ -69,7 +69,10 @@ export interface WeaponTypeData {
 }
 
 /** Affixes no weapon rolls, whatever its type: element resistances (fire, shadow...). Magic resistance still can. */
-const NO_WEAPON_AFFIXES: BuffableStat[] = DAMAGE_ELEMENTS.map((el) => `${el}Resistance` as const);
+const NO_WEAPON_AFFIXES: BuffableStat[] = [
+  ...DAMAGE_ELEMENTS.map((el) => `${el}Resistance` as const),
+  'healingReceived'
+];
 
 /** Every affix a weapon of this type never rolls: its type's own list (invalidAffixes), and those no weapon rolls. */
 export const weaponInvalidAffixes = (type: WeaponType): BuffableStat[] => [...WEAPON_TYPE_DATA[type].invalidAffixes, ...NO_WEAPON_AFFIXES];
@@ -113,7 +116,7 @@ export const WEAPON_TYPE_DATA: Record<WeaponType, WeaponTypeData> = {
     defaultDamageElement: 'physical',
     implicit: { stat: 'meleeHit', baseValue: 3, growthPerLevel: 0.5 },
     invalidAffixes: [
-      'spirit', 'finesse', 'glancingBlow', 'stealth', 'perception',
+      'spirit', 'finesse', 'glancingBlow', 'subtlety', 'perception',
       ...rangedStats, ...nonWeaponAffixes, 
       ...damageTypeAffixes(['magic'], {only: ['Hit','Penetration']}),
       ...damageTypeAffixes(['poison','shadow','ice'])
@@ -128,7 +131,7 @@ export const WEAPON_TYPE_DATA: Record<WeaponType, WeaponTypeData> = {
     defaultDamageElement: 'physical',
     implicit: { stat: 'armor', baseValue: 4, growthPerLevel: 0.2 },
     invalidAffixes: [
-      'finesse', 'meleeCrit', 'dodge', 'initiative', 'stealth', 'perception',
+      'finesse', 'meleeCrit', 'dodge', 'initiative', 'subtlety', 'perception',
       ...rangedStats, ...nonWeaponAffixes,
       ...damageTypeAffixes(['shadow','ice'])
     ],
@@ -142,7 +145,7 @@ export const WEAPON_TYPE_DATA: Record<WeaponType, WeaponTypeData> = {
     defaultDamageElement: 'physical',
     implicit: { stat: 'armor', baseValue: 6, growthPerLevel: 0.4 },
     invalidAffixes: [
-      'finesse', 'mind', 'spirit',  'meleeCrit', 'initiative', 'stealth', 'perception',
+      'finesse', 'mind', 'spirit',  'meleeCrit', 'initiative', 'subtlety', 'perception',
       ...rangedStats, ...nonWeaponAffixes, 'magicHit', 'magicCrit',
       ...damageTypeAffixes(['magic'], {only: ['Hit','Penetration']}),
       ...damageTypeAffixes(['poison','shadow','ice'])
@@ -157,7 +160,7 @@ export const WEAPON_TYPE_DATA: Record<WeaponType, WeaponTypeData> = {
     defaultDamageElement: 'physical',
     implicit: { stat: 'meleeDamage', baseValue: 2, growthPerLevel: 0.4 },
     invalidAffixes: [
-      'mind', 'spirit', 'healing', 'stealth', 'perception', 'spellcraft', 'devotion',
+      'mind', 'spirit', 'healing', 'subtlety', 'perception', 'spellcraft', 'devotion',
       ...rangedStats, ...magicStats, ...nonWeaponAffixes,
       ...damageTypeAffixes(['magic'], {only: ['Hit','Penetration']}),
       ...damageTypeAffixes(['shadow','ice'])
@@ -172,7 +175,7 @@ export const WEAPON_TYPE_DATA: Record<WeaponType, WeaponTypeData> = {
     defaultDamageElement: 'physical',
     implicit: { stat: 'meleeDamage', baseValue: 4, growthPerLevel: 0.7 },
     invalidAffixes: [
-      'mind', 'spirit', 'healing', 'stealth', 'perception', 'spellcraft', 'devotion',
+      'mind', 'spirit', 'healing', 'subtlety', 'perception', 'spellcraft', 'devotion',
       ...rangedStats, ...magicStats, ...nonWeaponAffixes,
       ...damageTypeAffixes(['magic'], {only: ['Hit','Penetration']}),
       ...damageTypeAffixes(['poison','shadow','ice'])
@@ -220,7 +223,7 @@ export const WEAPON_TYPE_DATA: Record<WeaponType, WeaponTypeData> = {
     implicit: { stat: 'magicDamage', baseValue: 2, growthPerLevel: 0.5 },
     invalidAffixes: [
       'strength', 'finesse', 'parry', 'glancingBlow', 'dodge', 
-      'evasion', 'redoubt', 'expertise', 'stealth',
+      'evasion', 'redoubt', 'expertise', 'subtlety',
       'armor', 'block', 'hpRegen', //allows mpRegen
       ...meleeStats, ...rangedStats,
       ...damageTypeAffixes(['physical','poison'])
@@ -236,7 +239,7 @@ export const WEAPON_TYPE_DATA: Record<WeaponType, WeaponTypeData> = {
     implicit: { stat: 'magicCrit', baseValue: 3, growthPerLevel: 0.4 },
     invalidAffixes: [
       'strength', 'finesse', 'parry', 'glancingBlow', 'dodge', 
-      'evasion', 'redoubt', 'expertise', 'stealth',
+      'evasion', 'redoubt', 'expertise', 'subtlety',
       'armor', 'block', 'hpRegen', //allows mpRegen
       ...meleeStats, ...rangedStats,
       ...damageTypeAffixes(['physical','poison'])

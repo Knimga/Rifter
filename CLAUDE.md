@@ -2,18 +2,29 @@
 
 Turn-based dungeon crawler. App is `client/` (Vite + React 19 + Tailwind + TypeScript); `server/` is an unused stub. Run commands from `client/` unless noted (`npm run dev` at the repo root starts both).
 
+## `handoff/` (external designers' examples)
+A drop-off spot for mockups and example 3D models from external designers. The user places files there and asks you to look at them; never edit, watch or tidy the folder (the user clears it once an example is implemented, so don't link to it from code or docs).
+- The designers don't know the app or its code: their files may have placeholder content, inaccurate example data (names, stats, numbers) and patterns we don't use (their own vector helpers, mesh classes, renderers, seeds).
+- **UI mockups are implemented exactly as they appear**, except for the data they display: replicate their styling, layout, fonts, spacing, colors and theme, built with our components and code (palette variables, existing pieces where they match). Only the shown data (names, stats, numbers, items) comes from the game instead of the mockup.
+- **3D model examples** are merged gracefully into our implementation: take their look and intent, and build them with the forge's toolkit and rules. Map their helpers onto ours (`docs/forge/05-cookbook.md`); add a shared helper only when ours lack one.
+- Never copy placeholder data into the game: use the game's real data, and ask when an example disagrees with it.
+- Say what you changed from the example and why (e.g. a glow below 0.5 so it stays see-through in game).
+
 ## Code sweeps
 When asked to "do a sweep of the code", "audit the code" or anything like it, do a full review of the whole project (not just recent changes) for redundancies and duplicated logic, bugs, relics (dead code, stale comments, leftover names or files), anti-patterns, and bloat. Fix what is clearly wrong, and report what is a judgment call.
 - Run `npm run lint` (ESLint: chiefly React's hook rules) and `npx tsc -b`, and fix what they report.
 - Also run `npx eslint . --no-inline-config` once to see what the `eslint-disable` comments hide, and check each is still deliberate (a stable ref, a value tracked through a computed key) rather than a stale value.
+- Check the docs against the code: `CLAUDE.md` and `docs/forge/` (README, contract, style guide, cookbook). Fix instructions that are outdated (renamed files, functions or options, changed rules, wrong numbers), add helpers the cookbook's toolkit is missing, and drop ones that are gone. Look through the designs for vertex math or shapes repeated across files that should become a shared helper (core or a family `_x.ts`), and report them.
 - Finish with `npm run build` and `npm run forge:lint -- --drafts`.
 
 ## Procedural models (forge, `client/src/forge`)
-Overview, layout and workflow: `docs/forge/README.md`. Read `docs/forge/03-design-contract.md` and `docs/forge/04-style-guide.md` before writing a design.
+Overview, layout and workflow: `docs/forge/README.md`. Read `docs/forge/03-design-contract.md`, `docs/forge/04-style-guide.md` (art direction: saturated glows on dark, serving the dungeon's atmosphere) and `docs/forge/05-cookbook.md` (toolkit, construction patterns, pitfalls, how to check) before writing a design.
+
+**Keep those docs current.** They are how a fresh context learns the forge. When a change adds, renames or removes a core or family helper, a fit or design option, a rule, or a lesson learned the hard way (a pitfall), update the contract, style guide or cookbook in the same change. Art direction the user settles (a palette, a do or don't) goes into the style guide.
 
 - Every model is procedural and seed-based: `(design, seed)`. No hand-authored meshes, no params, no versions. Items have one look (every item of a name is identical, `ITEM_SEED`); creatures and characters vary per instance (seeded from the instance id).
-- **One design per game data entry, named exactly like it:** `source` points at the entry (e.g. `{ table: 'weapons', key: 'plain/1h Swords' }`), `label` is its exact display name ("Plain Gladius"), the file is the slug (`plain-gladius.ts`). Never make one design cover several entries; share shape code through family helpers (`designs/_sword.ts` etc.). `forge:lint` enforces all of this.
-- **Requested changes and new designs go to `client/src/forge/drafts/<stem>.ts`. Never edit `client/src/forge/designs/` directly** for a requested change; the user approves in `/dev/forge`.
+- **One design per game data entry, named exactly like it:** `source` points at the entry (e.g. `{ table: 'weapons', key: 'plain/1h Swords' }`), `label` is its exact display name ("Plain Gladius"), the file is the slug, in its category's folder (`designs/weapons/plain-gladius.ts`; folders in `forge/core/folders.ts`; drafts stay flat in `drafts/`). Never make one design cover several entries; share shape code through family helpers (`designs/_sword.ts` etc.). `forge:lint` enforces all of this.
+- **Requested changes and new designs go to `client/src/forge/drafts/<stem>.ts`. Never edit `client/src/forge/designs/` directly** for a requested change; the user approves in `/dev/forge` (approving files the draft into its category's folder).
 - Draw randomness with `c.rf/ri/pick/chance`. A look the user wants fixed is written into the design, not exposed as a choice.
 - Before saying a design is done: run `npm run forge:lint -- --drafts`, then `npm run forge:sheet -- --only-drafts --seeds 12 --yaws 0,180 --out forge-sheet.png` and LOOK at the PNG (use Read on it). Fix what you see.
 - Under the top-down camera, lean long parts (weapons, limbs) outward, never toward or away from the camera (see the style guide's "Camera" section).

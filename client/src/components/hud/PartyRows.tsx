@@ -1,4 +1,4 @@
-// The party (UI handoff, game screen, bottom left): a row per member with portrait, name, class and HP/MP.
+// The party (UI handoff, game screen, bottom left): a row per member with portrait, name, level and class, and HP/MP.
 // The selected member (acting in combat; chosen out of combat) glows. Out of combat a click selects.
 // A member with level-up points to spend gets the pale yellow level-up treatment and a LEVEL UP tag.
 import { CLASSES } from '../../data/units/classes';
@@ -13,8 +13,10 @@ export interface PartyRow {
   levelUp: boolean;
 }
 
-export default function PartyRows({ rows, selectedIdx, canSelect, onSelect }: {
+export default function PartyRows({ rows, level, selectedIdx, canSelect, onSelect }: {
   rows: PartyRow[];
+  /** The party's level (one for all its members). */
+  level: number;
   selectedIdx: number;
   canSelect: boolean;
   onSelect: (partyIndex: number) => void;
@@ -33,7 +35,7 @@ export default function PartyRows({ rows, selectedIdx, canSelect, onSelect }: {
             <span className="flex-1 min-w-0 flex flex-col gap-[5px]">
               <span className="flex items-baseline justify-between gap-2">
                 <span className="font-display text-[15px] tracking-[0.04em] text-rift-ink truncate">{name}</span>
-                <span className="text-[11px] text-rift-label">{CLASSES[t.classKey].name}</span>
+                <span className="text-[11px] text-rift-label whitespace-nowrap">Lvl {level} {CLASSES[t.classKey].name}</span>
               </span>
               <span className="flex items-center gap-2">
                 <span className="flex-1"><StatBar value={t.hp} max={t.maxHp} kind="hp" /></span>

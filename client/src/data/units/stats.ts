@@ -5,7 +5,7 @@ import type { ClassKey, ClassData, Passive, ScalingPassive } from './classes';
 //
 
 export const ATTRIBUTE_KEYS = ['strength', 'toughness', 'finesse', 'mind', 'spirit', 'speed'] as const;
-export const SKILL_KEYS = ['perception', 'stealth', 'expertise', 'spellcraft', 'evasion', 'redoubt', 'devotion'] as const;
+export const SKILL_KEYS = ['perception', 'subtlety', 'expertise', 'spellcraft', 'evasion', 'redoubt', 'devotion'] as const;
 export const DAMAGE_ELEMENTS = ['physical', 'fire', 'ice', 'lightning', 'shadow', 'poison', 'holy', 'nature'] as const;
 /** The stats every damage element has: e.g. fireHit, fireCrit, fireDamage, fireResistance, firePenetration. */
 export const ELEMENT_STAT_SUFFIXES = ['Hit', 'Crit', 'Damage', 'Resistance', 'Penetration'] as const;
@@ -18,7 +18,7 @@ export type ElementStatKey = `${DamageElement}${typeof ELEMENT_STAT_SUFFIXES[num
 
 const MISC_STATS = [
   'hpRegen', 'mpRegen', 'initiative', 'movement', 'apMax',
-  'armor', 'dodge', 'parry', 'block', 'glancingBlow', 'magicResistance', 'healing',
+  'armor', 'dodge', 'parry', 'block', 'glancingBlow', 'magicResistance', 'healing', 'healingReceived',
   'meleeHit', 'meleeDamage', 'meleeCrit', 'meleePenetration',
   'rangedHit', 'rangedDamage', 'rangedCrit', 'rangedPenetration',
   'magicHit', 'magicDamage', 'magicCrit', 'magicPenetration',
@@ -77,6 +77,8 @@ export interface Stats {
   glancingBlow:    number;
   magicResistance: number;
   healing:         number;
+  /** Added to every heal this unit receives; half of it (rounded down) to each HoT tick (combat: executeAction, tickHots). */
+  healingReceived: number;
   melee:           AttackCategoryStats;
   ranged:          AttackCategoryStats;
   magic:           AttackCategoryStats;
@@ -171,11 +173,11 @@ export type BaseStatBonuses = Partial<Record<BaseStatKey, { flat: number; percen
 // passive / BuffableStat key. The modifier phases iterate this table instead of listing
 // each stat by hand.
 
-/** The least threatMultiplier can be (high stealth, buffs): threat is always gained, never lost. */
+/** The least threatMultiplier can be (high subtlety, buffs): threat is always gained, never lost. */
 export const MIN_THREAT_MULTIPLIER = 0.1;
 
 type ScalarStatKey = 'hp' | 'mp' | 'hpRegen' | 'mpRegen' | 'initiative' | 'movement' | 'apMax' | 'armor' | 'dodge'
-  | 'parry' | 'block' | 'glancingBlow' | 'magicResistance' | 'healing' | 'threatMultiplier';
+  | 'parry' | 'block' | 'glancingBlow' | 'magicResistance' | 'healing' | 'healingReceived' | 'threatMultiplier';
 
 interface StatAccessor {
   key: string;
@@ -201,7 +203,7 @@ const scalar = (key: ScalarStatKey, opts: Partial<StatAccessor> = {}): StatAcces
   ({ key, get: s => s[key], set: (s, v) => { s[key] = v; }, ...opts });
 
 const STAT_ACCESSORS: StatAccessor[] = [
-  ...(['hp', 'mp', 'hpRegen', 'mpRegen', 'initiative', 'armor', 'dodge', 'parry', 'block', 'glancingBlow', 'magicResistance', 'healing'] as const)
+  ...(['hp', 'mp', 'hpRegen', 'mpRegen', 'initiative', 'armor', 'dodge', 'parry', 'block', 'glancingBlow', 'magicResistance', 'healing', 'healingReceived'] as const)
     .map(k => scalar(k)),
   scalar('movement', { min: 1 }),
   scalar('apMax'), // a stun can take it to 0: the unit skips its turn
@@ -301,16 +303,16 @@ function buildRawStats(
   baseHp: number,
 ): Stats {
   const { strength: str, toughness: tou, finesse: fin, mind: mnd, spirit: spr, speed: spd } = attrs;
-  const { perception, stealth, expertise, spellcraft, evasion, redoubt, devotion } = skills;
+  const { perception, subtlety, expertise, spellcraft, evasion, redoubt, devotion } = skills;
   return {
     level,
     attributes: attrs,
     skills,
-    hp:              fl(baseHp + (str / 2) + (fl(tou / 2) * level)),
+    hp:              fl(baseHp + str + (fl(tou / 2) * level)),
     mp:              fl(10 + spr + (mnd * level)),
     hpRegen:         1 + fl((spr / 6) + (tou / 12)),
     mpRegen:         1 + fl((spr / 6) + (mnd / 12) + (devotion / 6)),
-    initiative:      fl(3 + (spd / 4) + (fin / 8) + (perception / 3) + (stealth / 6)),
+    initiative:      fl(3 + (spd / 4) + (fin / 8) + (perception / 3) + (subtlety / 6)),
     movement:        movement + fl(spd / 12),
     apMax,
     armor:           fl(tou + (armorBonus * (1 + redoubt * 0.02))),
@@ -320,25 +322,26 @@ function buildRawStats(
     glancingBlow:    (armorBonus * (0.05 + redoubt * 0.01)) + (spd / 4) + (evasion / 4),
     magicResistance: fl(spr + (mnd / 3) + devotion),
     healing:         fl((spr / 3) + (devotion / 4)),
+    healingReceived: fl((spr / 6) + (devotion / 6)),
     melee: {
       hit:         (str / 4) + (fin / 3) + (expertise / 3),
       damage:      fl((str / 3) + (fin / 6)),
-      crit:        5 + (fin / 4) + (str / 6) + (expertise / 3) + (stealth / 5),
+      crit:        5 + (fin / 4) + (str / 6) + (expertise / 3) + (subtlety / 5),
       penetration: expertise / 3,
     },
     ranged: {
       hit:         (fin / 2) + (expertise / 3),
       damage:      fl(fin / 3),
-      crit:        5 + (fin / 2) + (expertise / 3) + (stealth / 5),
+      crit:        5 + (fin / 2) + (expertise / 3) + (subtlety / 5),
       penetration: expertise / 3,
     },
     magic: {
       hit:         (mnd / 2) + (spellcraft / 3),
       damage:      fl(mnd / 3),
-      crit:        5 + (mnd / 2) + (spellcraft / 3) + (stealth / 5),
+      crit:        5 + (mnd / 3) + (spellcraft / 3) + (subtlety / 5),
       penetration: spellcraft / 3,
     },
-    threatMultiplier: 1 - (stealth * 0.05), // floored at MIN_THREAT_MULTIPLIER (applyStatMinimums)
+    threatMultiplier: 1 - (subtlety * 0.05), // floored at MIN_THREAT_MULTIPLIER (applyStatMinimums)
     elementalStats:  {},
   };
 }

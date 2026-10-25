@@ -1,7 +1,7 @@
 import { BuildCtx } from './ctx';
 import { finalize } from './finalize';
 import { bake } from './mesh';
-import { itemGroundPitch } from './stage-config';
+import { itemGroundPitch, itemGroundRoll } from './stage-config';
 import type { Design, Model } from './types';
 
 /**
@@ -18,6 +18,7 @@ export function buildModel(design: Design, seed: number, hold?: string): Model {
     name,
     mesh: bake(c.mesh),
     groundPitch: design.fit.kind === 'item' ? itemGroundPitch(design.fit) : undefined,
+    groundRoll: design.fit.kind === 'item' ? itemGroundRoll(design.fit) : undefined,
     motion: design.motion,
     animations: design.animations,
   };

@@ -82,7 +82,7 @@ export const ARMOR_TYPE_DATA: Record<ArmorProficiency, ArmorTypeData> = {
       },
     },
     invalidAffixes: [
-      'finesse', 'evasion', 'stealth', 'initiative', 'dodge', 
+      'finesse', 'evasion', 'subtlety', 'initiative', 'dodge', 
       ...rangedStats, ...damageTypeAffixes(['poison','shadow','ice'])
     ],
   },

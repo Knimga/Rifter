@@ -21,7 +21,7 @@ export interface MapLoot {
   pos: Pos;
 }
 
-/** A game object on the map (a door, a portal): it stands on its tile, facing `facing` (yaw, radians), and never moves. */
+/** A game object on the map (a door, a rift): it stands on its tile, facing `facing` (yaw, radians), and never moves. */
 export interface MapObject {
   /** Stable for the map's lifetime (e.g. the door's id); also seeds its look. */
   id: string;
@@ -54,7 +54,7 @@ interface Props {
   enemies?: EnemyInstance[];
   /** Loot, one model per tile. Every item of a design looks the same. */
   loot?: MapLoot[];
-  /** Game objects (doors, portals): fixed, each facing its own way. Keep the array stable while unchanged. */
+  /** Game objects (doors, rifts): fixed, each facing its own way. Keep the array stable while unchanged. */
   objects?: MapObject[];
   /** DOM drawn just above each enemy model's head (HP bar, effect dots). */
   renderEnemyOverlay?: (enemy: EnemyInstance) => ReactNode;

@@ -12,7 +12,7 @@ import { unitKey } from '../data/combat/abilityExecution';
 import FloatingCombatText, { type FloatingText } from './FloatingCombatText';
 import { MoveCostPips } from './MoveLine';
 import { gameObjectGlow, gameObjectModel } from '../data/world/gameObjects';
-import { Board, FloorGrid, FloorTile, HoverEdgeGlow, MoveLineOverlay, ObjectTag, PORTAL_TAG_HEIGHT, TileHighlight, UprightAt, UsableGlow, facingOpenSide, portalTag, toMapMember, useBoard, useHoveredTile, useStableHandler, type PartyTokenData, TILE_HIGHLIGHT } from './mapParts';
+import { Board, FloorGrid, FloorTile, HoverEdgeGlow, MoveLineOverlay, ObjectTag, RIFT_TAG_HEIGHT, TileHighlight, UprightAt, UsableGlow, facingOpenSide, riftTag, toMapMember, useBoard, useHoveredTile, useStableHandler, type PartyTokenData, TILE_HIGHLIGHT } from './mapParts';
 import UnitStatus, { statusMarkers } from './hud/UnitStatus';
 import type { MapLoot, MapObject, UnitAim } from './ModelLayer';
 
@@ -25,7 +25,7 @@ function enemyOverlay(enemy: EnemyInstance) {
 }
 
 interface Props {
-  playerPos: Pos;                   // party leader (doors, portal and loot adjacency)
+  playerPos: Pos;                   // party leader (doors, rift and loot adjacency)
   activeMoverPos: Pos;
   party: PartyTokenData[];
   /** Tiles the active mover can move to this turn (tile key -> steps), from GameScreen (partyMoveTargets). */
@@ -59,15 +59,15 @@ interface Props {
   floatingTexts: FloatingText[];
   onFloatingTextComplete: (id: number) => void;
   zone: ZoneData;
-  portalPos: Pos | null;
+  riftPos: Pos | null;
   partyBuffs: ActiveBuff[][];
   partyHots: ActiveHot[][];
   partyDots: ActiveDot[][];
   floorColor: string;
   wallColor: string;
-  /** GAME_OBJECTS ids of this dungeon's doors and exit portal (DungeonConfig). */
+  /** GAME_OBJECTS ids of this dungeon's doors and exit rift (DungeonConfig). */
   doorObject: string;
-  portalObject: string;
+  riftObject: string;
   enemyAoePreviewTiles?: Set<string>;
   /** The unit (unitKey: a party member or summoned ally) a creature is about to hit; null when none. */
   enemyTargetKey: string | null;
@@ -88,7 +88,7 @@ interface Props {
   fog: FogState | null;
 }
 
-export default function DungeonMap({ playerPos, activeMoverPos, party, moveTargets, moveApCost, onMove, onLocationChange, onDoorClick, chests, emptiedChests, onOpenChest, activeTarget, activeAbilityArea, areaTone, actionRange, onAbilityUse, onAbilityDeselect, onMemberSelect, enemies, inCombat, isPlayerTurn, activeCombatantId, floatingTexts, onFloatingTextComplete, zone, portalPos, partyBuffs, partyHots, partyDots, floorColor, wallColor, doorObject, portalObject, enemyAoePreviewTiles, enemyTargetKey, tileTargets = null, droppedItems = {}, onLootClick, aims, highlightUnitId = null, fog, onReady }: Props) {
+export default function DungeonMap({ playerPos, activeMoverPos, party, moveTargets, moveApCost, onMove, onLocationChange, onDoorClick, chests, emptiedChests, onOpenChest, activeTarget, activeAbilityArea, areaTone, actionRange, onAbilityUse, onAbilityDeselect, onMemberSelect, enemies, inCombat, isPlayerTurn, activeCombatantId, floatingTexts, onFloatingTextComplete, zone, riftPos, partyBuffs, partyHots, partyDots, floorColor, wallColor, doorObject, riftObject, enemyAoePreviewTiles, enemyTargetKey, tileTargets = null, droppedItems = {}, onLootClick, aims, highlightUnitId = null, fog, onReady }: Props) {
   const { width, height, floors, doors } = zone;
   const hover = useHoveredTile();
   const hoveredTile = hover.hovered;
@@ -115,7 +115,7 @@ export default function DungeonMap({ playerPos, activeMoverPos, party, moveTarge
 
   const isAoE = isArea({ area: activeAbilityArea });
   const canAct = !inCombat || isPlayerTurn;
-  const isAdjacentToPortal = portalPos ? isAdjacent(playerPos, portalPos) : false;
+  const isAdjacentToRift = riftPos ? isAdjacent(playerPos, riftPos) : false;
 
   // Per-tile lookups, built once per render instead of scanning lists for every tile
   const enemyByKey = useMemo(() => new Map(enemies.filter(e => e.currentHp > 0).map(e => [posKey(e.pos), e])), [enemies]);
@@ -140,19 +140,19 @@ export default function DungeonMap({ playerPos, activeMoverPos, party, moveTarge
   );
   const doorByKey = useMemo(() => new Map(doors.map(d => [posKey(d.pos), d])), [doors]);
   const chestByKey = useMemo(() => new Map(chests.map(c => [posKey(c.pos), c])), [chests]);
-  // Doors, the exit portal and chests, drawn as their game objects' models. A door stands in its wall tile
+  // Doors, the exit rift and chests, drawn as their game objects' models. A door stands in its wall tile
   // facing the floor it opens onto; a chest stands with its back to a wall (its `facing`), its lid open once
   // it has been emptied (its 'open' animation).
   const emptiedKey = [...emptiedChests].sort().join('|');
   const mapObjects = useMemo(() => {
     const isFloor = (q: Pos) => floors.has(posKey(q));
     const out: MapObject[] = doors.map(d => ({ id: d.id, link: gameObjectModel(doorObject), pos: d.pos, facing: facingOpenSide(d.pos, isFloor) }));
-    if (portalPos) out.push({ id: 'portal', link: gameObjectModel(portalObject), pos: portalPos, facing: facingOpenSide(portalPos, isFloor) });
+    if (riftPos) out.push({ id: 'rift', link: gameObjectModel(riftObject), pos: riftPos, facing: facingOpenSide(riftPos, isFloor) });
     for (const c of chests) {
       out.push({ id: c.id, link: gameObjectModel(c.object), pos: c.pos, facing: yawFromGridMove(...c.facing), played: emptiedChests.has(c.id) ? ['open'] : undefined });
     }
     return out;
-  }, [doors, floors, portalPos, doorObject, portalObject, chests, emptiedKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [doors, floors, riftPos, doorObject, riftObject, chests, emptiedKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const inRangeWithLOS = (p: Pos) => chebyshev(activeMoverPos, p) <= actionRange && hasLineOfSight(activeMoverPos, p, floors);
 
@@ -207,8 +207,8 @@ export default function DungeonMap({ playerPos, activeMoverPos, party, moveTarge
     // Out of combat: clicking a party member selects their action bar
     if (!inCombat && member) { onMemberSelect(member.partyIndex); return; }
 
-    if (portalPos && samePos(p, portalPos)) {
-      if (!inCombat && isAdjacentToPortal) onLocationChange('sanctum');
+    if (riftPos && samePos(p, riftPos)) {
+      if (!inCombat && isAdjacentToRift) onLocationChange('sanctum');
       return;
     }
     if (moveTargets.has(key)) onMove(p);
@@ -219,7 +219,7 @@ export default function DungeonMap({ playerPos, activeMoverPos, party, moveTarge
 
   const tile = (p: Pos) => {
     const key = posKey(p);
-    const isPortal = !!portalPos && samePos(p, portalPos);
+    const isRift = !!riftPos && samePos(p, riftPos);
     const floor = floors.has(key);
     const member = memberByKey.get(key);
     const enemy = floor && !member ? enemyByKey.get(key) : undefined;
@@ -261,11 +261,11 @@ export default function DungeonMap({ playerPos, activeMoverPos, party, moveTarge
               style={{ boxShadow: '0 0 10px 3px color-mix(in srgb, var(--rift-loot) 60%, transparent)' }} />
           </div>
         )}
-        {/* A door, the portal or a chest the leader can use now: a soft pulsing glow on its tile (stronger on hover) */}
-        {/* The portal, hovered from farther away: its edges glow faintly */}
-        {isPortal && !isAdjacentToPortal && hover.isHovered(p) && <HoverEdgeGlow color={gameObjectGlow(portalObject)} />}
-        {((door && isDoorAdjacent && !inCombat) || (isPortal && isAdjacentToPortal)) && (
-          <UsableGlow color={gameObjectGlow(door ? doorObject : portalObject)} hovered={hover.isHovered(p)} />
+        {/* A door, the rift or a chest the leader can use now: a soft pulsing glow on its tile (stronger on hover) */}
+        {/* The rift, hovered from farther away: its edges glow faintly */}
+        {isRift && !isAdjacentToRift && hover.isHovered(p) && <HoverEdgeGlow color={gameObjectGlow(riftObject)} />}
+        {((door && isDoorAdjacent && !inCombat) || (isRift && isAdjacentToRift)) && (
+          <UsableGlow color={gameObjectGlow(door ? doorObject : riftObject)} hovered={hover.isHovered(p)} />
         )}
         {chest && isChestUsable && <UsableGlow color={gameObjectGlow(chest.object)} hovered={hover.isHovered(p)} />}
         {highlight && <TileHighlight kind={highlight} />}
@@ -313,9 +313,9 @@ export default function DungeonMap({ playerPos, activeMoverPos, party, moveTarge
         );
       })}
 
-      {/* Where the exit portal leads, at once while it is hovered, wherever the party stands */}
-      {portalPos && hoveredTile && samePos(hoveredTile, portalPos) && isKnown(posKey(portalPos)) && (
-        <ObjectTag board={board} x={portalPos.x} y={portalPos.y} height={PORTAL_TAG_HEIGHT} text={portalTag('The Sanctum')} />
+      {/* Where the exit rift leads, at once while it is hovered, wherever the party stands */}
+      {riftPos && hoveredTile && samePos(hoveredTile, riftPos) && isKnown(posKey(riftPos)) && (
+        <ObjectTag board={board} x={riftPos.x} y={riftPos.y} height={RIFT_TAG_HEIGHT} text={riftTag('The Sanctum')} />
       )}
 
       {/* Floating combat text */}

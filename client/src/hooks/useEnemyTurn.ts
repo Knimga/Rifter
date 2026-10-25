@@ -32,6 +32,9 @@ type Refs = {
 
 export type EnemyAoePreview = { tiles: Set<string> };
 
+/** What the acting creature is doing, for the status box (null: deciding, between beats). */
+export type EnemyActivity = { kind: 'moving' } | { kind: 'ability'; ability: Ability } | null;
+
 /**
  * The turns of every creature the AI runs: enemies (summoned ones too), and the party's summoned allies. All
  * use the same AI (computeEnemyTurn) and steps; they differ only in who their foes and friends are (an
@@ -46,8 +49,11 @@ export function useEnemyTurn(
   setEnemyAoePreview: Dispatch<SetStateAction<EnemyAoePreview | null>>,
   /** The unit (unitKey) a creature is about to hit, highlighted on the map; null when none. */
   setEnemyTargetKey: Dispatch<SetStateAction<string | null>>,
-  /** The ability the acting creature is using (from when it shows its target until its next step); null when none. */
-  setEnemyAbility: Dispatch<SetStateAction<Ability | null>>,
+  /**
+   * What the acting creature is doing now: moving (while a step moves it), using an ability (from when it shows
+   * its target until its next beat), or null (deciding). Each call is a new activity, even a repeat.
+   */
+  showActivity: (activity: EnemyActivity) => void,
 ) {
   useEffect(() => {
     if (!combat.active || !currentCombatant || currentCombatant.isPlayer) return;
@@ -82,7 +88,6 @@ export function useEnemyTurn(
     const step = (apSpent: number, paidTiles: number) => {
       const pause = apSpent === 0 && paidTiles === 0 ? ENEMY_STEP_PAUSE_MS : ENEMY_FOLLOWUP_PAUSE_MS;
       later(pause, () => {
-        setEnemyAbility(null);
         const enemy = liveEnemy();
         const currentZoneEnemies = zoneEnemies();
         if (!enemy) { advanceTurnNow(); return; }
@@ -132,6 +137,7 @@ export function useEnemyTurn(
 
         const finalPos = action.moveTo ?? enemy.pos;
         if (action.moveTo) {
+          showActivity({ kind: 'moving' });
           setEnemies(prev => prev.map(e =>
             e.id === enemy.id ? { ...e, pos: action.moveTo! } : e
           ));
@@ -152,7 +158,7 @@ export function useEnemyTurn(
 
         // Show its target: the single-target highlight or the AoE preview
         later(pause, () => {
-          setEnemyAbility(ability);
+          showActivity({ kind: 'ability', ability });
           if (action.targetKey !== null && ability.target === 'enemy') setEnemyTargetKey(action.targetKey);
           if (aoeTiles && targetKeys.length > 0) setEnemyAoePreview({ tiles: aoeTiles });
 
@@ -202,7 +208,7 @@ export function useEnemyTurn(
       timers.forEach(clearTimeout);
       setEnemyAoePreview(null);
       setEnemyTargetKey(null);
-      setEnemyAbility(null);
+      showActivity(null);
     };
-  }, [combat.active, combat.currentTurnIndex, currentCombatant, refs, setCombat, setEnemies, setEnemyAoePreview, setEnemyTargetKey, setEnemyAbility]);
+  }, [combat.active, combat.currentTurnIndex, currentCombatant, refs, setCombat, setEnemies, setEnemyAoePreview, setEnemyTargetKey, showActivity]);
 }

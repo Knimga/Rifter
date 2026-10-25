@@ -77,7 +77,8 @@ export function fitIconCamera(cam: THREE.PerspectiveCamera, min: ArrayLike<numbe
  * lootYaw, so it keeps its icon's screen orientation).
  */
 export function layItemOnGround(obj: THREE.Object3D, model: Model, yaw = 0): void {
-  const pitch = model.groundPitch ?? ITEM_GROUND_PITCH;
-  obj.rotation.set(pitch, yaw, 0, 'YXZ');
-  obj.position.y = itemRestLift(model.mesh.positions, pitch);
+  const pitch = model.groundPitch ?? ITEM_GROUND_PITCH, roll = model.groundRoll ?? 0;
+  // YXZ: the roll (z) first, then the pitch (x), then the yaw (y), as layItem poses it
+  obj.rotation.set(pitch, yaw, roll, 'YXZ');
+  obj.position.y = itemRestLift(model.mesh.positions, pitch, roll);
 }

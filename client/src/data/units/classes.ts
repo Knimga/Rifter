@@ -2,11 +2,12 @@ import {
   GiSwordBrandish, GiHospitalCross, GiSacrificialDagger, GiDrippingBlade, GiWaveStrike, GiEnrage,
   GiFireZone, GiPlantWatering, GiLayeredArmor, GiEvilComet, GiCursedStar, GiHolosphere,
   GiBroadsword, GiShield, GiHealthNormal, GiCometSpark, GiHealing, GiHidden, GiAngryEyes,
-  GiFocusedLightning, GiFlamingArrow, GiStoneAxe, GiSparkSpirit, GiOrbitalRays
+  GiFocusedLightning, GiFlamingArrow, GiStoneAxe, GiSparkSpirit, GiOrbitalRays, GiMantrap
 } from 'react-icons/gi';
 import { FaRegSnowflake } from 'react-icons/fa';
 import { FaExplosion } from 'react-icons/fa6';
 import { RiTargetFill } from 'react-icons/ri';
+import { TbBow } from "react-icons/tb";
 
 import type { IconType } from 'react-icons';
 import type { DamageElement, OffhandKind, WeaponType } from '../gear';
@@ -14,13 +15,14 @@ import type { AttributeKey, SkillKey } from './stats';
 import { warnIgnoredEffects, type Ability } from '../combat/abilities';
 import type { ModelLink } from '../../forge/core/types';
 
-export type ClassKey = 'knight' | 'rogue' | 'brute' | 'arcanist' | 'archer' | 'primalist' | 'occultist' | 'acolyte';
+export type ClassKey = 'knight' | 'rogue' | 'barbarian' | 'arcanist' | 'archer' | 'primalist' | 'occultist' | 'acolyte';
 
 /** What a class is for. Each role has an icon (ROLE_ICONS). */
-export type Role = 'damage' | 'tank' | 'healer' | 'caster';
+export type Role = 'melee' | 'ranged' | 'tank' | 'healer' | 'caster';
 
 export const ROLE_ICONS: Record<Role, IconType> = {
-  damage: GiBroadsword,
+  melee: GiBroadsword,
+  ranged: TbBow,
   tank:   GiShield,
   healer: GiHealthNormal,
   caster: GiCometSpark,
@@ -101,8 +103,8 @@ export const CLASSES: Record<ClassKey, ClassData> = {
       {
         name: 'Taunting Blow',
         icon: GiSwordBrandish,
-        mpCost: 8,
-        apCost: 2,
+        mpCost: 5,
+        apCost: 1,
         range: 1,
         target: 'enemy',
         attackCategory: 'melee',
@@ -133,7 +135,7 @@ export const CLASSES: Record<ClassKey, ClassData> = {
         target: 'enemy',
         displayElement: 'holy',
         effects: [
-          { type: 'damage', appliesTo: 'target', damageElement: 'holy', minDamage: 7, maxDamage: 10 }
+          { type: 'damage', appliesTo: 'target', damageElement: 'holy', minDamage: 8, maxDamage: 10 }
         ]
       }
     ],
@@ -141,11 +143,11 @@ export const CLASSES: Record<ClassKey, ClassData> = {
 
   rogue: {
     name: 'Rogue',
-    roles: ['damage'],
+    roles: ['melee'],
     baseHp: 30,
     description: 'A dagger-wielding brigand who fights dirty.',
     attributes: { strength: 1, toughness: 1, finesse: 7, mind: 1, spirit: 0, speed: 4 },
-    skills: { perception: 2, stealth: 4, expertise: 3, evasion: 3 },
+    skills: { perception: 2, subtlety: 4, expertise: 3, evasion: 3 },
     passives: {
       dodge:     { name: 'Slippery',    flat: 5 },
       meleeCrit: { name: 'Opportunist', flat: 5 },
@@ -198,13 +200,13 @@ export const CLASSES: Record<ClassKey, ClassData> = {
     ],
   },
 
-  brute: {
-    name: 'Brute',
-    roles: ['damage','tank'],
+  barbarian: {
+    name: 'Barbarian',
+    roles: ['melee','tank'],
     baseHp: 40,
     description: 'A powerful warrior who runs in swinging.',
     attributes: { strength: 5, toughness: 5, finesse: 2, mind: 0, spirit: 0, speed: 2 },
-    skills: { redoubt: 4, evasion: 4, expertise: 4 },
+    skills: { redoubt: 3, evasion: 6, expertise: 3 },
     passives: {
       glancingBlow: { name: 'Shrug It Off', flat: 10 },
       hpRegen: { name: 'Bloodrush', flat: 1 },
@@ -213,7 +215,7 @@ export const CLASSES: Record<ClassKey, ClassData> = {
     armorProficiencies: ['Light', 'Medium'],
     weaponProficiencies: ['2h Swords', '2h Maces', '2h Axes'],
     startingGear: { chest: 'Medium', boots: 'Medium', weapon: '2h Axes' },
-    model: 'character.brute',
+    model: 'character.barbarian',
     abilities: [
       {
         name: 'Cleave',
@@ -285,7 +287,7 @@ export const CLASSES: Record<ClassKey, ClassData> = {
       {
         name: 'Freeze',
         icon: FaRegSnowflake,
-        mpCost: 7,
+        mpCost: 6,
         apCost: 1,
         range: 5,
         target: 'enemy',
@@ -301,7 +303,7 @@ export const CLASSES: Record<ClassKey, ClassData> = {
         icon: GiFocusedLightning,
         mpCost: 10,
         apCost: 2,
-        range: 4,
+        range: 5,
         target: 'enemy',
         area: 'line',
         displayElement: 'lightning',
@@ -316,11 +318,11 @@ export const CLASSES: Record<ClassKey, ClassData> = {
 
   archer: {
     name: 'Archer',
-    roles: ['damage'],
+    roles: ['ranged'],
     baseHp: 25,
     description: 'A marksman who deals damage from afar.',
     attributes: { strength: 0, toughness: 1, finesse: 7, mind: 3, spirit: 1, speed: 2 },
-    skills: { perception: 4, stealth: 2, expertise: 4, evasion: 2 },
+    skills: { perception: 4, subtlety: 2, expertise: 4, evasion: 2 },
     passives: {
       rangedHit:    { name: 'Eagle Eye', flat: 5 },
       rangedDamage: { name: 'Marksman',  flat: 3 },
@@ -347,20 +349,21 @@ export const CLASSES: Record<ClassKey, ClassData> = {
       },
       {
         name: 'Bear Trap',
-        mpCost: 7,
+        icon: GiMantrap,
+        mpCost: 5,
         apCost: 1,
-        range: 3,
+        range: 4,
         target: 'enemy',
         attackCategory: 'ranged',
         effects: [
           { type: 'root', appliesTo: 'target', rounds: 3 },
-          { type: 'dot', appliesTo: 'target', damageElement: 'physical', damagePerRound: 4, rounds: 3 }
+          { type: 'dot', appliesTo: 'target', damageElement: 'physical', damagePerRound: 6, rounds: 3 }
         ]
       },
       {
         name: 'Flaming Arrow',
         icon: GiFlamingArrow ,
-        mpCost: 6,
+        mpCost: 5,
         apCost: 1,
         range: 5,
         target: 'enemy',
@@ -377,10 +380,10 @@ export const CLASSES: Record<ClassKey, ClassData> = {
 
   primalist: {
     name: 'Primalist',
-    roles: ['damage', 'healer', 'caster'],
+    roles: ['tank', 'healer', 'caster'],
     baseHp: 30,
     description: 'A nature-attuned wanderer who can take on many roles.',
-    attributes: { strength: 3, toughness: 3, finesse: 1, mind: 3, spirit: 4, speed: 0 },
+    attributes: { strength: 1, toughness: 4, finesse: 1, mind: 4, spirit: 4, speed: 0 },
     skills: { perception: 3, spellcraft: 3, devotion: 3, redoubt: 3 },
     passives: {
       healing:      { name: 'Verdant', flat: 3 },
@@ -408,7 +411,7 @@ export const CLASSES: Record<ClassKey, ClassData> = {
       {
         name: 'Stonestrike',
         icon: GiStoneAxe,
-        mpCost: 4,
+        mpCost: 3,
         apCost: 1,
         range: 1,
         displayElement: 'nature',
@@ -441,10 +444,11 @@ export const CLASSES: Record<ClassKey, ClassData> = {
     baseHp: 25,
     description: 'A dark caster of questionable origins.',
     attributes: { strength: 0, toughness: 2, finesse: 1, mind: 8, spirit: 2, speed: 1 },
-    skills: { spellcraft: 6, devotion: 2, perception: 2, stealth: 2 },
+    skills: { spellcraft: 6, devotion: 2, subtlety: 4 },
     passives: {
       shadowDamage: { name: 'Dark Mark', flat: 3 },
       magicHit:     { name: 'Spite',     flat: 5 },
+      shadowResistance: { name: 'Demon-touched', flat: 30 }
     },
     armorProficiencies: ['Cloth'],
     weaponProficiencies: ['Staves', 'Daggers', 'Wands', 'Foci'],
@@ -481,7 +485,7 @@ export const CLASSES: Record<ClassKey, ClassData> = {
       {
         name: 'Summon Void Wisp',
         icon: GiSparkSpirit,
-        mpCost: 12,
+        mpCost: 10,
         apCost: 2,
         range: 1,
         target: 'tile',
@@ -499,7 +503,7 @@ export const CLASSES: Record<ClassKey, ClassData> = {
     baseHp: 25,
     description: 'A devotee who heals allies with divine power.',
     attributes: { strength: 0, toughness: 1, finesse: 0, mind: 5, spirit: 8, speed: 0 },
-    skills: { spellcraft: 4, devotion: 6, stealth: 2 },
+    skills: { spellcraft: 4, devotion: 6, subtlety: 2 },
     passives: {
       healing: { name: 'Inner Light', flat: 3 },
       holyDamage: { name: 'Divine Vengeance', flat: 3 },
@@ -532,7 +536,7 @@ export const CLASSES: Record<ClassKey, ClassData> = {
         area: 'blast1',
         displayElement: 'holy',
         effects: [
-          { type: 'damage', appliesTo: 'target', damageElement: 'holy', minDamage: 6, maxDamage: 9 },
+          { type: 'damage', appliesTo: 'target', damageElement: 'holy', minDamage: 4, maxDamage: 8 },
           { type: 'heal',   appliesTo: 'allies', damageElement: 'holy', minHeal: 4, maxHeal: 6 }
         ]
       },

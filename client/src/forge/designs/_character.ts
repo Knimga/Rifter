@@ -107,7 +107,7 @@ export interface BodyBuild {
  *  oneHand        right arm swung back, forearm forward, the weapon held out in front (Knight, Rogue);
  *                 the left arm hangs, a shield strapped to its forearm
  *  staff          right elbow bent ~90°, gripping a planted walking staff (Arcanist)
- *  shoulderCarry  right fist in front of the shoulder, a two-hander resting on the shoulder (Brute)
+ *  shoulderCarry  right fist in front of the shoulder, a two-hander resting on the shoulder (Barbarian)
  *  bow            bow low in front in the left hand, the right hand on the string (Archer)
  *  crossbow       both hands, low in front: left hand under the stock, right hand on the trigger end,
  *                 the bolt line pointing forward and down

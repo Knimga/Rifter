@@ -31,7 +31,7 @@ export function haloShader(shader: THREE.WebGLProgramParametersWithUniforms): vo
   shader.vertexShader = shader.vertexShader
     .replace('#include <common>', '#include <common>\nattribute vec2 haloCorner;\nattribute float haloRadius;\nvarying vec2 vHaloCorner;')
     .replace('#include <project_vertex>', `#include <project_vertex>
-\tfloat haloScale = length((modelViewMatrix * vec4(1.0, 0.0, 0.0, 0.0)).xyz);
+\tfloat haloScale = pow(abs(determinant(mat3(modelViewMatrix))), 1.0 / 3.0); // its overall scale, the same in every direction (a squashed spin frame stretches one axis)
 \tmvPosition.xy += haloCorner * haloRadius * haloScale;
 \tmvPosition.z += haloRadius * haloScale;
 \tgl_Position = projectionMatrix * mvPosition;

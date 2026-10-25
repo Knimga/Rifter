@@ -3,6 +3,7 @@ import { buildModel } from '../src/forge/core/build';
 import type { Model } from '../src/forge/core/types';
 import { loadDesigns } from './load-designs';
 import { checkDataRefs } from '../src/forge/dataRefs';
+import { CATEGORY_FOLDER } from '../src/forge/core/folders';
 
 const args = process.argv.slice(2);
 const flag = (n: string) => args.includes(`--${n}`);
@@ -15,12 +16,14 @@ const same = (a: Model, b: Model) => a.mesh.triCount === b.mesh.triCount && a.me
 const designs = (await loadDesigns({ drafts: flag('drafts') })).filter((d) => !only || d.design.id.includes(only));
 let failures = 0;
 
-for (const { stem, source, design } of designs) {
+for (const { stem, folder, source, design } of designs) {
   const errs = new Map<string, string>(); // first example per error kind
   const fail = (kind: string, seed: number, detail = '') => {
     if (!errs.has(kind)) errs.set(kind, `seed ${seed} ${detail}`.trim());
   };
   if (design.id !== `${design.category}.${stem}`) fail('id-mismatch', 0, `id "${design.id}" != "${design.category}.${stem}"`);
+  // An approved design lives in its category's folder (core/folders.ts)
+  if (source === 'approved' && folder !== CATEGORY_FOLDER[design.category]) fail('wrong-folder', 0, `in designs/${folder}/, belongs in designs/${CATEGORY_FOLDER[design.category]}/`);
   let minTris = Infinity, maxTris = 0;
 
   for (let seed = 1; seed <= N; seed++) {
@@ -42,7 +45,8 @@ for (const { stem, source, design } of designs) {
     if (design.fit.kind === 'standing') {
       const r = Math.max(...[0, 1].map((i) => Math.max(Math.abs(bounds.min[i * 2]), Math.abs(bounds.max[i * 2]))));
       if (bounds.max[1] > design.fit.height + eps) fail('too-tall', seed, `${bounds.max[1].toFixed(3)}`);
-      if (Math.abs(bounds.min[1]) > eps) fail('feet-not-on-ground', seed, `${bounds.min[1].toFixed(3)}`);
+      // On the floor (a floating one, fit.floor 'origin': never below it)
+      if (design.fit.floor === 'origin' ? bounds.min[1] < -eps : Math.abs(bounds.min[1]) > eps) fail('feet-not-on-ground', seed, `${bounds.min[1].toFixed(3)}`);
       if (r > design.fit.maxRadius * 1.5 + eps) fail('too-wide', seed, `${r.toFixed(3)}`);
       if (!anchors.feet || !anchors.overhead) fail('missing-anchors', seed, 'feet/overhead');
     } else {

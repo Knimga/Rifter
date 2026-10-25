@@ -1,6 +1,6 @@
 // The action bar (UI handoff, game screen, bottom centre): the acting member (portrait, name, class,
 // movement and, in combat, its AP tracker), five slots (weapon attack or an ability, its AP cost as dots;
-// right-click to assign; number keys 1-5 use them like clicks) and End Turn. A slot dims when its ability
+// right-click to assign; number keys 1-5 use them like clicks) and End Turn (Space). A slot dims when its ability
 // costs more MP or AP than the member has, or the member can't act now.
 import { createElement, useEffect, useRef, useState, type CSSProperties, type MouseEvent } from 'react';
 import { CLASSES } from '../../data/units/classes';
@@ -80,19 +80,28 @@ export default function ActionDock({ member, stats, mp, slots, onSlotsChange, ar
     if (usable) onArmedSlotChange(armedSlot === i && ability ? null : i);
   };
 
-  // Number keys 1-5 use slots 1-5, like clicking them (not while typing in a field, or with a modifier held)
+  // Number keys 1-5 use slots 1-5, like clicking them; Space ends the turn, like End Turn (in combat). Not while
+  // typing in a field, or with a modifier held.
   const toggleSlotRef = useLatest(toggleSlot);
+  const endTurnRef = useLatest(inCombat ? onEndTurn : undefined);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.repeat || e.ctrlKey || e.altKey || e.metaKey) return;
       const target = e.target as HTMLElement | null;
       if (target && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))) return;
+      if (e.key === ' ') {
+        if (!endTurnRef.current) return;
+        // Not also the browser's own Space: clicking whatever button has focus, or scrolling
+        e.preventDefault();
+        endTurnRef.current();
+        return;
+      }
       const n = Number(e.key);
       if (Number.isInteger(n) && n >= 1 && n <= SLOT_KEYS) toggleSlotRef.current(n - 1);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [toggleSlotRef]);
+  }, [toggleSlotRef, endTurnRef]);
 
   // The armed slot's AP cost, previewed on the tracker
   const armedContent = armedSlot !== null ? slots[armedSlot] : null;
@@ -182,7 +191,11 @@ export default function ActionDock({ member, stats, mp, slots, onSlotsChange, ar
       {inCombat && onEndTurn && (
         <>
           <div aria-hidden="true" className="self-stretch w-px bg-rift-line" />
-          <RiftButton size="md" className="!min-h-[48px] !px-[22px] !text-[13px]" onClick={onEndTurn}>End Turn</RiftButton>
+          <RiftButton size="md" className="!min-h-[48px] !px-[22px] !text-[13px] flex-col whitespace-nowrap" aria-keyshortcuts="Space" onClick={onEndTurn}>
+            <span>End Turn</span>
+            {/* Its key, small and dim like the slots' numbers */}
+            <span aria-hidden="true" className="rf-btn-key">SPACE</span>
+          </RiftButton>
         </>
       )}
     </section>

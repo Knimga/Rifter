@@ -39,10 +39,13 @@
   --rift-label: #8d9096;     /* small caps labels */
   --rift-off: #7a7d85;       /* disabled text, placeholders */
   --rift-faint: #5d6068;     /* empty and unusable things */
+  --rift-cap: #6f727a;       /* the faintest small caps titles (the Stats panel's Resistances) */
 
   /* Meaning */
   --rift-hp: #a4504a;
   --rift-mp: #6f93ad;
+  --rift-hp-bar: #b4534d;    /* the party window's HP and MP bars (Stats panel) */
+  --rift-mp-bar: #5d86a8;
   --rift-up: #9bbf9b;        /* raised by a buff */
   --rift-down: #d9958f;      /* lowered by a debuff */
   --rift-warn: #d9a39d;      /* not enough mana, inventory full */
@@ -62,9 +65,9 @@
   --rift-ap-spent: #15161a;  /* a spent action point */
   --rift-ap-lost: #000000;   /* an action point lost to a debuff (stun) */
   --rift-ap-extra: #ffffff;  /* an extra action point from a buff (haste) */
-  --rift-portal-necrotic: #b2ecc0; /* a usable portal's tile glow, in its own color */
-  --rift-portal-fire: #f0a060;
-  --rift-portal-fungal: #d6e47c;
+  --rift-rift-necrotic: #b2ecc0; /* a usable rift's tile glow, in its own color */
+  --rift-rift-fire: #f0a060;
+  --rift-rift-fungal: #d6e47c;
 
   /* Effect lines (ability cards, item tooltips) */
   --tone-base: var(--rift-muted);
@@ -265,6 +268,8 @@
   .rf-aslot.is-dim .rf-apdots > span { background: var(--rift-rim-hi); }
   /* The slot's number key (bottom right, opposite the AP dots): small and dim */
   .rf-aslot-key { position: absolute; right: 5px; bottom: 3px; font-size: 9px; line-height: 1; color: var(--rift-faint); pointer-events: none; }
+  /* A button's key, under its label (End Turn: Space): small and dim, like the slots' numbers */
+  .rf-btn-key { margin-top: 4px; font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 9px; line-height: 1; letter-spacing: normal; text-indent: 0; color: var(--rift-faint); }
 
   /* AP tracker (action bar): label, one pip per action point, available / total, lost-AP chip */
   .rf-ap { display: flex; align-items: center; gap: 8px; min-height: 16px; outline: none; }
@@ -311,6 +316,16 @@
     background: radial-gradient(circle at 50% 55%, color-mix(in srgb, var(--rarity) 20%, transparent), transparent 72%), var(--rift-raised);
   }
   .rf-cell.is-filled.has-rarity:not(:hover), .rf-eqs.is-filled.has-rarity:not(:hover) { border-color: color-mix(in srgb, var(--rarity) 32%, var(--rift-rim)); }
+  /* An item the viewer can't use (not proficient): a faint red wash over the cell, under its icon (an inset shadow
+     filling it, so a rarity glow still shows through), kept on hover */
+  .rf-cell.is-filled.is-unusable { box-shadow: inset 0 0 0 23px color-mix(in srgb, var(--rift-hp) 16%, transparent), inset 0 -2px 8px rgba(0, 0, 0, 0.6); }
+  .rf-cell.is-filled.is-unusable:hover { box-shadow: inset 0 0 0 23px color-mix(in srgb, var(--rift-hp) 16%, transparent), 0 0 16px color-mix(in srgb, var(--glow) 22%, transparent); }
+  /* The party window's Stats panel (StatsPanel.tsx): near-black boxes, whatever the theme (like the attribute rows) */
+  .rf-stcard { position: relative; box-sizing: border-box; min-width: 0; padding: 9px 11px; background: var(--rift-void); border: 1px solid var(--rift-seam); border-radius: 2px; }
+  .rf-stlab { font-size: 10px; line-height: 12px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--rift-muted); }
+  .rf-stcap { font-size: 9px; line-height: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--rift-cap); }
+  .rf-stbar { box-sizing: border-box; height: 6px; background: var(--rift-raised); border: 1px solid var(--rift-seam); border-radius: 1px; overflow: hidden; }
+  .rf-stbar > span { display: block; height: 100%; }
   .rf-tiplabel { color: var(--rift-muted); border-bottom: 1px dotted var(--rift-rim-hi); outline: none; }
   .rf-tiplabel:hover { color: var(--rift-soft); }
   .rf-tiplabel:focus-visible { outline: 1px solid color-mix(in srgb, var(--glow) 60%, transparent); outline-offset: 2px; }

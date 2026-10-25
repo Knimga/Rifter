@@ -47,21 +47,22 @@ export interface DungeonChest {
 export interface DungeonData {
   zones: ZoneData[];
   startZoneId: number;
-  endZoneId: number;     // boss zone — portal lives here
+  endZoneId: number;     // boss zone — rift lives here
   playerStart: Pos;
-  portalPos: Pos;
+  riftPos: Pos;
   /** Treasure chests: one in the boss room (the only place chests are found for now). */
   chests: DungeonChest[];
-  baseEnemyLevel: number;
+  /** The party's level when it entered: the first zone's enemies are this level, each zone after one higher; loot is this level. */
+  level: number;
 }
 
 /**
- * Tiles of a zone that a game object stands on (the exit portal, chests): nobody walks onto or through
+ * Tiles of a zone that a game object stands on (the exit rift, chests): nobody walks onto or through
  * them, party or enemy. They stay floor (drawn as floor; they don't block sight or AoE). The Sanctum's
- * portals are handled the same way by isSanctumWalkable.
+ * rifts are handled the same way by isSanctumWalkable.
  */
 export const objectTilesOf = (d: DungeonData, zone: ZoneData): Set<string> => new Set([
-  ...(zone.id === d.endZoneId ? [posKey(d.portalPos)] : []),
+  ...(zone.id === d.endZoneId ? [posKey(d.riftPos)] : []),
   ...d.chests.filter(c => c.zoneId === zone.id).map(c => posKey(c.pos)),
 ]);
 
@@ -107,7 +108,11 @@ export interface ZoneConfig {
   layout?: 'rooms' | 'caverns';
   /** Wall islands inside rooms (none if absent). */
   islands?: IslandConfig;
-  enemyGroups: EnemyClassData[][];  // one group chosen at random per room
+  /**
+   * The zone's enemies: every group is placed once, each in a room of its own (which one is random). With more
+   * groups than rooms to spare, the extras share a room, kept apart from the group already there.
+   */
+  enemyGroups: EnemyClassData[][];
 }
 
 export interface BossZoneConfig {
@@ -115,20 +120,20 @@ export interface BossZoneConfig {
   corridorWidth: number;  // corridor (or, for caverns, opening) connecting boss room to antechamber
   /** The boss room and its antechamber: rectangles joined by a corridor ('rooms', default), or caverns ('caverns'). */
   layout?: 'rooms' | 'caverns';
-  bossGroup: EnemyClassData[];  // placed scattered in the boss room center
+  /** The boss first, then its guard: the boss in the boss room's center, the rest flanking it (spawnDungeonEnemies). */
+  bossGroup: EnemyClassData[];
 }
 
 export interface DungeonConfig {
   name: string;
   width: number;          // applies to all regular zones
   height: number;         // applies to all regular zones
-  baseEnemyLevel: number;
   zones: ZoneConfig[];    // regular zones, chained linearly: 0 → 1 → … → boss
   bossZone: BossZoneConfig;
   floorColor: string;     // hex color for walkable floor tiles
   wallColor: string;      // hex color for wall/non-floor tiles
   doorObject: string;     // GAME_OBJECTS id of the doors between zones
-  portalObject: string;   // GAME_OBJECTS id of the exit portal in the boss zone
+  riftObject: string;   // GAME_OBJECTS id of the exit rift in the boss zone
   chestObject: string;    // GAME_OBJECTS id of the treasure chest in the boss room
 }
 
@@ -469,7 +474,7 @@ function generateBossZoneMain(id: number, config: BossZoneConfig): { zone: ZoneD
 
 /**
  * Adds an antechamber (small room) in a random cardinal direction that is not
- * the entry direction, connects it with a corridor, and returns the portal position.
+ * the entry direction, connects it with a corridor, and returns the rift position.
  * Caverns: the antechamber is a cavern too, opening into the boss room by the shortest way (no corridor).
  */
 function addBossAntechamber(
@@ -589,12 +594,25 @@ function linkDoors(zoneA: ZoneData, posA: Pos, zoneB: ZoneData, posB: Pos, nextD
 
 // ─── Main Generator ─────────────────────────────────────────────────────────
 
-export function generateDungeon(config: DungeonConfig): DungeonData {
+/** How many times a zone is generated, at most, to get a room for each of its enemy groups. */
+const ZONE_TRIES = 8;
+
+/** A fresh dungeon from its config, its enemies' and loot's level set by the party's (`partyLevel`). */
+export function generateDungeon(config: DungeonConfig, partyLevel: number): DungeonData {
   const numRegularZones = config.zones.length;
   const bossZoneId = numRegularZones;
 
-  // Generate regular zones
-  const zones: ZoneData[] = config.zones.map((zoneConfig, i) => generateZone(i, config.width, config.height, zoneConfig));
+  // Generate regular zones, each with a room per enemy group if it can: a zone that comes out with too few is
+  // generated again, a few times (the first zone needs one more, the room the party arrives in)
+  const zones: ZoneData[] = config.zones.map((zoneConfig, i) => {
+    const wanted = zoneConfig.enemyGroups.length + (i === 0 ? 1 : 0);
+    let zone = generateZone(i, config.width, config.height, zoneConfig);
+    for (let tries = 1; tries < ZONE_TRIES && zone.rooms.length < wanted; tries++) {
+      const again = generateZone(i, config.width, config.height, zoneConfig);
+      if (again.rooms.length > zone.rooms.length) zone = again;
+    }
+    return zone;
+  });
 
   // Generate boss zone (main room only — antechamber added after door placement)
   const { zone: bossZone, bossRoom } = generateBossZoneMain(bossZoneId, config.bossZone);
@@ -608,7 +626,7 @@ export function generateDungeon(config: DungeonConfig): DungeonData {
 
   // Linear chain 0 → 1 → … → boss, no branches: the first zone has one door (forward), every later zone a
   // door back and a door forward. A zone's forward door is as far as possible (by walking) from where the
-  // party enters it (the portal in, or its door back), so moving on means crossing the zone.
+  // party enters it (the rift in, or its door back), so moving on means crossing the zone.
   const nextDoorId = { value: 0 };
   let entry = playerStart;
   for (let i = 0; i < zones.length - 1; i++) {
@@ -626,7 +644,7 @@ export function generateDungeon(config: DungeonConfig): DungeonData {
   // Determine entry direction from the boss zone's entry door, then add antechamber
   const entryDoor = bossZone.doors[0];
   const entryDir = entryDoor ? getEntryDirection(entryDoor.pos, bossRoom) : 'south';
-  const portalPos = addBossAntechamber(bossZone, bossRoom, entryDir, config.bossZone.corridorWidth, config.bossZone.layout);
+  const riftPos = addBossAntechamber(bossZone, bossRoom, entryDir, config.bossZone.corridorWidth, config.bossZone.layout);
   const chestSpot = entryDoor ? bossChestSpot(bossZone, bossRoom, entryDoor.pos) : null;
 
   return {
@@ -634,9 +652,9 @@ export function generateDungeon(config: DungeonConfig): DungeonData {
     startZoneId: 0,
     endZoneId: bossZoneId,
     playerStart,
-    portalPos,
+    riftPos,
     chests: chestSpot ? [{ id: 'boss-chest', zoneId: bossZoneId, object: config.chestObject, ...chestSpot }] : [],
-    baseEnemyLevel: config.baseEnemyLevel,
+    level: partyLevel,
   };
 }
 
@@ -689,6 +707,9 @@ function bossChestSpot(zone: ZoneData, room: Room, door: Pos): { pos: Pos; facin
  */
 const ENTRY_CLEAR_STEPS = AGGRO_RANGE + 3;
 
+/** How far (tiles, in either direction) a group sharing a room keeps from the enemies already there. */
+const GROUP_SPACING = 3;
+
 export function spawnDungeonEnemies(dungeon: DungeonData, config: DungeonConfig): EnemyInstance[] {
   const instances: EnemyInstance[] = [];
   let globalIdx = 0;
@@ -696,7 +717,7 @@ export function spawnDungeonEnemies(dungeon: DungeonData, config: DungeonConfig)
 
   const occupied = new Set([
     `${dungeon.startZoneId}:${posKey(dungeon.playerStart)}`,
-    `${dungeon.endZoneId}:${posKey(dungeon.portalPos)}`,
+    `${dungeon.endZoneId}:${posKey(dungeon.riftPos)}`,
     ...dungeon.chests.map(c => `${c.zoneId}:${posKey(c.pos)}`),
   ]);
   for (const zone of dungeon.zones) {
@@ -715,35 +736,81 @@ export function spawnDungeonEnemies(dungeon: DungeonData, config: DungeonConfig)
   }
 
   /**
-   * Place one enemy group on random free floor tiles inside `area` (away from the zone's entry, unless
-   * `nearEntryOk`). False (nothing placed) if the group doesn't fit there.
+   * Free floor tiles inside `area`: no one on them, away from the zone's entry unless `nearEntryOk`, and at least
+   * `spacing` tiles (either direction) from every enemy already in the zone.
    */
-  const placeGroup = (zone: ZoneData, area: Rect, group: EnemyClassData[], nearEntryOk = false): boolean => {
+  const freeTiles = (zone: ZoneData, area: Rect, nearEntryOk: boolean, spacing = 0): Pos[] => {
+    const others = spacing ? instances.filter(e => e.zoneId === zone.id).map(e => e.pos) : [];
     const free: Pos[] = [];
     for (let x = area.x; x < area.x + area.w; x++) {
       for (let y = area.y; y < area.y + area.h; y++) {
         const key = `${zone.id}:${posKey({ x, y })}`;
-        if (zone.floors.has(posKey({ x, y })) && !occupied.has(key) && (nearEntryOk || !nearEntry.has(key))) free.push({ x, y });
+        if (!zone.floors.has(posKey({ x, y })) || occupied.has(key) || (!nearEntryOk && nearEntry.has(key))) continue;
+        if (others.some(p => Math.max(Math.abs(p.x - x), Math.abs(p.y - y)) < spacing)) continue;
+        free.push({ x, y });
       }
     }
-    if (free.length < group.length) return false;
+    return free;
+  };
 
+  /** Place one enemy group, member i on spots[i]. */
+  const placeAt = (zone: ZoneData, group: EnemyClassData[], spots: Pos[]) => {
     const groupId = nextGroupId++;
-    const spots = shuffle(free);
     group.forEach((type, i) => {
       const pos = spots[i];
       occupied.add(`${zone.id}:${posKey(pos)}`);
-      const level = config.baseEnemyLevel + zone.id;
+      const level = dungeon.level + zone.id;
       instances.push(generateEnemyInstance(type, level, `${type.id}-${globalIdx++}`, pos, zone.id, groupId));
     });
+  };
+
+  /**
+   * Place one enemy group on random free floor tiles inside `area` (freeTiles: away from the zone's entry unless
+   * `nearEntryOk`, `spacing` from other enemies). False (nothing placed) if the group doesn't fit there.
+   */
+  const placeGroup = (zone: ZoneData, area: Rect, group: EnemyClassData[], nearEntryOk = false, spacing = 0): boolean => {
+    const free = freeTiles(zone, area, nearEntryOk, spacing);
+    if (free.length < group.length) return false;
+    placeAt(zone, group, shuffle(free));
+    return true;
+  };
+
+  /**
+   * Place a boss group: the boss (its first member) on a random free tile inside `area`, the rest flanking it in
+   * `room`: beside it on the line across the party's way in (`across`), one each side, then a step further out.
+   * A flank tile that isn't free (a wall, a cavern's edge) gives way to the free tile nearest it. False (nothing
+   * placed) if the group doesn't fit.
+   */
+  const placeBossGroup = (zone: ZoneData, area: Rect, room: Rect, group: EnemyClassData[], across: 'x' | 'y', nearEntryOk = false): boolean => {
+    const bossSpots = freeTiles(zone, area, nearEntryOk);
+    const open = new Map(freeTiles(zone, room, nearEntryOk).map(p => [posKey(p), p]));
+    if (bossSpots.length === 0 || open.size < group.length) return false;
+    const boss = pick(bossSpots);
+    open.delete(posKey(boss));
+    const spots = [boss];
+    for (let i = 1; i < group.length; i++) {
+      const out = (i % 2 ? 1 : -1) * Math.ceil(i / 2);
+      const want = across === 'x' ? { x: boss.x + out, y: boss.y } : { x: boss.x, y: boss.y + out };
+      let spot = open.get(posKey(want));
+      if (!spot) {
+        // Nearest to the flank tile; on a tie, nearest the boss
+        const d2 = (p: Pos, q: Pos) => (p.x - q.x) ** 2 + (p.y - q.y) ** 2;
+        for (const p of open.values()) {
+          if (!spot || d2(p, want) < d2(spot, want) || (d2(p, want) === d2(spot, want) && d2(p, boss) < d2(spot, boss))) spot = p;
+        }
+      }
+      open.delete(posKey(spot!));
+      spots.push(spot!);
+    }
+    placeAt(zone, group, spots);
     return true;
   };
 
   for (const zone of dungeon.zones) {
     if (zone.id === dungeon.endZoneId) {
-      // Boss group scattered in the center half of the boss room. The boss is always placed: if the center is too
-      // near the door (a round room's door can sit on its diagonal), anywhere in the room away from the door, and
-      // failing that the center after all
+      // Boss group in the center half of the boss room, its guard flanking the boss across the party's way in.
+      // The boss is always placed: if the center is too near the door (a round room's door can sit on its
+      // diagonal), anywhere in the room away from the door, and failing that the center after all
       const group = config.bossZone.bossGroup;
       if (group.length === 0) continue;
       const bossRoom = zone.rooms[0];
@@ -753,23 +820,31 @@ export function spawnDungeonEnemies(dungeon: DungeonData, config: DungeonConfig)
         w: Math.ceil(bossRoom.w / 2),
         h: Math.ceil(bossRoom.h / 2),
       };
-      if (!placeGroup(zone, center, group) && !placeGroup(zone, bossRoom, group)) placeGroup(zone, center, group, true);
+      const entryDoor = zone.doors.find(d => d.targetZoneId < zone.id);
+      const entryDir = entryDoor ? getEntryDirection(entryDoor.pos, bossRoom) : 'south';
+      const across = entryDir === 'north' || entryDir === 'south' ? 'x' : 'y';
+      if (!placeBossGroup(zone, center, bossRoom, group, across) && !placeBossGroup(zone, bossRoom, bossRoom, group, across)) {
+        placeBossGroup(zone, center, bossRoom, group, across, true);
+      }
       continue;
     }
 
-    // Regular zone: one random group per selected room (never the room the party arrives in)
+    // Regular zone: every group once, each in a room of its own (never the room the party arrives in), in random
+    // order. Once the rooms run out (or a room is too near the entry, or too small), a group shares the biggest
+    // room it fits in, kept apart from the enemies there; failing that, anywhere in the zone away from the
+    // entry; and failing that, anywhere at all.
     const zoneConfig = config.zones[zone.id];
-    if (!zoneConfig || zoneConfig.enemyGroups.length === 0) continue;
-
-    const eligibleRooms = zone.id === dungeon.startZoneId ? zone.rooms.filter(r => !inRect(dungeon.playerStart, r)) : zone.rooms;
-    if (eligibleRooms.length === 0) continue;
-
-    // Rooms in random order; one too close to the zone's entry for a group is passed over for the next
-    const groupCount = Math.ceil(eligibleRooms.length / 2) + randInt(0, Math.floor(eligibleRooms.length / 4));
-    let placed = 0;
-    for (const room of shuffle(eligibleRooms)) {
-      if (placed >= groupCount) break;
-      if (placeGroup(zone, room, pick(zoneConfig.enemyGroups))) placed++;
+    if (!zoneConfig) continue;
+    const rooms = shuffle(zone.id === dungeon.startZoneId ? zone.rooms.filter(r => !inRect(dungeon.playerStart, r)) : zone.rooms);
+    const byArea = [...rooms].sort((p, q) => q.w * q.h - p.w * p.h);
+    const used = new Set<Room>();
+    const everywhere: Rect = { x: 0, y: 0, w: zone.width, h: zone.height };
+    for (const group of shuffle(zoneConfig.enemyGroups)) {
+      const own = rooms.find(r => !used.has(r) && placeGroup(zone, r, group));
+      if (own) { used.add(own); continue; }
+      if (byArea.some(r => placeGroup(zone, r, group, false, GROUP_SPACING))) continue;
+      if (placeGroup(zone, everywhere, group, false, GROUP_SPACING) || placeGroup(zone, everywhere, group)) continue;
+      placeGroup(zone, everywhere, group, true);
     }
   }
 

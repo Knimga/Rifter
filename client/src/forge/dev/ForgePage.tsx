@@ -9,8 +9,9 @@ import { drafts } from './draftRegistry';
 import { dataEntry } from '../dataRefs';
 import { buildPreview, classHolds, classOf } from '../equip';
 import { HOLD_LABEL } from '../designs/_character';
+import { CATEGORY_FOLDER } from '../core/folders';
 import type { WeaponType } from '../../data/gear/types';
-import { DUNGEON_PRESETS } from '../../data/world/dungeonPresets';
+import { DUNGEONS } from '../../data/world/dungeons';
 import { TILE_BORDER_COLOR } from '../../components/mapParts';
 import { ForgeView, GAME_VIEW_ANCHOR, type CameraPreset, type Cell } from './forgeView';
 import { floorMatrix } from '../../viewEngine/camera';
@@ -188,7 +189,7 @@ export default function ForgePage() {
       );
       view.render(cells, { camera, wireframe, ground }, { w: width, h: height }, now / 1000);
     };
-    // Models with moving parts (a portal's swirl), or an animation being watched, animate even when the view is static
+    // Models with moving parts (a rift's swirl), or an animation being watched, animate even when the view is static
     const hasMovingParts = !!playing || built.some((block) => block.some(({ model }) => !!model?.motion?.length));
     if (motion === 'none' && !hasMovingParts) {
       yawRef.current = (yawDeg * Math.PI) / 180;
@@ -223,7 +224,7 @@ export default function ForgePage() {
   const run = (label: string, fn: () => Promise<string>) =>
     fn().then((msg) => setStatus(`${label}: ${msg}`), (e) => setStatus(`${label} failed: ${e.message}`));
 
-  const approve = () => run('Approve', async () => (await post('approve', { stem: stemOf(entry!.id) }), 'draft moved to designs/'));
+  const approve = () => run('Approve', async () => (await post('approve', { stem: stemOf(entry!.id), category: entry!.draft!.category }), `draft moved to designs/${CATEGORY_FOLDER[entry!.draft!.category]}/`));
   const discard = () => run('Discard', async () => (await post('discard', { stem: stemOf(entry!.id) }), 'draft deleted'));
   // Re-fetch both registries with a cache-busting query. Vite re-transforms them (picking up added or
   // removed files) and stamps each changed design's import with its latest update, so edited design
@@ -414,7 +415,7 @@ const BTN = 'px-2.5 py-1 rounded bg-gray-700 hover:bg-gray-600 text-gray-100';
 // In the game, models draw on a transparent canvas over the DOM tile grid. The game view does the
 // same: real floor tiles (same size, color and border as DungeonMap) behind the transparent canvas.
 
-const FLOOR = DUNGEON_PRESETS.crypt.floorColor;
+const FLOOR = DUNGEONS.crypt.floorColor;
 const PAGE_BG = '#111827'; // Tailwind gray-900, the page background
 
 type Rect = { x: number; y: number; w: number; h: number };
