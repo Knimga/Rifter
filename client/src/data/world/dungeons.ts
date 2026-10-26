@@ -1,4 +1,5 @@
-import { ENEMY_CLASSES, BOSS_CLASSES } from '../units/enemies';
+import { ENEMY_CLASSES } from '../units/enemies';
+import { BOSS_CLASSES } from '../units/bosses';
 import type { DungeonConfig } from './dungeonGen';
 
 const skelly = ENEMY_CLASSES.find(c => c.id === 'skeleton')!;
@@ -25,7 +26,8 @@ export const DUNGEONS: Record<string, DungeonConfig> = {
     floorColor: '#303030',
     wallColor: '#202020',
     doorObject: 'heavy-door',
-    riftObject: 'necrotic-rift',
+    riftColor: [178, 236, 192], // pale, ghostly necrotic green, washed toward white-grey
+    keyName: 'Necrotic Key',
     chestObject: 'basic-treasure-chest',
     zones: [
       {
@@ -64,7 +66,8 @@ export const DUNGEONS: Record<string, DungeonConfig> = {
     floorColor: '#472424',
     wallColor: '#3d0f0f',
     doorObject: 'heavy-door',
-    riftObject: 'fire-rift',
+    riftColor: [255, 168, 72],  // fiery orange, deepening to ember red
+    keyName: 'Fiery Key',
     chestObject: 'basic-treasure-chest',
     zones: [
       {
@@ -108,7 +111,8 @@ export const DUNGEONS: Record<string, DungeonConfig> = {
     floorColor: '#2c3022',
     wallColor: '#171a11',
     doorObject: 'heavy-door',
-    riftObject: 'fungal-rift',
+    riftColor: [218, 230, 124], // sickly spore yellow-green, deepening to moss
+    keyName: 'Fetid Key',
     chestObject: 'basic-treasure-chest',
     zones: [
       {

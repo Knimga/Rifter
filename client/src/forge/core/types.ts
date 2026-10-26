@@ -1,7 +1,7 @@
 import type { Vec3 } from './vec';
 import type { BuildCtx } from './ctx';
 
-export type Category = 'creature' | 'summon' | 'character' | 'weapon' | 'armor' | 'offhand' | 'object';
+export type Category = 'creature' | 'summon' | 'character' | 'weapon' | 'armor' | 'offhand' | 'object' | 'rift';
 
 /**
  * A part that keeps moving while the model is on screen (view state, like facing): it spins about `axis`
@@ -24,16 +24,40 @@ export interface PartTurn {
 }
 
 /**
- * A one-time animation (e.g. a chest's lid swinging open): from the rest pose, each listed part turns over
- * `ms` (eased), then holds its end pose. The game plays one when its object's state calls for it (view
- * state, like facing) and shows it already played on an object that appears in that state; the forge plays
- * each one on demand. Unlike PartSpin, it never repeats.
+ * One part's growth in an animation: it scales up from nothing to its full size about its pivot, or (`shrink`)
+ * down from its full size to nothing.
+ */
+export interface PartGrow {
+  part: string;
+  /**
+   * 'out' (growing's default): fast, then settling, like something bursting open; 'in' (shrinking's default):
+   * slow, then faster, like something collapsing; 'inOut': eased at both ends.
+   */
+  ease?: 'out' | 'in' | 'inOut';
+  shrink?: boolean;
+}
+
+/**
+ * One part's glow fading in an animation: its faces go from their `from` colors (FaceOpts.from) to their own,
+ * its halos from theirs (Mesh.halo's `from`) to theirs. Faces and halos without a `from` don't change.
+ */
+export interface PartFade {
+  part: string;
+}
+
+/**
+ * A one-time animation (e.g. a chest's lid swinging open, the Rifter waking): from the rest pose, over `ms`
+ * (eased), each listed part turns, grows or fades, then holds its end pose. The game plays one when its
+ * object's state calls for it (view state, like facing) and shows it already played on an object that
+ * appears in that state; the forge plays each one on demand. Unlike PartSpin, it never repeats.
  */
 export interface PartAnimation {
   /** Short name, shown in the forge and used by the game to ask for it: 'open'. */
   name: string;
   ms: number;
-  turns: PartTurn[];
+  turns?: PartTurn[];
+  grows?: PartGrow[];
+  fades?: PartFade[];
 }
 
 /**
@@ -60,11 +84,12 @@ export type FitSpec =
  *  - offhands: the offhand's id ('buckler')
  *  - classes: the class key ('knight'); the player character's body (it holds its gear, see equip.ts)
  *  - gameObjects: the object's id ('heavy-door'): interactable things on the map (data/world/gameObjects.ts)
+ *  - rifts: 'rift' or 'keystone' (data/world/rifts.ts): category `rift` ("Rifts & Keys"), tinted models (core/tint.ts)
  * Lint checks that the entry exists, that the design's label is exactly the entry's display name, and
  * that the file name is that name slugged (see src/forge/dataRefs.ts).
  */
 export interface DataRef {
-  table: 'enemies' | 'summons' | 'weapons' | 'armor' | 'offhands' | 'classes' | 'gameObjects';
+  table: 'enemies' | 'summons' | 'weapons' | 'armor' | 'offhands' | 'classes' | 'gameObjects' | 'rifts';
   key: string;
 }
 
@@ -88,6 +113,12 @@ export interface Design {
 }
 
 /**
+ * How much a tinted face, corner or halo takes of the tint it is drawn in (core/tint.ts): [bright, deep], the
+ * tint itself and its deep shade (tintDeep), added to its own color. [1, 0] is the tint, [0, 1] its deep shade.
+ */
+export type Tone = [number, number];
+
+/**
  * A soft glow around a point of light the model carries (an eye, a spore, a gem): drawn by the renderer as a
  * round additive halo facing the camera, fading from its center to `r`, hidden by whatever is in front of it.
  */
@@ -98,6 +129,10 @@ export interface Halo {
   r: number;
   /** Its color, sRGB 0..1. */
   c: [number, number, number];
+  /** Painted with the model's tint too (Tone), added to `c` (core/tint.ts). */
+  t?: Tone;
+  /** Where a fading part (PartFade) starts this halo's color, sRGB 0..1 (none: it doesn't fade). */
+  from?: [number, number, number];
   /** Index into partNames: the part it moves with. */
   part: number;
 }
@@ -113,6 +148,16 @@ export interface MeshData {
   emissive: Float32Array;
   /** 1 float per triangle: 1 = opaque. */
   alpha: Float32Array;
+  /**
+   * Tinted models only (Rifts & Keys): 6 floats per triangle, (bright, deep) tint weights per corner, face-jitter
+   * baked in. The color drawn is colors + the weights times the tint (tintModel, core/tint.ts).
+   */
+  tint?: Float32Array;
+  /**
+   * Models with fading parts only (PartFade): 9 floats per triangle, each corner's color where the fade starts
+   * (FaceOpts.from; the same as `colors` on faces without one), face-jitter baked in.
+   */
+  fromColors?: Float32Array;
   /** 1 byte per triangle: index into partNames. */
   part: Uint8Array;
   partNames: string[];

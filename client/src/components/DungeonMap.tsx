@@ -12,7 +12,13 @@ import { unitKey } from '../data/combat/abilityExecution';
 import FloatingCombatText, { type FloatingText } from './FloatingCombatText';
 import { MoveCostPips } from './MoveLine';
 import { gameObjectGlow, gameObjectModel } from '../data/world/gameObjects';
-import { Board, FloorGrid, FloorTile, HoverEdgeGlow, MoveLineOverlay, ObjectTag, RIFT_TAG_HEIGHT, TileHighlight, UprightAt, UsableGlow, facingOpenSide, riftTag, toMapMember, useBoard, useHoveredTile, useStableHandler, type PartyTokenData, TILE_HIGHLIGHT } from './mapParts';
+import { RIFT_MODELS, riftGlowCss } from '../data/world/rifts';
+import { DUNGEONS, type DungeonKey } from '../data/world/dungeons';
+
+/** How high (world tiles) a rift key's name tag sits over the floor it lies on. */
+const KEY_TAG_HEIGHT = 0.35;
+import type { RGB } from '../forge/core/vec';
+import { Board, FloorGrid, FloorTile, HoverEdgeGlow, deepFogTiles, MoveLineOverlay, ObjectTag, RIFT_TAG_HEIGHT, TileHighlight, UprightAt, UsableGlow, facingOpenSide, riftTag, toMapMember, useBoard, useHoveredTile, useStableHandler, type PartyTokenData, TILE_HIGHLIGHT } from './mapParts';
 import UnitStatus, { statusMarkers } from './hud/UnitStatus';
 import type { MapLoot, MapObject, UnitAim } from './ModelLayer';
 
@@ -67,7 +73,7 @@ interface Props {
   wallColor: string;
   /** GAME_OBJECTS ids of this dungeon's doors and exit rift (DungeonConfig). */
   doorObject: string;
-  riftObject: string;
+  riftColor: RGB;
   enemyAoePreviewTiles?: Set<string>;
   /** The unit (unitKey: a party member or summoned ally) a creature is about to hit; null when none. */
   enemyTargetKey: string | null;
@@ -75,6 +81,8 @@ interface Props {
   tileTargets?: Set<string> | null;
   droppedItems?: Record<string, Item[]>;
   onLootClick?: (pos: Pos) => void;
+  /** Rift keys lying on the floor ("x,y" → the dungeon whose key it is): drawn in its color, picked up by a click. */
+  droppedKeys?: Record<string, DungeonKey>;
   /** Where each unit last aimed an ability; its model turns to face it. */
   aims?: Record<string, UnitAim>;
   /** The 3D layer has drawn its first frame (ModelLayer onReady): the page stops hiding the map. */
@@ -88,7 +96,7 @@ interface Props {
   fog: FogState | null;
 }
 
-export default function DungeonMap({ playerPos, activeMoverPos, party, moveTargets, moveApCost, onMove, onLocationChange, onDoorClick, chests, emptiedChests, onOpenChest, activeTarget, activeAbilityArea, areaTone, actionRange, onAbilityUse, onAbilityDeselect, onMemberSelect, enemies, inCombat, isPlayerTurn, activeCombatantId, floatingTexts, onFloatingTextComplete, zone, riftPos, partyBuffs, partyHots, partyDots, floorColor, wallColor, doorObject, riftObject, enemyAoePreviewTiles, enemyTargetKey, tileTargets = null, droppedItems = {}, onLootClick, aims, highlightUnitId = null, fog, onReady }: Props) {
+export default function DungeonMap({ playerPos, activeMoverPos, party, moveTargets, moveApCost, onMove, onLocationChange, onDoorClick, chests, emptiedChests, onOpenChest, activeTarget, activeAbilityArea, areaTone, actionRange, onAbilityUse, onAbilityDeselect, onMemberSelect, enemies, inCombat, isPlayerTurn, activeCombatantId, floatingTexts, onFloatingTextComplete, zone, riftPos, partyBuffs, partyHots, partyDots, floorColor, wallColor, doorObject, riftColor, enemyAoePreviewTiles, enemyTargetKey, tileTargets = null, droppedItems = {}, droppedKeys = {}, onLootClick, aims, highlightUnitId = null, fog, onReady }: Props) {
   const { width, height, floors, doors } = zone;
   const hover = useHoveredTile();
   const hoveredTile = hover.hovered;
@@ -96,22 +104,8 @@ export default function DungeonMap({ playerPos, activeMoverPos, party, moveTarge
   // Fog of war: tiles the party has seen at all (now or before), and tiles it sees now (no fog: everything)
   const isKnown = (key: string) => !fog || fog.visible.has(key) || fog.explored.has(key);
   const isSeenNow = (key: string) => !fog || fog.visible.has(key);
-  // Tiles deep in the fog: unseen, and no tile around them seen either. The HTML floor draws them in the fog's
-  // color, so the zone's layout never shows through, even before the 3D layer (and its fog) has drawn. The fog is
-  // fully dark over them anyway; the tiles at its edge keep their colors, so its soft edge looks as it should.
-  const deepFog = useMemo(() => {
-    const deep = new Set<string>();
-    if (!fog) return deep;
-    const known = (x: number, y: number) => fog.visible.has(`${x},${y}`) || fog.explored.has(`${x},${y}`);
-    for (let x = 0; x < width; x++) {
-      for (let y = 0; y < height; y++) {
-        let near = false;
-        for (let dx = -1; dx <= 1 && !near; dx++) for (let dy = -1; dy <= 1 && !near; dy++) near = known(x + dx, y + dy);
-        if (!near) deep.add(`${x},${y}`);
-      }
-    }
-    return deep;
-  }, [fog, width, height]);
+  // Tiles deep in the fog: drawn in the fog's color (deepFogTiles)
+  const deepFog = useMemo(() => (fog ? deepFogTiles(fog, width, height) : new Set<string>()), [fog, width, height]);
 
   const isAoE = isArea({ area: activeAbilityArea });
   const canAct = !inCombat || isPlayerTurn;
@@ -122,7 +116,7 @@ export default function DungeonMap({ playerPos, activeMoverPos, party, moveTarge
   // Living enemies drawn as models (stable array while `enemies` is unchanged, so ModelLayer can memo on it)
   const modelEnemies = useMemo(() => enemies.filter(e => e.currentHp > 0), [enemies]);
   const memberByKey = useMemo(() => new Map(party.map(m => [posKey(m.pos), m])), [party]);
-  // Loot drawn as models: the top item of each pile
+  // Loot drawn as models: the top item of each pile, and each rift key (the keystone, in its dungeon's color)
   const modelLoot = useMemo(() => {
     const out: MapLoot[] = [];
     for (const [key, items] of Object.entries(droppedItems)) {
@@ -131,8 +125,12 @@ export default function DungeonMap({ playerPos, activeMoverPos, party, moveTarge
       const [x, y] = key.split(',').map(Number);
       out.push({ id: top.id, link: top.model, pos: { x, y } });
     }
+    for (const [key, dungeon] of Object.entries(droppedKeys)) {
+      const [x, y] = key.split(',').map(Number);
+      out.push({ id: `key-${dungeon}`, link: RIFT_MODELS.keystone.model, pos: { x, y }, tint: DUNGEONS[dungeon].riftColor });
+    }
     return out;
-  }, [droppedItems]);
+  }, [droppedItems, droppedKeys]);
   // Party members drawn as their class models, with HP/MP bars and effect markers above their heads
   const modelParty = useMemo(
     () => party.map(m => toMapMember(m, statusMarkers(partyBuffs[m.partyIndex] ?? [], partyHots[m.partyIndex] ?? [], partyDots[m.partyIndex] ?? []))),
@@ -147,12 +145,12 @@ export default function DungeonMap({ playerPos, activeMoverPos, party, moveTarge
   const mapObjects = useMemo(() => {
     const isFloor = (q: Pos) => floors.has(posKey(q));
     const out: MapObject[] = doors.map(d => ({ id: d.id, link: gameObjectModel(doorObject), pos: d.pos, facing: facingOpenSide(d.pos, isFloor) }));
-    if (riftPos) out.push({ id: 'rift', link: gameObjectModel(riftObject), pos: riftPos, facing: facingOpenSide(riftPos, isFloor) });
+    if (riftPos) out.push({ id: 'rift', link: RIFT_MODELS.rift.model, pos: riftPos, facing: facingOpenSide(riftPos, isFloor), tint: riftColor });
     for (const c of chests) {
       out.push({ id: c.id, link: gameObjectModel(c.object), pos: c.pos, facing: yawFromGridMove(...c.facing), played: emptiedChests.has(c.id) ? ['open'] : undefined });
     }
     return out;
-  }, [doors, floors, riftPos, doorObject, riftObject, chests, emptiedKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [doors, floors, riftPos, doorObject, riftColor, chests, emptiedKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const inRangeWithLOS = (p: Pos) => chebyshev(activeMoverPos, p) <= actionRange && hasLineOfSight(activeMoverPos, p, floors);
 
@@ -199,7 +197,7 @@ export default function DungeonMap({ playerPos, activeMoverPos, party, moveTarge
     if (enemy) return; // can't walk onto enemies (or stop on a summoned ally)
 
     // Loot pickup: click adjacent dropped item out of combat
-    if (!inCombat && droppedItems[key]?.length && isAdjacent(playerPos, p)) {
+    if (!inCombat && (droppedItems[key]?.length || droppedKeys[key]) && isAdjacent(playerPos, p)) {
       onLootClick?.(p);
       return;
     }
@@ -233,7 +231,8 @@ export default function DungeonMap({ playerPos, activeMoverPos, party, moveTarge
     const chest = chestByKey.get(key);
     const isChestUsable = !!chest && !inCombat && !emptiedChests.has(chest.id) && isAdjacent(playerPos, p);
     const tileItems = floor && isKnown(key) ? droppedItems[key] : undefined;
-    const isLootAdjacent = !inCombat && !!tileItems?.length && isAdjacent(playerPos, p);
+    const tileKey = floor && isKnown(key) ? droppedKeys[key] : undefined;
+    const isLootAdjacent = !inCombat && (!!tileItems?.length || !!tileKey) && isAdjacent(playerPos, p);
     const unitOnTile = member ? unitKey({ side: 'party', idx: member.partyIndex }) : enemy?.id;
     const isEnemyTargeted = enemyTargetKey !== null && unitOnTile === enemyTargetKey;
     // A 'tile' ability: every tile it can be aimed at, softly; the hovered one as the target
@@ -254,18 +253,19 @@ export default function DungeonMap({ playerPos, activeMoverPos, party, moveTarge
       <FloorTile key={key} p={p} hover={hover} onClick={onTileClick}
         color={deepFog.has(key) ? 'var(--rift-fog)' : floor && !door ? floorColor : wallColor}
         brighten={floor && !door && !activeTarget && !highlight && moveTargets.has(key) && hover.isHovered(p)}>
-        {tileItems?.[0] && (
-          // The pile is drawn by ModelLayer; a glow on the floor under it shows it can be picked up
+        {(tileItems?.[0] || tileKey) && (
+          // The pile (or rift key) is drawn by ModelLayer; a glow on the floor under it shows it can be picked up,
+          // in the key's own color for a key
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
             <div className={`w-8 h-8 rounded-full ${isLootAdjacent ? 'animate-pulse' : 'invisible'}`}
-              style={{ boxShadow: '0 0 10px 3px color-mix(in srgb, var(--rift-loot) 60%, transparent)' }} />
+              style={{ boxShadow: `0 0 10px 3px color-mix(in srgb, ${tileKey ? riftGlowCss(DUNGEONS[tileKey].riftColor) : 'var(--rift-loot)'} 60%, transparent)` }} />
           </div>
         )}
         {/* A door, the rift or a chest the leader can use now: a soft pulsing glow on its tile (stronger on hover) */}
         {/* The rift, hovered from farther away: its edges glow faintly */}
-        {isRift && !isAdjacentToRift && hover.isHovered(p) && <HoverEdgeGlow color={gameObjectGlow(riftObject)} />}
+        {isRift && !isAdjacentToRift && hover.isHovered(p) && <HoverEdgeGlow color={riftGlowCss(riftColor)} />}
         {((door && isDoorAdjacent && !inCombat) || (isRift && isAdjacentToRift)) && (
-          <UsableGlow color={gameObjectGlow(door ? doorObject : riftObject)} hovered={hover.isHovered(p)} />
+          <UsableGlow color={door ? gameObjectGlow(doorObject) : riftGlowCss(riftColor)} hovered={hover.isHovered(p)} />
         )}
         {chest && isChestUsable && <UsableGlow color={gameObjectGlow(chest.object)} hovered={hover.isHovered(p)} />}
         {highlight && <TileHighlight kind={highlight} />}
@@ -312,6 +312,11 @@ export default function DungeonMap({ playerPos, activeMoverPos, party, moveTarge
           </UprightAt>
         );
       })}
+
+      {/* A rift key's name while it is hovered */}
+      {hoveredTile && droppedKeys[posKey(hoveredTile)] && isKnown(posKey(hoveredTile)) && (
+        <ObjectTag board={board} x={hoveredTile.x} y={hoveredTile.y} height={KEY_TAG_HEIGHT} text={DUNGEONS[droppedKeys[posKey(hoveredTile)]].keyName} />
+      )}
 
       {/* Where the exit rift leads, at once while it is hovered, wherever the party stands */}
       {riftPos && hoveredTile && samePos(hoveredTile, riftPos) && isKnown(posKey(riftPos)) && (

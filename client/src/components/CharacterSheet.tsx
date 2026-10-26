@@ -1,10 +1,10 @@
 // The party window (UI handoff, 04 party modal): party rail, the member's model and equipment, the shared
-// inventory, and their attributes, skills and stats (StatsPanel). Values raised or lowered by gear, buffs and
-// debuffs show green / red with an arrow.
+// inventory (or, its Keys tab, the keyring), and their attributes, skills and stats (StatsPanel). Values raised or
+// lowered by gear, buffs and debuffs show green / red with an arrow.
 // Level-up (UI handoff: level-up and XP tracking): the party's XP bar on the rail; a member with points to
 // spend is marked on the rail, gets a header banner (Reset, Confirm) and + / - on their attribute and skill
 // rows. Placed points stay pending (kept by GameScreen, so closing the window keeps them) until Confirm.
-import { lazy, Suspense, useEffect, useMemo, useState, type ComponentType, type MouseEvent } from 'react';
+import { lazy, Suspense, useMemo, useState, type ComponentType, type MouseEvent } from 'react';
 import { Crown, Shirt, Hand, Footprints, Sword, Shield } from 'lucide-react';
 import { CLASSES } from '../data/units/classes';
 import { ATTRIBUTE_KEYS, SKILL_KEYS, recomputeStats, type ActiveBuff, type Stats } from '../data/units/stats';
@@ -21,6 +21,9 @@ import { PanelTitle } from './ui/Panel';
 import { XpBar } from './hud/XpBar';
 import { characterLookKey, characterModel, heldGear } from './characterModel';
 import StatsPanel, { Val, type StatShift } from './StatsPanel';
+import Keyring from './Keyring';
+import ModalWindow from './ui/ModalWindow';
+import type { DungeonKey } from '../data/world/dungeons';
 
 // The turning model (lazy: it pulls in three.js)
 const ModelTurntable = lazy(() => import('./ModelTurntable'));
@@ -33,6 +36,12 @@ interface Props {
   /** Each member's active buffs and debuffs (effects, not gear): what colors their stats red. */
   partyBuffs: ActiveBuff[][];
   inventory: Inventory;
+  /** The party's rift keys (shared, like the inventory), in the order obtained. */
+  keys: readonly DungeonKey[];
+  /** A key was obtained since the Keys tab was last opened: the tab glows gold. */
+  hasNewKey: boolean;
+  /** The Keys tab was opened (the new key has been seen). */
+  onSeeKeys: () => void;
   onClose: () => void;
   onEquipItem?: (inventoryIdx: number, charIdx: number) => void;
   onUnequipItem?: (slot: GearSlot, charIdx: number) => void;
@@ -133,21 +142,11 @@ function GearSlotBox({ slot, item, stats, onUnequip }: { slot: GearSlot; item: I
   );
 }
 
-/** The window's scale: as large as fits the viewport (with a margin), never above 1. */
-function useFitScale(): number {
-  const fit = () => Math.max(0.4, Math.min(1, (window.innerWidth - 40) / WIDTH, (window.innerHeight - 40) / HEIGHT));
-  const [scale, setScale] = useState(fit);
-  useEffect(() => {
-    const onResize = () => setScale(fit());
-    window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
-  }, []);
-  return scale;
-}
-
-export default function CharacterSheet({ party, partyHp, partyMp, partyStats, partyBuffs, inventory, onClose, onEquipItem, onUnequipItem, progress, pending: pendingAll, onPendingChange, onConfirmPoints }: Props) {
+export default function CharacterSheet({ party, partyHp, partyMp, partyStats, partyBuffs, inventory, keys, hasNewKey, onSeeKeys, onClose, onEquipItem, onUnequipItem, progress, pending: pendingAll, onPendingChange, onConfirmPoints }: Props) {
   const [selectedIdx, setSelectedIdx] = useState(0);
-  const scale = useFitScale();
+  // The Inventory panel's tab: the shared inventory, or the keyring
+  const [tab, setTab] = useState<'items' | 'keys'>('items');
+  const showKeys = () => { setTab('keys'); onSeeKeys(); };
 
   const member = party[selectedIdx];
   const { characterName, selectedClass, gear } = member;
@@ -200,18 +199,7 @@ export default function CharacterSheet({ party, partyHp, partyMp, partyStats, pa
     : `Spend ${[left.attr > 0 && `${left.attr} attribute`, left.skill > 0 && `${left.skill} skill`].filter(Boolean).join(' and ')} point${left.attr + left.skill === 1 ? '' : 's'}`;
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center font-tech text-rift-ink bg-[rgba(4,5,6,0.76)] backdrop-blur-[2px]">
-      {/* Clicking outside the window closes it */}
-      <button type="button" aria-label="Close party window" tabIndex={-1} onClick={onClose} className="absolute inset-0 w-full h-full p-0 bg-transparent border-0" />
-
-      <div
-        role="dialog" aria-modal="true" aria-labelledby="party-who"
-        className="relative flex-none box-border flex gap-4 px-6 py-5 bg-rift-sunk border border-rift-edge rounded-sm"
-        style={{
-          width: WIDTH, height: HEIGHT, transform: `scale(${scale})`,
-          boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 30px 90px rgba(0, 0, 0, 0.8), 0 0 90px color-mix(in srgb, var(--glow) 7%, transparent)',
-        }}
-      >
+    <ModalWindow width={WIDTH} height={HEIGHT} labelledBy="party-who" closeLabel="Close party window" onClose={onClose} className="flex gap-4 px-6 py-5">
         {/* ── Party rail ── */}
         <nav aria-label="Party members" className="flex-none w-[188px] flex flex-col gap-2">
           {/* The heading block: "Party" and the party's XP toward the next level */}
@@ -297,15 +285,28 @@ export default function CharacterSheet({ party, partyHp, partyMp, partyStats, pa
               </div>
 
               <section aria-label="Inventory" className="rf-panel flex-none p-3.5">
+                {/* Two tabs, the shared inventory and the keyring (UI handoff: party modal keys tab); the panel keeps its
+                    size between them */}
                 <div className="flex items-baseline justify-between mb-2.5">
-                  <PanelTitle variant="heading">Inventory <span className="font-tech text-[10px] tracking-[0.1em] text-rift-label">Shared</span></PanelTitle>
-                  <span className={`text-xs ${invFull ? 'text-rift-warn' : 'text-rift-muted'}`}>{inventory.length} / {INVENTORY_SIZE}{invFull ? ' · Full' : ''}</span>
+                  <div role="tablist" aria-label="Shared storage" className="flex items-baseline gap-[18px]">
+                    <button type="button" role="tab" aria-selected={tab === 'items'} className={`rf-h rf-tab ${tab === 'items' ? 'is-on' : ''}`} onClick={() => setTab('items')}>
+                      Inventory <span className="font-tech text-[10px] tracking-[0.1em] text-rift-label">Shared</span>
+                    </button>
+                    <button type="button" role="tab" aria-selected={tab === 'keys'} className={`rf-h rf-tab ${tab === 'keys' ? 'is-on' : ''} ${hasNewKey ? 'is-new' : ''}`} onClick={showKeys}>
+                      Keys
+                    </button>
+                  </div>
+                  {tab === 'items'
+                    ? <span className={`text-xs ${invFull ? 'text-rift-warn' : 'text-rift-muted'}`}>{inventory.length} / {INVENTORY_SIZE}{invFull ? ' · Full' : ''}</span>
+                    : <span className="text-xs text-rift-muted">{keys.length} {keys.length === 1 ? 'key' : 'keys'}</span>}
                 </div>
-                <ItemGrid items={inventory} cols={INVENTORY_COLS} size={INVENTORY_SIZE} stats={stats}
-                  canUse={(item) => isProficient(classData, item)}
-                  action={(item) => (onEquipItem && canEquip(classData, item, inventory, gear) ? 'Equip' : null)}
-                  onAction={(i) => onEquipItem?.(i, selectedIdx)} unusableNote=", not proficient"
-                  equippedFor={(item) => gear[item.slot]} />
+                {tab === 'items' ? (
+                  <ItemGrid items={inventory} cols={INVENTORY_COLS} size={INVENTORY_SIZE} stats={stats}
+                    canUse={(item) => isProficient(classData, item)}
+                    action={(item) => (onEquipItem && canEquip(classData, item, inventory, gear) ? 'Equip' : null)}
+                    onAction={(i) => onEquipItem?.(i, selectedIdx)} unusableNote=", not proficient"
+                    equippedFor={(item) => gear[item.slot]} />
+                ) : <Keyring keys={keys} />}
               </section>
             </div>
 
@@ -342,7 +343,6 @@ export default function CharacterSheet({ party, partyHp, partyMp, partyStats, pa
             </div>
           </div>
         </div>
-      </div>
-    </div>
+    </ModalWindow>
   );
 }

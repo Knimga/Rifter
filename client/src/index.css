@@ -37,6 +37,7 @@
   --rift-soft: #cfc9bc;      /* button text, secondary text */
   --rift-muted: #a39f95;     /* descriptions */
   --rift-label: #8d9096;     /* small caps labels */
+  --rift-keyname: #d6d0c3;   /* a rift key's name on the keyring */
   --rift-off: #7a7d85;       /* disabled text, placeholders */
   --rift-faint: #5d6068;     /* empty and unusable things */
   --rift-cap: #6f727a;       /* the faintest small caps titles (the Stats panel's Resistances) */
@@ -65,9 +66,6 @@
   --rift-ap-spent: #15161a;  /* a spent action point */
   --rift-ap-lost: #000000;   /* an action point lost to a debuff (stun) */
   --rift-ap-extra: #ffffff;  /* an extra action point from a buff (haste) */
-  --rift-rift-necrotic: #b2ecc0; /* a usable rift's tile glow, in its own color */
-  --rift-rift-fire: #f0a060;
-  --rift-rift-fungal: #d6e47c;
 
   /* Effect lines (ability cards, item tooltips) */
   --tone-base: var(--rift-muted);
@@ -320,6 +318,64 @@
      filling it, so a rarity glow still shows through), kept on hover */
   .rf-cell.is-filled.is-unusable { box-shadow: inset 0 0 0 23px color-mix(in srgb, var(--rift-hp) 16%, transparent), inset 0 -2px 8px rgba(0, 0, 0, 0.6); }
   .rf-cell.is-filled.is-unusable:hover { box-shadow: inset 0 0 0 23px color-mix(in srgb, var(--rift-hp) 16%, transparent), 0 0 16px color-mix(in srgb, var(--glow) 22%, transparent); }
+  /* The Inventory panel's tabs (Inventory, Keys): the active one full and underlined in the glow, the other faint.
+     A newly obtained key lights the Keys tab in the level-up gold until it is opened. */
+  .rf-tab { appearance: none; background: none; border: 0; border-bottom: 1px solid transparent; padding: 0 0 3px; margin: 0; opacity: 0.45; transition: opacity 180ms ease, border-color 180ms ease; }
+  .rf-tab:hover { opacity: 0.8; }
+  .rf-tab.is-new { opacity: 1; color: var(--rift-levelup); text-shadow: 0 0 14px color-mix(in srgb, var(--rift-levelup) 90%, transparent), 0 0 6px color-mix(in srgb, var(--rift-levelup) 75%, transparent), 0 0 2px color-mix(in srgb, var(--rift-levelup) 60%, transparent); }
+  .rf-tab.is-new.is-on { border-bottom-color: color-mix(in srgb, var(--rift-levelup) 55%, transparent); }
+  .rf-tab.is-on { opacity: 1; border-bottom-color: color-mix(in srgb, var(--glow) 55%, transparent); }
+  .rf-tab:focus-visible { outline: 1px solid color-mix(in srgb, var(--glow) 60%, transparent); outline-offset: 4px; }
+  @media (prefers-reduced-motion: reduce) { .rf-tab { transition: none; } }
+  /* The keyring (Keyring.tsx): one dark box, as tall as the inventory grid, two columns of ten keys */
+  .rf-keyring {
+    height: 246px; box-sizing: border-box; padding: 8px 12px; display: grid; grid-template-rows: repeat(10, 1fr); grid-auto-flow: column;
+    grid-template-columns: 1fr 1fr; gap: 0 28px; background: var(--rift-sunk); border: 1px solid var(--rift-seam); border-radius: 2px; box-shadow: inset 0 1px 6px rgba(0, 0, 0, 0.7);
+  }
+  .rf-key { display: flex; align-items: center; gap: 8px; min-width: 0; box-sizing: border-box; padding: 0 6px 0 2px; }
+  /* The Rifter's window (RifterWindow.tsx). --kc: the set key's color (a row's own, on a row) */
+  .rf-rifter-keys {
+    flex: none; height: 246px; box-sizing: border-box; padding: 8px 6px 8px 8px; display: flex; flex-direction: column; overflow-y: auto;
+    overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--rift-rim) transparent;
+    background: var(--rift-sunk); border: 1px solid var(--rift-seam); border-radius: 2px; box-shadow: inset 0 1px 6px rgba(0, 0, 0, 0.7);
+  }
+  .rf-krow {
+    flex: none; height: 26px; appearance: none; text-align: left; display: flex; align-items: center; gap: 8px; min-width: 0; box-sizing: border-box;
+    padding: 0 10px 0 6px; margin: 0; background: transparent; color: inherit; font: inherit; font-weight: 400; border: 1px solid transparent; border-radius: 2px;
+    transition: background-color 160ms ease, border-color 160ms ease;
+  }
+  .rf-krow:hover { background: rgba(255, 255, 255, 0.035); }
+  .rf-krow:focus-visible { outline: 1px solid color-mix(in srgb, var(--glow) 60%, transparent); outline-offset: -1px; }
+  .rf-krow.is-sel {
+    background: color-mix(in srgb, var(--kc) 11%, transparent); border-color: color-mix(in srgb, var(--kc) 48%, transparent);
+    box-shadow: 0 0 14px color-mix(in srgb, var(--kc) 14%, transparent);
+  }
+  /* Its button: disabled with no key set, in the key's color once one is, brighter once the rift is open */
+  .rf-go { min-height: 52px; width: 100%; font-size: 14px; letter-spacing: 0.25em; padding: 0 0 0 0.25em; color: var(--rift-soft); }
+  .rf-go.is-off, .rf-go.is-off:hover, .rf-go.is-off:focus-visible {
+    color: var(--rift-faint); border-color: var(--rift-edge); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), inset 0 -2px 8px rgba(0, 0, 0, 0.6);
+  }
+  .rf-go.is-ready {
+    color: var(--rift-bright); border-color: color-mix(in srgb, var(--kc) 55%, var(--rift-edge));
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), inset 0 -2px 8px rgba(0, 0, 0, 0.6), 0 0 22px color-mix(in srgb, var(--kc) 22%, transparent), 0 10px 28px rgba(0, 0, 0, 0.55);
+  }
+  .rf-go.is-ready:hover, .rf-go.is-ready:focus-visible {
+    border-color: color-mix(in srgb, var(--kc) 80%, transparent);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), inset 0 -2px 8px rgba(0, 0, 0, 0.6), 0 0 34px color-mix(in srgb, var(--kc) 38%, transparent), 0 10px 28px rgba(0, 0, 0, 0.55);
+  }
+  .rf-go.is-open, .rf-go.is-open:hover, .rf-go.is-open:focus-visible {
+    color: var(--rift-active); border-color: color-mix(in srgb, var(--kc) 70%, transparent);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), inset 0 -2px 8px rgba(0, 0, 0, 0.6), 0 0 34px color-mix(in srgb, var(--kc) 34%, transparent);
+  }
+  /* Its device's rings: turning (faster once the rift is open); the empty socket's outline breathing */
+  .rf-spin { transform-origin: 80px 80px; animation: rf-spin 22s linear infinite; }
+  .rf-spin-r { transform-origin: 80px 80px; animation: rf-spin 34s linear infinite reverse; }
+  .rf-spin.is-fast { animation-duration: 6s; }
+  .rf-spin-r.is-fast { animation-duration: 9s; }
+  .rf-breathe { animation: rf-breathe 2.6s ease-in-out infinite; }
+  @keyframes rf-spin { to { transform: rotate(360deg); } }
+  @keyframes rf-breathe { 0%, 100% { opacity: 0.35; } 50% { opacity: 0.8; } }
+  @media (prefers-reduced-motion: reduce) { .rf-spin, .rf-spin-r, .rf-breathe { animation: none; } .rf-krow { transition: none; } }
   /* The party window's Stats panel (StatsPanel.tsx): near-black boxes, whatever the theme (like the attribute rows) */
   .rf-stcard { position: relative; box-sizing: border-box; min-width: 0; padding: 9px 11px; background: var(--rift-void); border: 1px solid var(--rift-seam); border-radius: 2px; }
   .rf-stlab { font-size: 10px; line-height: 12px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--rift-muted); }

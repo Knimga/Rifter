@@ -12,6 +12,8 @@ import { HOLD_LABEL } from '../designs/_character';
 import { CATEGORY_FOLDER } from '../core/folders';
 import type { WeaponType } from '../../data/gear/types';
 import { DUNGEONS } from '../../data/world/dungeons';
+import { isTinted, tintModel } from '../core/tint';
+import type { RGB } from '../core/vec';
 import { TILE_BORDER_COLOR } from '../../components/mapParts';
 import { ForgeView, GAME_VIEW_ANCHOR, type CameraPreset, type Cell } from './forgeView';
 import { floorMatrix } from '../../viewEngine/camera';
@@ -25,7 +27,11 @@ const COLS = 6;
 // Left-panel sections, in order. Every Category must be listed (Record keeps that checked).
 const CATEGORY_LABEL: Record<Category, string> = {
   creature: 'Creatures', summon: 'Summons', character: 'Classes', weapon: 'Weapons', armor: 'Armor', offhand: 'Offhands', object: 'Game Objects',
+  rift: 'Rifts & Keys',
 };
+const DUNGEON_KEYS = Object.keys(DUNGEONS);
+const toHex = (c: RGB) => `#${c.map((v) => Math.round(v).toString(16).padStart(2, '0')).join('')}`;
+const fromHex = (h: string): RGB => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16)) as RGB;
 const CATEGORIES = Object.keys(CATEGORY_LABEL) as Category[];
 const WALK_DIRS = [0, 1, 2, 3, 4, 5, 6, 7].map((i) => (i * Math.PI) / 4);
 
@@ -44,11 +50,12 @@ function readUrl() {
     seed: Number(q.get('seed') ?? 1),
     count: Number(q.get('count') ?? 12),
     camera: (q.get('cam') as CameraPreset) ?? 'game',
+    tint: q.get('tint') ?? DUNGEON_KEYS[0],
   };
 }
 
-function writeUrl(s: { design: string; seed: number; count: number; camera: CameraPreset }) {
-  const q = new URLSearchParams({ design: s.design, seed: String(s.seed), count: String(s.count), cam: s.camera });
+function writeUrl(s: { design: string; seed: number; count: number; camera: CameraPreset; tint: string }) {
+  const q = new URLSearchParams({ design: s.design, seed: String(s.seed), count: String(s.count), cam: s.camera, tint: s.tint });
   history.replaceState(null, '', `${location.pathname}?${q}`);
 }
 
@@ -81,9 +88,13 @@ export default function ForgePage() {
   // Which of the design's one-time animations (PartAnimation) plays on a loop in every cell; null = the model at rest
   const [animation, setAnimation] = useState<string | null>(null);
   const [status, setStatus] = useState('');
+  // Rifts & Keys: the dungeon whose color they are shown in, or 'custom' (the picker's color, to try new ones)
+  const [tintKey, setTintKey] = useState(initial.tint.startsWith('#') ? 'custom' : DUNGEON_KEYS.includes(initial.tint) ? initial.tint : DUNGEON_KEYS[0]);
+  const [customTint, setCustomTint] = useState<RGB>(initial.tint.startsWith('#') ? fromHex(initial.tint) : DUNGEONS[DUNGEON_KEYS[0]].riftColor);
 
   const entry = entries.find((e) => e.id === selectedId) ?? entries[0];
   const shownDesign = entry ? (entry.approved ?? entry.draft)! : null;
+  const tint: RGB = tintKey === 'custom' ? customTint : DUNGEONS[tintKey].riftColor;
   // The exact game data entry this design is the model for (lint guarantees it exists and the names match)
   const source = shownDesign ? dataEntry(shownDesign.source) : undefined;
   // Items have one look (every item of a name is identical: ITEM_SEED); creatures and characters get a
@@ -119,7 +130,8 @@ export default function ForgePage() {
     ? blocks
     : blocks.map((b) => ({ ...b, cells: b.cells.filter((c) => c.seed === focusSeed).slice(0, 1) })).filter((b) => b.cells.length);
 
-  useEffect(() => writeUrl({ design: entry?.id ?? '', seed: seedStart, count, camera }), [entry, seedStart, count, camera]);
+  const tintParam = tintKey === 'custom' ? toHex(customTint) : tintKey;
+  useEffect(() => writeUrl({ design: entry?.id ?? '', seed: seedStart, count, camera, tint: tintParam }), [entry, seedStart, count, camera, tintParam]);
 
   // Browser tab title (index.html's "Rifter" is the game's)
   useEffect(() => {
@@ -128,14 +140,17 @@ export default function ForgePage() {
 
   // Build every model shown (blocks x cells). Pure and deterministic, so memo on inputs.
   // Character (class) designs are shown holding the class's starting gear, built from the approved item designs.
+  // Tinted models (Rifts & Keys, the active Rifter) are painted in the chosen color, as the game paints them in a dungeon's.
   const built = useMemo(
-    () => shown.map((b) => b.cells.map((cell) => ({
-      ...cell,
-      model: safeBuild(b.design, cell.seed, registry.designs, cell.weaponType),
-    }))),
+    () => shown.map((b) => b.cells.map((cell) => {
+      const model = safeBuild(b.design, cell.seed, registry.designs, cell.weaponType);
+      return { ...cell, model: model && isTinted(model) ? tintModel(model, tint) : model };
+    })),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [entry, registry, shown.map((b) => `${b.label}:${b.cells.map((c) => c.seed).join(',')}`).join('|')],
+    [entry, registry, tint.join(','), shown.map((b) => `${b.label}:${b.cells.map((c) => c.seed).join(',')}`).join('|')],
   );
+  // The color picker shows for tinted models
+  const tinted = built.some((cells) => cells.some((c) => c.model && isTinted(c.model)));
 
   // Layout: each block is a titled row of cells, COLS per line.
   const cellSize = focusSeed !== null ? CELL * 2 : CELL;
@@ -315,6 +330,17 @@ export default function ForgePage() {
                 </select>
               )}
             </>
+          )}
+          {tinted && (
+            <div className="flex items-center gap-2" title="Rifts and keystones are one model each, painted in a dungeon's riftColor (data/world/dungeons.ts)">
+              <select className={INPUT + ' w-36'} value={tintKey} onChange={(e) => setTintKey(e.target.value)}>
+                {DUNGEON_KEYS.map((k) => <option key={k} value={k}>{DUNGEONS[k].name}</option>)}
+                <option value="custom">Custom…</option>
+              </select>
+              <input type="color" className="w-8 h-6 bg-transparent" value={toHex(tint)}
+                onChange={(e) => { setCustomTint(fromHex(e.target.value)); setTintKey('custom'); }} title="Pick a color to try (Custom)" />
+              <code className="text-xs text-gray-400 select-all" title="Paste into a dungeon's entry">riftColor: [{tint.map(Math.round).join(', ')}]</code>
+            </div>
           )}
           <select className={INPUT + ' w-24'} value={camera} onChange={(e) => setCamera(e.target.value as CameraPreset)}>
             {(['game', 'icon', 'top', 'side'] as const).map((c) => <option key={c}>{c}</option>)}

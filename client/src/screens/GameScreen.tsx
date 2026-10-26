@@ -1,7 +1,7 @@
 // The game: the Sanctum or a dungeon, the party moving and fighting in it, and the HUD. Each concern lives in
 // its own hook (party member state, inventory, chests, experience, round ticks, action outcomes, keys, the
 // enemy turn); this screen holds where everyone is and the fight, wires the hooks together, and draws it all.
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 
 import { CLASSES } from '../data/units/classes';
 import { generateLootDrop, isWeaponItem, type Item } from '../data/gear';
@@ -10,11 +10,12 @@ import { AUTO_END_TURN_DELAY_MS, COMBAT_TEXT_COLOR, STUNNED_PAUSE_MS } from '../
 import { hasPointsToSpend, isOnMap, type PartyMemberConfig } from '../data/units/party';
 import { xpToNext, type PartyProgress } from '../data/units/xp';
 import { isAlly, isHostile, type EnemyInstance } from '../data/units/enemies';
+import { isBoss } from '../data/units/bosses';
 import { areaTone } from '../data/combat/areas';
 import { aimPartyAction } from '../data/combat/targeting';
-import { findOpenTilesNear, posKey, samePos, type Pos } from '../data/world/grid';
+import { findOpenTilesNear, isAdjacent, posKey, samePos, type Pos } from '../data/world/grid';
 import { partyWalk, findFollowerSpawns, spreadOut, trailFollowers } from '../data/world/movement';
-import { SANCTUM, SANCTUM_FLOORS, isSanctumWalkable } from '../data/world/sanctum';
+import { SANCTUM, SANCTUM_FLOORS, SANCTUM_RECEPTACLE, isSanctumWalkable } from '../data/world/sanctum';
 import { gameObjectName } from '../data/world/gameObjects';
 import { generateDungeon, isFreeFloor, objectTilesOf, spawnDungeonEnemies, zoneWalkable, type DungeonData, type ZoneData } from '../data/world/dungeonGen';
 import { DUNGEONS, type DungeonKey } from '../data/world/dungeons';
@@ -24,6 +25,11 @@ import { creatureUnit, executeAction, memberUnit, toAction, type CombatUnit } fr
 import { useEnemyTurn, type EnemyActivity, type EnemyAoePreview } from '../hooks/useEnemyTurn';
 import { useFloatingText } from '../hooks/useFloatingText';
 import { useLatest } from '../hooks/useLatest';
+import { useKeyring } from '../hooks/useKeyring';
+import RifterWindow from '../components/RifterWindow';
+import { DORMANT_RIFTER, type RifterState } from '../components/SanctumMap';
+import { RIFT_CLOSE_MS } from '../forge/designs/_rifter';
+import { bossKeyDrop, riftGlowCss } from '../data/world/rifts';
 import { usePartyMembers } from '../hooks/usePartyMembers';
 import { useInventory } from '../hooks/useInventory';
 import { useChests } from '../hooks/useChests';
@@ -203,6 +209,32 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
   const partyCanUse = useCallback((item: Item) => partyCanUseItem(partyRef.current, item), [partyRef]);
 
   const { inventory, takeLoot, equipItem, unequipItem } = useInventory({ party, setParty, spawnFloat });
+  // The rift keys (shared, apart from the inventory, never lost)
+  const keyring = useKeyring();
+  const { addKey } = keyring;
+  // The Sanctum's Rifter: the key set in it and whether its rift is open (dormant whenever the party arrives),
+  // and its window, open while the leader stands by its receptacle
+  const [rifter, setRifter] = useState<RifterState>(DORMANT_RIFTER);
+  const reopenTimer = useRef<number | undefined>(undefined);
+  /**
+   * Open `key`'s rift (the window closes, so the device is seen). Dormant: it wakes. Awake with another key's rift:
+   * the new key goes in the socket at once, the old rift closes, then (RIFT_CLOSE_MS later) the new one opens.
+   */
+  const openRift = (key: DungeonKey) => {
+    setShowRifter(false);
+    if (!rifter.rift) { setRifter({ key, rift: key, phase: 'activate' }); return; }
+    if (key === rifter.key) return;
+    window.clearTimeout(reopenTimer.current);
+    // Mid-swap already: the rift still closing (or showing) stays the one that closes
+    setRifter({ key, rift: rifter.rift, phase: 'close' });
+    reopenTimer.current = window.setTimeout(() => setRifter((r) => (r.phase === 'close' ? { ...r, rift: r.key, phase: 'reopen' } : r)), RIFT_CLOSE_MS);
+  };
+  useEffect(() => () => window.clearTimeout(reopenTimer.current), []);
+  const [showRifter, setShowRifter] = useState(false);
+  useEffect(() => {
+    if (showRifter && (location !== 'sanctum' || !isAdjacent(playerPos, SANCTUM_RECEPTACLE))) setShowRifter(false);
+  }, [showRifter, location, playerPos]);
+  const keysRef = useLatest(keyring.keys);
   const chests = useChests({ location, dungeon, currentZone, combatActive: combat.active, playerPos, partyLevel: progress.level, partyCanUse, takeLoot });
 
   /** Replace the current zone's data in the dungeon (e.g. its dropped items). */
@@ -210,10 +242,19 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
     setDungeon(prev => prev ? { ...prev, zones: prev.zones.map((z, i) => i === currentZoneRef.current ? fn(z) : z) } : null);
   }, [currentZoneRef]);
 
-  /** Pick up the loot pile on `pos` (walking onto it), as much as fits. */
+  /**
+   * Pick up what lies on `pos` (clicked from next to it): a rift key goes on the keyring (never the inventory, so
+   * a full inventory never keeps it); a loot pile goes into the inventory, as much as fits.
+   */
   const handleLootPickup = useCallback((pos: Pos) => {
     if (!zone) return;
     const key = posKey(pos);
+    const riftKey = zone.droppedKeys[key];
+    if (riftKey) {
+      addKey(riftKey);
+      spawnFloat(pos.x, pos.y, DUNGEONS[riftKey].keyName, riftGlowCss(DUNGEONS[riftKey].riftColor));
+      updateCurrentZone(z => ({ ...z, droppedKeys: Object.fromEntries(Object.entries(z.droppedKeys).filter(([k]) => k !== key)) }));
+    }
     const items = zone.droppedItems[key];
     if (!items?.length) return;
 
@@ -225,23 +266,39 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
         ? { ...z.droppedItems, [key]: remaining }
         : Object.fromEntries(Object.entries(z.droppedItems).filter(([k]) => k !== key)),
     }));
-  }, [zone, takeLoot, updateCurrentZone]);
+  }, [zone, takeLoot, updateCurrentZone, addKey, spawnFloat]);
   const lootPickupRef = useLatest(handleLootPickup);
 
-  /** Loot for enemies that just died (any cause), on the tiles they fell, favouring what the party can use. */
+  /**
+   * Loot for enemies that just died (any cause), on the tiles they fell, favouring what the party can use. A boss
+   * also drops a rift key the party doesn't have (and that isn't already lying in this dungeon), if one is left:
+   * on its tile, or the nearest floor tile beside it with nothing lying on it.
+   */
   const dropLoot = useCallback((dead: EnemyInstance[]) => {
     const d = dungeonRef.current;
     if (!d) return;
     const drops: Record<string, Item[]> = {};
+    const keyDrops: { at: Pos; key: DungeonKey }[] = [];
     for (const e of dead) {
       const item = generateLootDrop(d.level, partyLevelRef.current, e.classData.dropChance, partyCanUse);
       if (item) (drops[posKey(e.pos)] ??= []).push(item);
+      if (isBoss(e)) {
+        const lying = [...d.zones.flatMap(z => Object.values(z.droppedKeys)), ...keyDrops.map(k => k.key)];
+        const key = bossKeyDrop(keysRef.current, lying);
+        if (key) keyDrops.push({ at: e.pos, key });
+      }
     }
-    if (Object.keys(drops).length === 0) return;
+    if (Object.keys(drops).length === 0 && keyDrops.length === 0) return;
     updateCurrentZone(z => {
       const merged = { ...z.droppedItems };
       for (const [k, items] of Object.entries(drops)) merged[k] = [...(merged[k] ?? []), ...items];
-      return { ...z, droppedItems: merged };
+      const keys = { ...z.droppedKeys };
+      for (const { at, key } of keyDrops) {
+        const free = (p: Pos) => z.floors.has(posKey(p)) && !merged[posKey(p)]?.length && !keys[posKey(p)];
+        const spot = free(at) ? at : (findOpenTilesNear(at, free, 1, 3)[0] ?? at);
+        keys[posKey(spot)] = key;
+      }
+      return { ...z, droppedItems: merged, droppedKeys: keys };
     });
   }, [partyCanUse, updateCurrentZone]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -260,8 +317,9 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
   const { pendingPoints, setMemberPending, confirmPoints, anyoneLeveling } = usePendingPoints(party, setParty);
 
   useGameKeys({
-    toggleSheet: () => setShowCharSheet(prev => !prev),
+    toggleSheet: () => { if (!showRifter) setShowCharSheet(prev => !prev); },
     escape: () => {
+      if (showRifter) { setShowRifter(false); return; }
       if (showCharSheet) { setShowCharSheet(false); return; }
       if (chests.openChest) { chests.closeChest(); return; }
       if (activeSlot !== null) clearActiveSlot();
@@ -295,6 +353,9 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
     } else {
       setDungeon(null);
       setCurrentZone(0);
+      window.clearTimeout(reopenTimer.current);
+      setRifter(DORMANT_RIFTER); // its rift closed after use: dormant again
+      setShowRifter(false);
       setPlayerPos(SANCTUM.playerStart);
       setFollowerPositions([...SANCTUM.followerStarts]);
       setEnemies([]);
@@ -552,7 +613,9 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
               aims={unitAims}
               moveTargets={moveTargets}
               onMove={handleMove}
-              onEnterDungeon={handleLocationChange}
+              rifter={rifter}
+              onUseRifter={() => setShowRifter(true)}
+              onEnterRift={handleLocationChange}
               activeTarget={activeTarget}
               onAbilityUse={handlePlayerAttack}
               onAbilityDeselect={clearActiveSlot}
@@ -596,11 +659,12 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
               floorColor={preset.floorColor}
               wallColor={preset.wallColor}
               doorObject={preset.doorObject}
-              riftObject={preset.riftObject}
+              riftColor={preset.riftColor}
               enemyAoePreviewTiles={enemyAoePreview?.tiles}
               enemyTargetKey={enemyTargetKey}
               tileTargets={tileTargets}
               droppedItems={zone?.droppedItems}
+              droppedKeys={zone?.droppedKeys}
               onLootClick={handleLootPickup}
               highlightUnitId={hoveredCombatant}
               onReady={onMapReady}
@@ -695,6 +759,13 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
         </div>
       )}
 
+      {showRifter && (
+        // The Rifter: pick a key, open its rift (the window closes so the device is seen waking, or swapping rifts)
+        <RifterWindow keys={keyring.keys} inserted={rifter.key} open={!!rifter.rift}
+          onOpenRift={openRift}
+          onClose={() => setShowRifter(false)} />
+      )}
+
       {showCharSheet && (
         <CharacterSheet
           party={party}
@@ -703,6 +774,9 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
           partyStats={partyAllStats}
           partyBuffs={partyBuffs}
           inventory={inventory}
+          keys={keyring.keys}
+          hasNewKey={keyring.hasNew}
+          onSeeKeys={keyring.seeKeys}
           onClose={() => setShowCharSheet(false)}
           onEquipItem={equipItem}
           onUnequipItem={unequipItem}

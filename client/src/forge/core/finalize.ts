@@ -1,8 +1,16 @@
 import type { Mesh } from './mesh';
 import type { FitSpec } from './types';
 
-/** Scale and position a finished mesh into game units (1 unit = 1 tile). Also writes the standard anchors. */
-export function finalize(m: Mesh, fit: FitSpec): void {
+/**
+ * The scale finalize will give a mesh as it stands now: a design that builds another model into itself at its true
+ * size (embed.ts) divides by it, so its own fit doesn't shrink or grow what it embedded.
+ */
+export function fitScale(m: Mesh, fit: FitSpec): number {
+  return measure(m, fit).s;
+}
+
+/** Where finalize puts the mesh: its center, floor and scale. */
+function measure(m: Mesh, fit: FitSpec) {
   const { min, max } = m.bounds();
   if (!Number.isFinite(min[0])) throw new Error('empty mesh');
 
@@ -25,14 +33,21 @@ export function finalize(m: Mesh, fit: FitSpec): void {
     const floorY = fit.floor === 'origin' ? Math.min(0, min[1]) : min[1];
     const h = max[1] - floorY;
     const s = Math.min(fit.height / h, fit.maxRadius / Math.max(rad, 1e-6));
-    m.xfAll((p) => [(p[0] - cx) * s, (p[1] - floorY) * s, (p[2] - cz) * s], s);
+    return { kind: 'standing' as const, c: [cx, floorY, cz] as const, s, h };
+  }
+  const c = [(min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2] as const;
+  const dim = Math.max(max[0] - min[0], max[1] - min[1], max[2] - min[2]);
+  return { kind: 'item' as const, c, s: fit.size / dim, h: 0 };
+}
+
+/** Scale and position a finished mesh into game units (1 unit = 1 tile). Also writes the standard anchors. */
+export function finalize(m: Mesh, fit: FitSpec): void {
+  const { kind, c, s, h } = measure(m, fit);
+  m.xfAll((p) => [(p[0] - c[0]) * s, (p[1] - c[1]) * s, (p[2] - c[2]) * s], s);
+  if (kind === 'standing') {
     m.anchor('feet', [0, 0, 0]);
     m.anchor('overhead', [0, h * s + 0.12, 0]);
   } else {
-    const c: [number, number, number] = [(min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2];
-    const dim = Math.max(max[0] - min[0], max[1] - min[1], max[2] - min[2]);
-    const s = fit.size / dim;
-    m.xfAll((p) => [(p[0] - c[0]) * s, (p[1] - c[1]) * s, (p[2] - c[2]) * s], s);
     m.anchor('center', [0, 0, 0]);
   }
 }

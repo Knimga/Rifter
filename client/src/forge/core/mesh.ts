@@ -1,6 +1,6 @@
 import type { Vec3, RGB } from './vec';
 import type { Rng } from './rng';
-import type { Halo, MeshData } from './types';
+import type { Halo, MeshData, Tone } from './types';
 
 export type ColorFn = (centroid: Vec3, normal: Vec3) => RGB;
 export interface FaceOpts {
@@ -15,12 +15,24 @@ export interface FaceOpts {
    * gradients, e.g. a blurred glow. Rare; the faceted look is the default.
    */
   vc?: [RGB, RGB, RGB];
+  /**
+   * Painted with the tint the model is drawn in (core/tint.ts: a rift or keystone in its dungeon's color): how
+   * much of the tint and of its deep shade this face adds to its own color (usually black). One Tone for the
+   * face, or one per corner (blended, like vc).
+   */
+  tint?: Tone | [Tone, Tone, Tone];
+  /** A fading part's start color (PartFade: the animation fades the face from this to its own color). */
+  from?: RGB;
 }
 export interface Face {
   v: [Vec3, Vec3, Vec3];
   c: RGB;
   /** Corner colors (same order as v), when the face blends them (FaceOpts.vc). */
   vc?: [RGB, RGB, RGB];
+  /** Tint weights per corner (FaceOpts.tint). */
+  t?: [Tone, Tone, Tone];
+  /** Its fade's start color (FaceOpts.from). */
+  f?: RGB;
   e: number;
   a: number;
   j: number;
@@ -33,7 +45,7 @@ export class Mesh {
   pivots: Record<string, Vec3> = {};
   anchors: Record<string, Vec3> = {};
   /** Halos so far (Mesh.halo); their color in 0..255 until bake. */
-  halos: { p: Vec3; r: number; c: RGB; part: number }[] = [];
+  halos: { p: Vec3; r: number; c: RGB; t?: Tone; from?: RGB; part: number }[] = [];
   private cur = 0;
 
   constructor(readonly R: Rng) {}
@@ -49,6 +61,16 @@ export class Mesh {
     if (pivot) this.pivots[name] = pivot;
   }
 
+  /** The index of part `name` (adding it if new), without making it the current part. */
+  partIndex(name: string): number {
+    let i = this.partNames.indexOf(name);
+    if (i < 0) {
+      i = this.partNames.length;
+      this.partNames.push(name);
+    }
+    return i;
+  }
+
   anchor(name: string, p: Vec3): void {
     this.anchors[name] = p;
   }
@@ -58,8 +80,8 @@ export class Mesh {
    * on the model's own lights (eyes, cores, spores), usually over an emissive face. Placed where given: `xf`
    * doesn't move it (`xfAll` does), so give it its final position.
    */
-  halo(p: Vec3, r: number, c: RGB): void {
-    this.halos.push({ p: [p[0], p[1], p[2]], r, c, part: this.cur });
+  halo(p: Vec3, r: number, c: RGB, tint?: Tone, from?: RGB): void {
+    this.halos.push({ p: [p[0], p[1], p[2]], r, c, ...(tint && { t: tint }), ...(from && { from }), part: this.cur });
   }
 
   /**
@@ -76,18 +98,22 @@ export class Mesh {
     if (l < 1e-7) return; // degenerate (collapsed tip rings etc.)
     const mx = (a[0] + b[0] + c[0]) / 3, my = (a[1] + b[1] + c[1]) / 3, mz = (a[2] + b[2] + c[2]) / 3;
     let vc = o.vc;
+    let tones: [Tone, Tone, Tone] | undefined = o.tint ? (typeof o.tint[0] === 'number' ? [o.tint as Tone, o.tint as Tone, o.tint as Tone] : (o.tint as [Tone, Tone, Tone])) : undefined;
     if (nx * (mx - ctr[0]) + ny * (my - ctr[1]) + nz * (mz - ctr[2]) < 0) {
       const t = b;
       b = c;
       c = t;
       nx = -nx; ny = -ny; nz = -nz;
       if (vc) vc = [vc[0], vc[2], vc[1]]; // corner colors follow their corners
+      if (tones) tones = [tones[0], tones[2], tones[1]];
     }
     const color = typeof col === 'function' ? col([mx, my, mz], [nx * (1 / l), ny * (1 / l), nz * (1 / l)]) : col;
     this.faces.push({
       v: [[a[0], a[1], a[2]], [b[0], b[1], b[2]], [c[0], c[1], c[2]]],
       c: color,
       vc,
+      t: tones,
+      f: o.from,
       e: o.e ?? 0,
       a: o.a ?? 1,
       j: 1 + (this.R() - 0.5) * (o.j ?? 0.16),
@@ -136,7 +162,15 @@ export function bake(m: Mesh): MeshData {
   const emissive = new Float32Array(n);
   const alpha = new Float32Array(n);
   const part = new Uint8Array(n);
+  // Tint weights (bright, deep) per corner, with the face's jitter, like its color: only if a face is tinted
+  const tint = m.faces.some((f) => f.t) ? new Float32Array(n * 6) : undefined;
+  // Fade start colors (FaceOpts.from): only if a face fades; the others start at their own color
+  const fromColors = m.faces.some((f) => f.f) ? new Float32Array(n * 9) : undefined;
   m.faces.forEach((f, i) => {
+    if (fromColors)
+      for (let v = 0; v < 3; v++)
+        for (let k = 0; k < 3; k++) fromColors[i * 9 + v * 3 + k] = Math.max(0, Math.min(1, ((f.f ?? (f.vc ? f.vc[v] : f.c))[k] / 255) * f.j));
+    if (tint && f.t) for (let v = 0; v < 3; v++) { tint[i * 6 + v * 2] = f.t[v][0] * f.j; tint[i * 6 + v * 2 + 1] = f.t[v][1] * f.j; }
     for (let v = 0; v < 3; v++) {
       for (let k = 0; k < 3; k++) {
         positions[i * 9 + v * 3 + k] = f.v[v][k];
@@ -154,10 +188,15 @@ export function bake(m: Mesh): MeshData {
     emissive,
     alpha,
     part,
+    ...(tint && { tint }),
+    ...(fromColors && { fromColors }),
     partNames: [...m.partNames],
     pivots: { ...m.pivots },
     anchors: { ...m.anchors },
-    halos: m.halos.map((h): Halo => ({ p: h.p, r: h.r, c: [h.c[0] / 255, h.c[1] / 255, h.c[2] / 255], part: h.part })),
+    halos: m.halos.map((h): Halo => ({
+      p: h.p, r: h.r, c: [h.c[0] / 255, h.c[1] / 255, h.c[2] / 255], ...(h.t && { t: h.t }),
+      ...(h.from && { from: [h.from[0] / 255, h.from[1] / 255, h.from[2] / 255] as [number, number, number] }), part: h.part,
+    })),
     bounds: m.bounds(),
   };
 }

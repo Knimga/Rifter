@@ -1,6 +1,6 @@
 import * as THREE from 'three';
-import type { Model, PartSpin, PartTurn } from '../../forge/core/types';
-import { easeAnimation, type AnimationProgress } from '../../forge/core/animate';
+import type { Model, PartGrow, PartSpin, PartTurn } from '../../forge/core/types';
+import { easeAnimation, growScale, type AnimationProgress } from '../../forge/core/animate';
 
 /** How much brighter a glowing face is than its color (fully emissive faces, and the glow part of partly emissive ones). */
 const GLOW_BOOST = 1.12;
@@ -111,8 +111,11 @@ function sub(model: Model, idx: Uint32Array, withAlpha: boolean, boost = 1, orig
   return geo;
 }
 
-/** The halos (MeshData.halos) of the part `partIdx` as one mesh of quads, positioned relative to `origin`, added to `g`. */
-function addHalos(g: THREE.Object3D, model: Model, partIdx: (part: number) => boolean, origin: readonly number[] = [0, 0, 0]): void {
+/**
+ * The halos (MeshData.halos) of the part `partIdx` as one mesh of quads, positioned relative to `origin`, added to `g`.
+ * `fading`: the part fades (PartFade), so the mesh also keeps its halos' start colors (Halo.from) for animateParts.
+ */
+function addHalos(g: THREE.Object3D, model: Model, partIdx: (part: number) => boolean, origin: readonly number[] = [0, 0, 0], fading = false): void {
   const halos = model.mesh.halos.filter((h) => partIdx(h.part));
   if (!halos.length) return;
   // Two triangles per halo, each corner at its center (the shader moves it out to its corner)
@@ -134,23 +137,49 @@ function addHalos(g: THREE.Object3D, model: Model, partIdx: (part: number) => bo
   geo.setAttribute('haloCorner', new THREE.BufferAttribute(corner, 2));
   geo.setAttribute('haloRadius', new THREE.BufferAttribute(radius, 1));
   const m = new THREE.Mesh(geo, halo);
+  if (fading) {
+    const from = new Float32Array(n * 3);
+    halos.forEach((h, i) => {
+      const c = (h.from ?? h.c).map(srgbToLinear);
+      for (let k = 0; k < 6; k++) for (let a = 0; a < 3; a++) from[(i * 6 + k) * 3 + a] = c[a];
+    });
+    m.userData.fade = { from, to: col.slice() } satisfies FadeColors;
+  }
   m.renderOrder = 2; // after the translucent faces
   m.frustumCulled = false; // its bounds are the halo centers only
   g.add(m);
 }
 
-/** Up to 3 meshes (solid, glowing, translucent) for the triangles `tris`, positioned relative to `origin`, added to `g`. */
-function addMeshes(g: THREE.Object3D, model: Model, tris: number[], origin?: readonly number[]): void {
-  const { emissive, alpha } = model.mesh;
+/** A fading mesh's vertex colors at the fade's start and end (animateParts blends its color attribute between them). */
+interface FadeColors {
+  from: Float32Array;
+  to: Float32Array;
+}
+
+/**
+ * Up to 3 meshes (solid, glowing, translucent) for the triangles `tris`, positioned relative to `origin`, added to `g`.
+ * `fading`: they belong to a fading part (PartFade), so each also keeps its start colors (MeshData.fromColors).
+ */
+function addMeshes(g: THREE.Object3D, model: Model, tris: number[], origin?: readonly number[], fading = false): void {
+  const { emissive, alpha, fromColors } = model.mesh;
   const solid: number[] = [], glow: number[] = [], clear: number[] = [];
   for (const t of tris) (emissive[t] >= 0.5 ? glow : alpha[t] < 0.99 ? clear : solid).push(t);
-  if (solid.length) g.add(new THREE.Mesh(sub(model, Uint32Array.from(solid), false, 1, origin), lit));
-  if (glow.length) g.add(new THREE.Mesh(sub(model, Uint32Array.from(glow), false, GLOW_BOOST, origin), unlit));
-  if (clear.length) {
-    const m = new THREE.Mesh(sub(model, Uint32Array.from(clear), true, 1, origin), glass);
-    m.renderOrder = 1;
+  const fromModel = fading && fromColors ? { ...model, mesh: { ...model.mesh, colors: fromColors } } : null;
+  const add = (list: number[], withAlpha: boolean, boost: number, material: THREE.Material, order = 0) => {
+    if (!list.length) return;
+    const idx = Uint32Array.from(list);
+    const m = new THREE.Mesh(sub(model, idx, withAlpha, boost, origin), material);
+    m.renderOrder = order;
+    if (fromModel) {
+      const to = (m.geometry.getAttribute('color').array as Float32Array).slice();
+      const from = sub(fromModel, idx, withAlpha, boost, origin).getAttribute('color').array as Float32Array;
+      m.userData.fade = { from, to } satisfies FadeColors;
+    }
     g.add(m);
-  }
+  };
+  add(solid, false, 1, lit);
+  add(glow, false, GLOW_BOOST, unlit);
+  add(clear, true, 1, glass, 1);
 }
 
 /** A moving part's scene object (it spins, PartSpin, or animates, PartAnimation), and what posing it needs. */
@@ -161,6 +190,10 @@ interface PartObject {
   spin?: PartSpin;
   /** The animations that turn this part, with its turn in each. */
   turns: { animation: string; turn: PartTurn }[];
+  /** The animations that grow this part (PartGrow). */
+  grows: { animation: string; grow: PartGrow }[];
+  /** The animations that fade this part's glow (PartFade), and its meshes' colors (with their last blend). */
+  fades: { animation: string; meshes: { mesh: THREE.Mesh; colors: FadeColors }[]; k: number }[];
 }
 
 /**
@@ -172,9 +205,11 @@ interface PartObject {
  */
 export function toThree(model: Model): THREE.Group {
   const { part, partNames, pivots, triCount } = model.mesh;
+  const animations = model.animations ?? [];
+  const fadingParts = new Set(animations.flatMap((a) => (a.fades ?? []).map((f) => f.part)));
   const moving = [...new Set([
     ...(model.motion ?? []).map((s) => s.part),
-    ...(model.animations ?? []).flatMap((a) => a.turns.map((t) => t.part)),
+    ...animations.flatMap((a) => [...(a.turns ?? []), ...(a.grows ?? []), ...(a.fades ?? [])].map((t) => t.part)),
   ])].filter((p) => partNames.includes(p));
   const owner = (t: number) => moving.indexOf(partNames[part[t]]);
   const groups: number[][] = Array.from({ length: moving.length + 1 }, () => []);
@@ -190,13 +225,17 @@ export function toThree(model: Model): THREE.Group {
     const obj = new THREE.Group();
     obj.matrixAutoUpdate = false;
     obj.matrix.makeTranslation(pivot[0], pivot[1], pivot[2]);
-    addMeshes(obj, model, groups[k + 1], pivot);
-    addHalos(obj, model, (p) => partNames[p] === name, pivot);
+    const fading = fadingParts.has(name);
+    addMeshes(obj, model, groups[k + 1], pivot, fading);
+    addHalos(obj, model, (p) => partNames[p] === name, pivot, fading);
     g.add(obj);
+    const fadeMeshes = obj.children.flatMap((c) => (c instanceof THREE.Mesh && c.userData.fade ? [{ mesh: c, colors: c.userData.fade as FadeColors }] : []));
     return {
       obj, part: name, pivot,
       spin: model.motion?.find((s) => s.part === name),
-      turns: (model.animations ?? []).flatMap((a) => a.turns.filter((t) => t.part === name).map((turn) => ({ animation: a.name, turn }))),
+      turns: animations.flatMap((a) => (a.turns ?? []).filter((t) => t.part === name).map((turn) => ({ animation: a.name, turn }))),
+      grows: animations.flatMap((a) => (a.grows ?? []).filter((t) => t.part === name).map((grow) => ({ animation: a.name, grow }))),
+      fades: animations.filter((a) => (a.fades ?? []).some((t) => t.part === name)).map((a) => ({ animation: a.name, meshes: fadeMeshes, k: 1 })),
     };
   });
   if (parts.length) g.userData.parts = parts;
@@ -209,7 +248,7 @@ const partsOf = (o: THREE.Object3D) => (o.userData.parts as PartObject[] | undef
 export const hasSpinningParts = (o: THREE.Object3D): boolean => partsOf(o).some((p) => p.spin);
 
 /** True if the object has parts its one-time animations (PartAnimation) move. */
-export const hasAnimations = (o: THREE.Object3D): boolean => partsOf(o).some((p) => p.turns.length);
+export const hasAnimations = (o: THREE.Object3D): boolean => partsOf(o).some((p) => p.turns.length || p.grows.length || p.fades.length);
 
 export type { AnimationProgress };
 
@@ -218,15 +257,33 @@ const m1 = new THREE.Matrix4(), m2 = new THREE.Matrix4();
 
 /**
  * Pose an object's moving parts: spinning parts (PartSpin) at time `sec`, and each one-time animation's
- * parts (PartAnimation) at its `progress`.
+ * parts (PartAnimation) at its `progress`: turned, grown, their glow faded.
  */
 export function animateParts(o: THREE.Object3D, sec: number, progress: AnimationProgress = {}): void {
-  for (const { obj, pivot, spin, turns } of partsOf(o)) {
+  for (const { obj, pivot, spin, turns, grows, fades } of partsOf(o)) {
     obj.matrix.makeTranslation(pivot[0], pivot[1], pivot[2]);
-    // Animation turns first (about the pivot), then any spin within that
+    // Animation turns first (about the pivot), then growth, then any spin within that
     for (const { animation, turn } of turns) {
       const k = easeAnimation(progress[animation] ?? 0);
       if (k > 0) obj.matrix.multiply(m2.makeRotationAxis(AXES[turn.axis], (turn.angleDeg * Math.PI / 180) * k));
+    }
+    // An animation not played (not in `progress`) changes nothing: see AnimationProgress
+    for (const { animation, grow } of grows) {
+      if (!(animation in progress)) continue;
+      const k = Math.max(1e-4, growScale(progress[animation], grow)); // never a zero scale (a singular matrix)
+      if (k < 1) obj.matrix.multiply(m1.makeScale(k, k, k));
+    }
+    // Fading glow: each mesh's colors blended from its start to its own (only when the blend changes)
+    for (const fade of fades) {
+      const k = fade.animation in progress ? easeAnimation(progress[fade.animation]) : 1; // not played: its own colors
+      if (k === fade.k) continue;
+      fade.k = k;
+      for (const { mesh, colors } of fade.meshes) {
+        const attr = mesh.geometry.getAttribute('color') as THREE.BufferAttribute;
+        const out = attr.array as Float32Array;
+        for (let i = 0; i < out.length; i++) out[i] = colors.from[i] + (colors.to[i] - colors.from[i]) * k;
+        attr.needsUpdate = true;
+      }
     }
     if (spin) {
       const f = spin.frame ?? [1, 1, 1];

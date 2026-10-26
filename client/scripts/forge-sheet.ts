@@ -11,6 +11,8 @@
 //   --weapon "<type>"   class designs: hold this weapon type (posed for its hold), e.g. "Crossbows";
 //                       default = the class's starting gear
 //   --anim <name>       designs with that one-time animation (PartAnimation): drawn at its end pose
+//   --tint <dungeon>    tinted models (Rifts & Keys, the active Rifter): paint them in this dungeon's riftColor (default: the first
+//                       dungeon), or a color given as #rrggbb
 import { writeFileSync } from 'node:fs';
 import { ITEM_GROUND_PITCH, SHEET_SHADING, itemRestLift, keyLightDir, layItem, lootYaw } from '../src/forge/core/stage-config';
 import { GAME_CAMERA, viewProject, type ViewAngles } from '../src/viewEngine/camera';
@@ -22,12 +24,20 @@ import { buildPreview } from '../src/forge/equip';
 import type { WeaponType } from '../src/data/gear/types';
 import { encodePNG } from './png';
 import { posedHalos, posedPositions } from '../src/forge/core/animate';
+import { isTinted, tintModel } from '../src/forge/core/tint';
+import type { RGB } from '../src/forge/core/vec';
+import { DUNGEONS } from '../src/data/world/dungeons';
 
 const args = process.argv.slice(2);
 const flag = (n: string) => args.includes(`--${n}`);
 const opt = (n: string, d: string) => (args.includes(`--${n}`) ? args[args.indexOf(`--${n}`) + 1] : d);
 
 const only = opt('design', '');
+// Rifts & Keys are drawn in a dungeon's color (or one given as #rrggbb), as the game draws them
+const tintArg = opt('tint', Object.keys(DUNGEONS)[0]);
+const tint: RGB = tintArg.startsWith('#')
+  ? ([1, 3, 5].map((i) => parseInt(tintArg.slice(i, i + 2), 16)) as RGB)
+  : (DUNGEONS[tintArg] ?? (() => { throw new Error(`--tint: no dungeon '${tintArg}' (${Object.keys(DUNGEONS).join(', ')})`); })()).riftColor;
 const seedArg = opt('seeds', '6');
 const seeds = seedArg.includes(',') ? seedArg.split(',').map(Number) : Array.from({ length: Number(seedArg) }, (_, i) => i + 1);
 const yaws = opt('yaws', '0').split(',').map((d) => (Number(d) * Math.PI) / 180);
@@ -187,7 +197,8 @@ for (const { design, source } of loaded) {
   const cells: Cell[] = [];
   for (const seed of oneLook(design) ? [ITEM_SEED] : seeds)
     for (const yaw of yaws) {
-      const model = buildPreview(design, seed, approvedById, (opt('weapon', '') || undefined) as WeaponType | undefined);
+      const built = buildPreview(design, seed, approvedById, (opt('weapon', '') || undefined) as WeaponType | undefined);
+      const model = isTinted(built) ? tintModel(built, tint) : built;
       cells.push({ label: '', pix: renderCell(model, design, yaw) });
       manifest.push(`${design.id}${source === 'draft' ? '[draft]' : ''} seed=${seed} yaw=${Math.round((yaw * 180) / Math.PI)} tris=${model.mesh.triCount} "${model.name}"`);
     }

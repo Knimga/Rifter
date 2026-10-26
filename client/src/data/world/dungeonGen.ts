@@ -1,5 +1,6 @@
 import type { EnemyClassData, EnemyInstance } from '../units/enemies';
 import type { Item } from '../gear';
+import type { RGB } from '../../forge/core/vec';
 import { generateEnemyInstance } from '../units/enemies';
 import { posKey, reachableTiles, type Pos } from './grid';
 import { chance, pick, randFloat, randInt, shuffle } from '../random';
@@ -32,6 +33,8 @@ export interface ZoneData {
   /** Wall tiles standing in the middle of rooms (IslandConfig): never door spots. */
   islands: Set<string>;
   droppedItems: Record<string, Item[]>; // "x,y" → items dropped at that tile
+  /** "x,y" → the rift key lying on that tile (a dungeon key: whose key it is), dropped by a boss. One per tile. */
+  droppedKeys: Record<string, string>;
 }
 
 /** A treasure chest on the map: its id (keys its contents), zone, tile, look (GAME_OBJECTS id) and the floor side its lock faces. */
@@ -59,7 +62,7 @@ export interface DungeonData {
 /**
  * Tiles of a zone that a game object stands on (the exit rift, chests): nobody walks onto or through
  * them, party or enemy. They stay floor (drawn as floor; they don't block sight or AoE). The Sanctum's
- * rifts are handled the same way by isSanctumWalkable.
+ * blockers are handled the same way by isSanctumWalkable.
  */
 export const objectTilesOf = (d: DungeonData, zone: ZoneData): Set<string> => new Set([
   ...(zone.id === d.endZoneId ? [posKey(d.riftPos)] : []),
@@ -133,7 +136,13 @@ export interface DungeonConfig {
   floorColor: string;     // hex color for walkable floor tiles
   wallColor: string;      // hex color for wall/non-floor tiles
   doorObject: string;     // GAME_OBJECTS id of the doors between zones
-  riftObject: string;   // GAME_OBJECTS id of the exit rift in the boss zone
+  /**
+   * The dungeon's color: its rifts (the exit in its boss zone, the Sanctum's way in) and its keystone are painted
+   * in it (data/world/rifts.ts). Bright and saturated: the rift's deeper swirl and floor pool derive from it.
+   */
+  riftColor: RGB;
+  /** Its rift key's name ("Necrotic Key"): the key that opens a rift to it (data/world/rifts.ts), painted in riftColor. */
+  keyName: string;
   chestObject: string;    // GAME_OBJECTS id of the treasure chest in the boss room
 }
 
@@ -435,7 +444,7 @@ function generateZone(id: number, width: number, height: number, zoneConfig: Zon
     connectBSP(root, floors, zoneConfig.corridorWidth);
   }
 
-  const zone: ZoneData = { id, width, height, floors, rooms, doors: [], islands: new Set(), droppedItems: {} };
+  const zone: ZoneData = { id, width, height, floors, rooms, doors: [], islands: new Set(), droppedItems: {}, droppedKeys: {} };
   if (zoneConfig.islands) placeIslands(zone, zoneConfig.islands);
   return zone;
 }
@@ -467,7 +476,7 @@ function generateBossZoneMain(id: number, config: BossZoneConfig): { zone: ZoneD
   if (config.layout === 'caverns') carveCavern(floors, bossRoom);
   else fillRect(floors, bossRoom);
   return {
-    zone: { id, width: zoneSize, height: zoneSize, floors, rooms: [bossRoom], doors: [], islands: new Set(), droppedItems: {} },
+    zone: { id, width: zoneSize, height: zoneSize, floors, rooms: [bossRoom], doors: [], islands: new Set(), droppedItems: {}, droppedKeys: {} },
     bossRoom,
   };
 }

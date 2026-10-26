@@ -1,5 +1,5 @@
 import type { Design } from '../../core/types';
-import { blob, box, frustum } from '../../core/primitives';
+import { blob, box, frustum, tube } from '../../core/primitives';
 import { add, mixC, mulC, rotZ, type RGB, type Vec3 } from '../../core/vec';
 
 // Identity: always ivory bone (narrow range), armed, with a shield and no helmet. Seeds vary build,
@@ -58,7 +58,7 @@ const design: Design = {
           const t = (i / 3) * Math.PI;
           return [sx * w * Math.sin(t), y - (i / 3) * 0.07, -d * Math.cos(t) - 0.02];
         });
-        for (let i = 0; i < 3; i++) frustum(m, pts[i], pts[i + 1], 0.024, 0.024, 3, bone, { caps: false }); // 3-sided: ~1.5 px wide in game
+        tube(m, pts, 0.024, 0.024, 3, bone, { caps: false }); // 3-sided: ~1.5 px wide in game
       }
     }
     box(m, [0, 1.47, 0.19], [0.05, 0.36, 0.03], bone, 0.1); // sternum

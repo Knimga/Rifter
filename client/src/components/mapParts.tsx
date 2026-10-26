@@ -195,6 +195,25 @@ export function useStableHandler<A extends unknown[]>(fn: (...args: A) => void):
 }
 
 /** A map's floor grid: `tile(p)` draws each tile (a FloorTile), row by row. */
+/**
+ * Tiles deep in the fog: unseen, and no tile around them seen either (`known`: in sight now, or seen before). A
+ * map's HTML floor draws them in the fog's color, so the layout never shows through, even before the 3D layer
+ * (and its fog) has drawn. The fog is fully dark over them anyway; the tiles at its edge keep their colors, so
+ * its soft edge looks as it should.
+ */
+export function deepFogTiles(fog: { visible: ReadonlySet<string>; explored: ReadonlySet<string> }, cols: number, rows: number): Set<string> {
+  const deep = new Set<string>();
+  const known = (x: number, y: number) => fog.visible.has(`${x},${y}`) || fog.explored.has(`${x},${y}`);
+  for (let x = 0; x < cols; x++) {
+    for (let y = 0; y < rows; y++) {
+      let near = false;
+      for (let dx = -1; dx <= 1 && !near; dx++) for (let dy = -1; dy <= 1 && !near; dy++) near = known(x + dx, y + dy);
+      if (!near) deep.add(`${x},${y}`);
+    }
+  }
+  return deep;
+}
+
 export function FloorGrid({ cols, rows, tile }: { cols: number; rows: number; tile: (p: Pos) => ReactNode }) {
   return (
     <>

@@ -1,5 +1,6 @@
-// Interactable things on the map that aren't units or loot: doors, rifts, and later treasure chests,
+// Interactable things on the map that aren't units or loot: doors, treasure chests, the Rifter, and later
 // craftbenches and the like. Each is drawn by its forge design (`model`, forge category "Game Objects").
+// Rifts are their own: one model in every dungeon's color (data/world/rifts.ts).
 import type { ModelLink } from '../../forge/core/types';
 
 export interface GameObjectData {
@@ -28,12 +29,14 @@ export const gameObjectGlow = (id: string): string => gameObject(id).glow ?? 'va
 export const GAME_OBJECTS: GameObjectData[] = [
   // Connects two dungeon zones; sits in a wall tile, facing the floor tile it opens onto
   { id: 'heavy-door', name: 'Heavy Door', model: 'object.heavy-door' },
-  // Travels between the Sanctum and the dungeon (the Sanctum's way in, a dungeon's way out). Rifts of
-  // other colors are their own entries (same shape: designs/_rift.ts); where one leads is set by the
-  // map that places it, not here.
-  { id: 'necrotic-rift', name: 'Necrotic Rift', model: 'object.necrotic-rift', glow: 'var(--rift-rift-necrotic)' },
-  { id: 'fire-rift', name: 'Fire Rift', model: 'object.fire-rift', glow: 'var(--rift-rift-fire)' },
-  { id: 'fungal-rift', name: 'Fungal Rift', model: 'object.fungal-rift', glow: 'var(--rift-rift-fungal)' },
+  // The Sanctum's arcane device for opening rifts: a keystone set in it opens a rift to that keystone's place.
+  // Three tiles in a line, all unwalkable: an instrument plinth (left, from the party's view), rift
+  // stabilizer struts (middle: an opened rift stands there, turned like the device) and the key receptacle
+  // (right). Dormant: no keystone, no rift. Active: a keystone set and its rift open, its lights awake; drawn in
+  // the opened dungeon's riftColor (MapObject.tint), and swapped in for the dormant one with played ['activate']
+  // (its waking animation). Same shape: designs/_rifter.ts.
+  { id: 'rifter', name: 'Rifter', model: 'object.rifter' },
+  { id: 'rifter-active', name: 'Rifter (Active)', model: 'object.rifter-active' },
   // A plain wooden chest bound in iron, locked; stands on a floor tile, its lock facing the open side
   { id: 'basic-treasure-chest', name: 'Basic Treasure Chest', model: 'object.basic-treasure-chest' },
 ];

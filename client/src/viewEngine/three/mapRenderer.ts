@@ -130,7 +130,7 @@ export class MapModelRenderer {
   }
 
   /**
-   * The fog of war (null: none, e.g. the Sanctum). Tiles that change fade in or out. Its clouds drift only
+   * The fog of war (null: none; the Sanctum's is still, darkening only its edges). Tiles that change fade in or out. Its clouds drift only
    * while a party member (a `viewer` unit) moves; other redraws (an ability, a chest opening) leave them still.
    */
   setFog(fog: FogInput | null): void {
@@ -164,6 +164,9 @@ export class MapModelRenderer {
         e = { ...e, model: u.model, obj: makeObject(u, this.fog) };
         this.scene.add(e.obj);
         this.entries.set(u.id, e);
+        // The new object where the unit is drawn now, facing its way (a fresh object starts at the origin)
+        this.place(u.id, e);
+        e.obj.rotation.y = e.yaw;
         animateParts(e.obj, 0, progressOf(e));
         changed = true;
       }
@@ -231,7 +234,6 @@ export class MapModelRenderer {
     let viewerMoving = false;
     for (const [id, e] of this.entries) {
       if (e.viewer && e.move) viewerMoving = true;
-      // Moving parts (e.g. a rift's swirl) keep the loop running while the unit is on the map
       // Spinning parts keep the loop running while the unit is on the map; a one-time animation while it plays
       const playing = Object.values(e.anims).some((a) => a.t < a.ms);
       for (const a of Object.values(e.anims)) a.t = Math.min(a.ms, a.t + dt);

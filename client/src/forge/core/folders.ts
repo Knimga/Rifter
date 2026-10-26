@@ -11,6 +11,7 @@ export const CATEGORY_FOLDER: Record<Category, string> = {
   armor: 'armor',
   offhand: 'offhands',
   object: 'objects',
+  rift: 'rifts',
 };
 
 /**

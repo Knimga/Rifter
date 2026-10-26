@@ -2,7 +2,8 @@
 // enemy class too (e.g. a spore that also roams in packs). Configured like enemy classes (CreatureClassData:
 // attributes, armor, abilities, passives, model) and run by the same AI, on their summoner's side. Their level
 // is their summoner's.
-import { BOSS_CLASSES, ENEMY_CLASSES, generateEnemyInstance, type CreatureClassData, type EnemyInstance } from './enemies';
+import { ENEMY_CLASSES, generateEnemyInstance, type CreatureClassData, type EnemyInstance } from './enemies';
+import { BOSS_CLASSES } from './bosses';
 import type { Pos } from '../world/grid';
 import { warnIgnoredEffects } from '../combat/abilities';
 

@@ -15,6 +15,8 @@ export interface FogInput {
   rows: number;
   visible: ReadonlySet<string>;
   explored: ReadonlySet<string>;
+  /** It never changes (the Sanctum's: only darkening the map's edges): its clouds don't drift. */
+  still?: boolean;
 }
 
 /** How much a tile seen before (but not now) is fogged: dimmed, still readable. */
@@ -92,6 +94,10 @@ export class FogOfWar {
   private fadeStart = 0;
   /** The clouds' clock: advances only while the map is drawing (see step). */
   private driftMs = 0;
+  /** The fog never changes (FogInput.still): no drift. */
+  private still = false;
+  /** A fade is running (set changed some tile): step blends toward the targets until it ends. */
+  private fading = false;
   private lastStep = 0;
   private cols = 0;
   private rows = 0;
@@ -140,18 +146,20 @@ export class FogOfWar {
     });
   }
 
-  /** Whether there is fog to draw (in a dungeon). */
+  /** Whether there is fog to draw. */
   get active(): boolean {
     return this.uniforms.fogOn.value > 0.5;
   }
 
-  /** New fog (null: none, e.g. the Sanctum). Changed tiles fade toward their new state (see step). */
+  /** New fog (null: none). Changed tiles fade toward their new state (see step). */
   set(fog: FogInput | null): void {
     if (!fog) {
       this.uniforms.fogOn.value = 0;
       this.sheet.visible = false;
+      this.fading = false;
       return;
     }
+    this.still = !!fog.still;
     if (fog.cols !== this.cols || fog.rows !== this.rows) this.resize(fog.cols, fog.rows);
     for (let y = 0; y < fog.rows; y++) {
       for (let x = 0; x < fog.cols; x++) {
@@ -166,6 +174,7 @@ export class FogOfWar {
     if (!this.active) this.current.set(this.target);
     this.from.set(this.current);
     this.fadeStart = performance.now();
+    this.fading = this.target.some((v, i) => v !== this.current[i]);
     this.uniforms.fogOn.value = 1;
     this.sheet.visible = true;
     this.upload();
@@ -179,9 +188,12 @@ export class FogOfWar {
   step(now: number, drifting: boolean): boolean {
     const gap = this.lastStep ? now - this.lastStep : 0;
     this.lastStep = now;
-    if (drifting) this.driftMs += Math.min(gap, MAX_DRIFT_STEP_MS);
-    this.uniforms.fogTime.value = this.driftMs / 1000;
-    if (!this.active) return false;
+    if (drifting && !this.still) {
+      this.driftMs += Math.min(gap, MAX_DRIFT_STEP_MS);
+      this.uniforms.fogTime.value = this.driftMs / 1000;
+    }
+    // Only while a fade runs: blend every tile toward its target (nothing to do once it has ended)
+    if (!this.active || !this.fading) return false;
     const t = Math.min(1, (now - this.fadeStart) / FADE_MS);
     let changing = false;
     for (let i = 0; i < this.current.length; i++) {
@@ -189,6 +201,7 @@ export class FogOfWar {
       if (v !== this.current[i]) { this.current[i] = v; changing = true; }
     }
     if (changing) this.upload();
+    if (t >= 1) this.fading = false;
     return t < 1;
   }
 

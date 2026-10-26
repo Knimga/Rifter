@@ -49,7 +49,7 @@ The forge folder holds the forge UI and the link between its models and game dat
 4. Item rarity glow (Superior and up) is applied by the renderer, never baked into a mesh. Loot never animates.
 
 ## Linking designs to game objects
-Every enemy class, item base (weapon, armor slot, shield) and class has a required `model` field on its own data entry: the id of its design.
+Every enemy class, item base (weapon, armor slot, shield), class and game object has a required `model` field on its own data entry: the id of its design. The Rift and the Keystone are one tinted model each (`data/world/rifts.ts`): every dungeon's rifts and key are drawn with them, painted in its `riftColor` (see the contract's Rifts & Keys).
 
 ```ts
 model: 'creature.zombie',
@@ -65,7 +65,7 @@ model: 'creature.zombie',
    (run both from `client/`).
 2. You open **`/dev/forge`** on the dev server (`npm run dev`, then `http://localhost:5173/dev/forge`).
    - Left: designs by category with approved / draft / new badges, and whether the data entry links the design.
-   - Center: items show their one look; creatures show a page of seeds (each a possible instance); classes show one row per hold. Game camera (or icon / top / side), a turntable and an 8-direction walk test, wireframe, and a 1×1 tile reference. Click a cell to focus it.
+   - Center: items show their one look; creatures show a page of seeds (each a possible instance); classes show one row per hold. Tinted models (Rifts & Keys, the active Rifter) get a dungeon menu and a color picker for the color they are shown in. Game camera (or icon / top / side), a turntable and an 8-direction walk test, wireframe, and a 1×1 tile reference. Click a cell to focus it.
    - Right: **Approve / Discard** when a draft exists (Current vs Draft side by side), and the focused model's name, seed and triangle count.
    - **Snapshot** writes the current view to `client/forge-snapshots/` so Claude Code can look at it.
    - The URL keeps the state (`?design=creature.skeleton&seed=7&count=12&cam=game`), so a view can be shared in one line.

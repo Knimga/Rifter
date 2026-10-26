@@ -6,7 +6,7 @@ const RIFT_COLORS = [
   'void', 'sunk', 'panel', 'raised', 'raised-hi',
   'divider', 'seam', 'line', 'edge', 'edge-hi', 'rim', 'rim-hi',
   'bright', 'ink', 'soft', 'muted', 'label', 'off', 'faint',
-  'hp', 'mp', 'up', 'down', 'warn', 'affix', 'unusable', 'active', 'ally', 'foe', 'acting', 'loot', 'portal',
+  'hp', 'mp', 'up', 'down', 'warn', 'affix', 'unusable', 'active', 'ally', 'foe', 'acting', 'loot', 'keyname',
 ];
 
 export default {

@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import type { Design, Model } from '../../forge/core/types';
 import { buildModel } from '../../forge/core/build';
 import { ITEM_SEED } from '../../forge/core/link';
+import { tintModel } from '../../forge/core/tint';
+import type { RGB } from '../../forge/core/vec';
 import { addForgeLights, fitIconCamera } from './stage';
 import { disposeObject, toThree } from './toThree';
 
@@ -42,10 +44,16 @@ export class IconRenderer {
 
 let shared: IconRenderer | null = null;
 
-/** Icon (PNG data URL) of an item design. Every item of a design looks the same, so one icon serves them all. */
-export function renderItemIcon(design: Design): string {
+/**
+ * Icon (PNG data URL) of an item design. Every item of a design looks the same, so one icon serves them all (one
+ * per color, for a tinted model such as a rift key: `tint`). Drawn without its halos: on the icon's transparent
+ * canvas a halo wider than the model fills the frame with a dark square (an icon gets its glow from CSS instead).
+ */
+export function renderItemIcon(design: Design, tint?: RGB): string {
   shared ??= new IconRenderer();
-  return shared.render(buildModel(design, ITEM_SEED));
+  const built = buildModel(design, ITEM_SEED);
+  const model = tint ? tintModel(built, tint) : built;
+  return shared.render({ ...model, mesh: { ...model.mesh, halos: [] } });
 }
 
 /** How a portrait frames a standing character: turned slightly to the viewer's right, head and shoulders. */

@@ -49,6 +49,19 @@ export function frustum(m: Mesh, p0: Vec3, p1: Vec3, r0: number, r1: number, n: 
   loft(m, [ringPts(p0, u, r0, n), ringPts(p1, u, r1, n)], col, o);
 }
 
+/**
+ * A tube along a path of points: a tapered prism (frustum) per segment, its radius going from `r0` at the first
+ * point to `r1` at the last (the same for a constant tube), or (`perSegment`) from r0 to r1 along each segment on
+ * its own. Struts, rails, rings (a closed path repeats its first point), ribs, a staff's jointed shaft.
+ */
+export function tube(m: Mesh, pts: Vec3[], r0: number, r1: number, sides: number, col: Col, o: PrimOpts & { perSegment?: boolean } = {}): void {
+  const { perSegment, ...face } = o;
+  const last = pts.length - 1;
+  const r = (t: number) => r0 + (r1 - r0) * t;
+  for (let i = 0; i < last; i++)
+    frustum(m, pts[i], pts[i + 1], perSegment ? r0 : r(i / last), perSegment ? r1 : r((i + 1) / last), sides, col, face);
+}
+
 /** Axis-aligned box with optional corner jitter (jit = fraction of size). */
 export function box(m: Mesh, c: Vec3, s: Vec3, col: Col, jit = 0, o: FaceOpts = {}): void {
   const P: Vec3[] = [];

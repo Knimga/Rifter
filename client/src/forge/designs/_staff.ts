@@ -1,6 +1,6 @@
 // Staff shape (Staves), shared by every staff design (e.g. plain-staff.ts). Wands have their own shape (_wand.ts).
 import type { Design } from '../core/types';
-import { bipyr, frustum } from '../core/primitives';
+import { bipyr, frustum, tube } from '../core/primitives';
 import { add, mixC, rotZ, type RGB, type Vec3 } from '../core/vec';
 import { PALE_CRYSTALS, WEAPON_ROLL, weaponEntry } from './_weapon';
 
@@ -25,7 +25,7 @@ export function staffDesign(seriesId: string): Design {
       const pts: Vec3[] = [[0, 0, 0]];
       for (let i = 1; i <= 3; i++) pts.push([rf(-0.05, 0.05), (Hs * i) / 3, rf(-0.05, 0.05)]);
       m.part('shaft');
-      for (let i = 0; i < 3; i++) frustum(m, pts[i], pts[i + 1], 0.07, 0.062, 6, wood);
+      tube(m, pts, 0.07, 0.062, 6, wood, { perSegment: true });
       for (let i = 1; i <= 3; i++) frustum(m, add(pts[i], [0, -0.04, 0]), add(pts[i], [0, 0.04, 0]), 0.09, 0.09, 6, trim);
 
       // Head: curling prongs cradling a single pale crystal (no floating shards)

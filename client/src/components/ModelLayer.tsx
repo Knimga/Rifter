@@ -5,6 +5,8 @@ import type { EnemyInstance } from '../data/units/enemies';
 import { CLASSES, type ClassKey } from '../data/units/classes';
 import type { Design, Model, ModelLink } from '../forge/core/types';
 import { buildInstance, instanceSeed, linkedDesign } from '../forge/core/link';
+import { tintModel } from '../forge/core/tint';
+import type { RGB } from '../forge/core/vec';
 import { TILE_SIZE, type BoardLayout } from '../viewEngine/board';
 import { buildCharacter, classInstanceId, type HeldWeapon } from '../forge/equip';
 import { designs } from '../forge/registry.vite';
@@ -19,6 +21,8 @@ export interface MapLoot {
   id: string;
   link: ModelLink;
   pos: Pos;
+  /** The color a tinted model (a rift key) is drawn in: its dungeon's riftColor (core/tint.ts). */
+  tint?: RGB;
 }
 
 /** A game object on the map (a door, a rift): it stands on its tile, facing `facing` (yaw, radians), and never moves. */
@@ -30,6 +34,13 @@ export interface MapObject {
   facing: number;
   /** Its model's animations its state calls for, e.g. ['open'] for a looted chest (see MapUnit.played). */
   played?: string[];
+  /** The color a tinted model (a rift) is drawn in: its dungeon's riftColor (core/tint.ts). */
+  tint?: RGB;
+  /**
+   * A tinted model holding two tinted things, each in its own color: a color per list of parts (tintModel's
+   * `parts`), e.g. the active Rifter's keystone and its rift while the rift swaps keys. Instead of `tint`.
+   */
+  partTints?: { color: RGB; parts: readonly string[] }[];
 }
 
 /** A party member drawn as their class model, holding their equipped weapon and offhand. */
@@ -116,21 +127,36 @@ export default function ModelLayer({ board, party = [], enemies = [], loot = [],
     return out;
   }, [enemyKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const lootKey = loot.map((l) => `${l.id}:${l.pos.x},${l.pos.y}`).join('|');
-  const objectKey = objects.map((o) => `${o.id}:${o.link}:${o.pos.x},${o.pos.y}:${o.facing}:${o.played?.join('+') ?? ''}`).join('|');
+  const lootKey = loot.map((l) => `${l.id}:${l.pos.x},${l.pos.y}:${l.tint?.join(',') ?? ''}`).join('|');
+  /** Loot models are shared by every item of a design (in one color, for tinted ones). */
+  const lootCacheId = (l: MapLoot) => `item:${l.link}:${l.tint?.join(',') ?? ''}`;
+  /** An object's colors, as text (its cache key and change key). */
+  const tintKey = (o: MapObject) => `${o.tint?.join(',') ?? ''}${o.partTints?.map((t) => `${t.parts.join('+')}=${t.color.join(',')}`).join(';') ?? ''}`;
+  const objectKey = objects.map((o) => `${o.id}:${o.link}:${o.pos.x},${o.pos.y}:${o.facing}:${o.played?.join('+') ?? ''}:${tintKey(o)}`).join('|');
   const aimKey = Object.entries(aims).map(([id, a]) => `${id}:${a.seq}`).join('|');
   const units: MapUnit[] = useMemo(() => {
     const out = [...partyUnits, ...enemyUnits].map((u) => (aims[u.id] ? { ...u, aim: aims[u.id] } : u));
     for (const o of objects) {
       const design = linkedDesign(designs, o.link);
-      if (design) out.push({ id: o.id, model: cached(o.id, o.link, [design], () => buildInstance(design, o.id)), pos: o.pos, facing: o.facing, played: o.played });
+      if (!design) continue;
+      const model = cached(o.id, `${o.link}:${tintKey(o)}`, [design], () => {
+        const built = buildInstance(design, o.id);
+        if (o.partTints) return o.partTints.reduce((m, t) => tintModel(m, t.color, t.parts), built);
+        return o.tint ? tintModel(built, o.tint) : built;
+      });
+      out.push({ id: o.id, model, pos: o.pos, facing: o.facing, played: o.played });
     }
     for (const l of loot) {
       const design = linkedDesign(designs, l.link);
-      if (design) out.push({ id: l.id, model: cached(`item:${design.id}`, '', [design], () => buildInstance(design, l.id)), pos: l.pos, lying: true });
+      if (!design) continue;
+      const model = cached(lootCacheId(l), '', [design], () => {
+        const built = buildInstance(design, l.id);
+        return l.tint ? tintModel(built, l.tint) : built;
+      });
+      out.push({ id: l.id, model, pos: l.pos, lying: true });
     }
     // Forget models no longer on the map (dead enemies, picked-up loot)
-    const live = new Set([...partyUnits, ...enemyUnits, ...objects].map((u) => u.id).concat(loot.map((l) => `item:${l.link}`)));
+    const live = new Set([...partyUnits, ...enemyUnits, ...objects].map((u) => u.id).concat(loot.map(lootCacheId)));
     for (const id of cache.current.keys()) if (!live.has(id)) cache.current.delete(id);
     return out;
   }, [partyUnits, enemyUnits, lootKey, objectKey, aimKey]); // eslint-disable-line react-hooks/exhaustive-deps

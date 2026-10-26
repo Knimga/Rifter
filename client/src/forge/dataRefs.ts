@@ -3,13 +3,15 @@
 // and by the builder page. No three.js; reads game data only.
 import type { DataRef, Design, ModelLink } from './core/types';
 import { slug } from './core/slug';
-import { ENEMY_CLASSES, BOSS_CLASSES } from '../data/units/enemies';
+import { ENEMY_CLASSES } from '../data/units/enemies';
+import { BOSS_CLASSES } from '../data/units/bosses';
 import { SUMMON_CLASSES } from '../data/units/summons';
 import { STARTER_WEAPON_SERIES, WEAPON_SERIES, weaponName } from '../data/gear/weapons';
 import { ARMOR_SERIES, STARTER_ARMOR_SERIES, armorName } from '../data/gear/armor';
 import { OFFHANDS, SHIELDS, STARTER_SHIELDS } from '../data/gear/offhands';
 import { CLASSES, type ClassKey } from '../data/units/classes';
 import { GAME_OBJECTS } from '../data/world/gameObjects';
+import { RIFT_MODELS } from '../data/world/rifts';
 import { ARMOR_SLOTS, type WeaponType } from '../data/gear/types';
 
 export interface DataEntry {
@@ -26,10 +28,14 @@ export const refKey = (r: DataRef) => `${r.table}:${r.key}`;
 
 /** Every game data entry that can have a model. */
 export function allDataEntries(): DataEntry[] {
-  const enemies: DataEntry[] = [...ENEMY_CLASSES, ...BOSS_CLASSES].map((c) => ({
+  // Bosses are enemies too (table 'enemies'), kept in their own file
+  const enemies: DataEntry[] = [
+    ...ENEMY_CLASSES.map((c) => ({ c, file: 'enemies' })),
+    ...BOSS_CLASSES.map((c) => ({ c, file: 'bosses' })),
+  ].map(({ c, file }) => ({
     ref: { table: 'enemies', key: c.id },
     name: c.name,
-    path: `data/units/enemies.ts › ${c.id}`,
+    path: `data/units/${file}.ts › ${c.id}`,
     link: c.model,
   }));
   const summons: DataEntry[] = SUMMON_CLASSES.map((c) => ({
@@ -75,7 +81,13 @@ export function allDataEntries(): DataEntry[] {
     path: `data/world/gameObjects.ts › ${o.id}`,
     link: o.model,
   }));
-  return [...enemies, ...summons, ...weapons, ...armor, ...offhands, ...classes, ...objects];
+  const rifts: DataEntry[] = Object.values(RIFT_MODELS).map((r) => ({
+    ref: { table: 'rifts', key: r.id },
+    name: r.name,
+    path: `data/world/rifts.ts › ${r.id}`,
+    link: r.model,
+  }));
+  return [...enemies, ...summons, ...weapons, ...armor, ...offhands, ...classes, ...objects, ...rifts];
 }
 
 // Built on first use. Game data is static at runtime (a hot reload re-runs this module).

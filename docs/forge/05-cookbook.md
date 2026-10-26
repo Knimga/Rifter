@@ -26,6 +26,7 @@ Reach for these before writing vertex math by hand. All coordinates are pre-fit 
 | `blob(m, c, r, level, jit, col)` | lumpy ellipsoid: heads, bodies, rocks, knuckles. Level 0 = 20 tris, 1 = 80 |
 | `crackedBlob(..., lava, share, o, vein)` | a blob with connected patches in another color: lava veins (default, glowing), moss or lichen (pass `vein: { j }` for lit) |
 | `frustum(m, p0, p1, r0, r1, sides, col)` | a tapered prism between two points: limb segments, horns, spikes, stalks |
+| `tube(m, pts, r0, r1, sides, col, o)` | frustums along a path of points, tapering r0 to r1 over it (or each segment on its own, `perSegment`): struts, rails, rings, ribs, a jointed shaft |
 | `loft(m, rings, col)` | connect a stack of rings: torsos, robes, hoods, blades |
 | `ringPts`, `wobbleRing` | rings to loft: a clean circle around any axis, or an organic, wavy outline in the x-z plane |
 | `box(m, c, s, col, jit)` | jittered boxes: feet, brows, slabs, vertebrae |
@@ -41,14 +42,20 @@ Reach for these before writing vertex math by hand. All coordinates are pre-fit 
 | `tri`, `quad` | custom faces (winding is automatic: away from the center you pass) |
 | `part(name, pivot)` | tag the following faces (torso, head, arm_l...); `motion` and `animations` move parts |
 | `anchor(name, p)` | attach points (`feet` always; `hand_l/hand_r` for creatures that hold things) |
-| `halo(p, r, color)` | a soft additive glow around a light (see Glow and translucency) |
+| `halo(p, r, color, tone?)` | a soft additive glow around a light (see Glow and translucency); `tone`: it takes a tinted model's tint |
 | `xf(from, fn)` | transform the faces added since index `from`: build a piece at the origin, then move it |
 | `xfAll(fn, scale)` | transform everything (faces, anchors, pivots, halos) |
+| `embed(m, design, seed, place, scale)` | build another design's model into this one (`core/embed.ts`): the active Rifter holds the keystone and rift. Pass `scale = 1 / fitScale(m, fit)` so it keeps its true size |
+| `FaceOpts.from`, `halo(..., from)` | a fading part's start color (an animation's `fades` step) |
 
 **Family helpers** (`designs/_*.ts`): shared shape code for a family of designs. `_character` (bodies, holds,
-clothing), `_sword`, `_axe` and the other weapons, `_armor` and the materials, `_shield`, `_rift`, `_object`,
+clothing), `_sword`, `_axe` and the other weapons, `_armor` and the materials, `_shield`, `_rifter` (its states), `_object`,
 `_glow` (`floorGlow`), `_fungal` (`cap`, `mush`, `shelf`, `antler`). When two designs need the same shape, it goes in a
 helper, never copied.
+
+**Tinted models** (`core/tint.ts`; Rifts & Keys only): `FaceOpts.tint` (a `Tone`, `[bright, deep]`, or one per corner) paints a
+face with the color the model is drawn in, added to its own color (black for pure glow); `TINT` / `TINT_DEEP` are the
+tint and its deep shade. Shade a tinted glow by its Tone (brighter on top, deeper below), not by its color.
 
 ## Construction patterns
 - **Limbs:** chains of `frustum`s through named joints (shoulder, elbow, wrist), a `blob` at each joint for bulk.
@@ -113,6 +120,7 @@ helper, never copied.
 `npm run forge:lint -- --drafts` (rules, determinism, budget) and then look at `forge:sheet`:
 - **Overview:** `npm run forge:sheet -- --only-drafts --seeds 12 --yaws 0,180 --out forge-sheet.png`.
 - **Detail:** fewer seeds, bigger cells: `--seeds 1,2,3 --cols 3 --cell 400` (or 520 for one or two).
+- **Rifts & Keys:** `--tint <dungeon>` (default: the first) or `--tint #rrggbb` paints them; check a few dungeons' colors.
 - **True side profile** (backs, hunches, how far things stick out): `--yaws 90 --elev 5`.
 - **Close three-quarter views:** `--yaws 30,330`.
 - Look at several seeds: a seed-dependent problem (a part buried on some seeds, a color that loses the floor)
