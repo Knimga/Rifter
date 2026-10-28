@@ -2,7 +2,7 @@
 import type { Ability } from './abilities';
 import { affectedKeys, isArea, unitsInArea } from './areas';
 import type { CombatUnit } from './abilityExecution';
-import { chebyshev, hasLineOfSight, posKey, samePos, type Pos } from '../world/grid';
+import { inRangeAndSight, posKey, samePos, type Pos } from '../world/grid';
 
 /** Who an action lands on: `targets` (its target effects), `allies` (its 'allies' effects, the caster's side in its area). */
 export interface AimedAction {
@@ -38,15 +38,16 @@ export function aimPartyAction(action: Ability, o: {
   if (action.target === 'self') return samePos(o.at, o.casterPos) ? none : null;
   if (action.target === 'tile') return o.tileTargets?.has(posKey(o.at)) ? none : null;
   if (action.target === 'enemy' && !o.inCombat) return null;
-  if (chebyshev(o.casterPos, o.at) > action.range || !hasLineOfSight(o.casterPos, o.at, o.floors)) return null;
+  if (!inRangeAndSight(o.casterPos, o.at, action.range, o.floors)) return null;
   if (action.target === 'ally') {
     const ally = isArea(action) ? null : o.allyAt(o.at);
     const targets = isArea(action) ? unitsInArea(affectedKeys(o.casterPos, o.at, action.area, o.floors), o.partySide()) : ally ? [ally] : [];
-    return targets.length ? { targets, allies: [] } : null;
+    // An area one's units are its targets and its 'allies' both (its 'allies' effects land on them too)
+    return targets.length ? { targets, allies: isArea(action) ? targets : [] } : null;
   }
   const area = action.area ?? 'single';
   const affected = affectedKeys(o.casterPos, o.at, area, o.floors);
-  const targets = o.hostiles.filter(u => affected.has(posKey(u.pos)));
+  const targets = unitsInArea(affected, o.hostiles);
   if (area === 'single' && targets.length === 0) return null;
   return { targets, allies: unitsInArea(affected, o.partySide()) };
 }

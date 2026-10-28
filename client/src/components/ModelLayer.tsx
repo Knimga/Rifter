@@ -14,6 +14,7 @@ import { MapModelRenderer, type MapUnit } from '../viewEngine/three/mapRenderer'
 import type { FogInput } from '../viewEngine/three/fog';
 import { useLatest } from '../hooks/useLatest';
 import { ActiveGlow } from './mapParts';
+import { characterLookKey } from './characterModel';
 
 type Pos = { x: number; y: number };
 
@@ -34,7 +35,7 @@ export interface MapObject {
   facing: number;
   /** Its model's animations its state calls for, e.g. ['open'] for a looted chest (see MapUnit.played). */
   played?: string[];
-  /** The color a tinted model (a rift) is drawn in: its dungeon's riftColor (core/tint.ts). */
+  /** The color a tinted model (a rift) is drawn in: the color of where it leads (core/tint.ts). */
   tint?: RGB;
   /**
    * A tinted model holding two tinted things, each in its own color: a color per list of parts (tintModel's
@@ -101,14 +102,14 @@ export default function ModelLayer({ board, party = [], enemies = [], loot = [],
   };
 
   // Party members: rebuilt when their class or held items change (the body's pose follows the weapon)
-  const partyKey = party.map((m) => `${m.id}:${m.classKey}:${m.weapon?.link ?? '-'}:${m.offhand ?? '-'}:${m.pos.x},${m.pos.y}`).join('|');
+  const partyKey = party.map((m) => `${m.id}:${characterLookKey(m.classKey, m.weapon, m.offhand)}:${m.pos.x},${m.pos.y}`).join('|');
   const partyUnits: MapUnit[] = useMemo(() => {
     const out: MapUnit[] = [];
     for (const m of party) {
       const body = linkedDesign(designs, CLASSES[m.classKey].model);
       if (!body) continue;
       const used = [body, m.weapon ? linkedDesign(designs, m.weapon.link) : null, m.offhand ? linkedDesign(designs, m.offhand) : null];
-      const look = `${m.classKey}:${m.weapon?.link ?? '-'}:${m.offhand ?? '-'}`;
+      const look = characterLookKey(m.classKey, m.weapon, m.offhand);
       // Seeded by class (classInstanceId), so the member looks as it did on character select
       const model = cached(m.id, look, used, () => buildCharacter(designs, body, instanceSeed(body, classInstanceId(m.classKey)), m.weapon, m.offhand));
       out.push({ id: m.id, model, pos: m.pos, viewer: true });

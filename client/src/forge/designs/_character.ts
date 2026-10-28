@@ -18,7 +18,7 @@ import type { DataRef } from '../core/types';
 import type { Mesh } from '../core/mesh';
 import { slug } from '../core/slug';
 import { blob, box, frustum, loft } from '../core/primitives';
-import { add, cross, mul, mulC, norm, rotX, rotY, sub, type RGB, type Vec3 } from '../core/vec';
+import { add, cross, lerp3, mul, mulC, norm, rotX, rotY, sub, type RGB, type Vec3 } from '../core/vec';
 import { CLASSES, type ClassKey } from '../../data/units/classes';
 import type { WeaponType } from '../../data/gear/types';
 import { band, ell } from './_armor';
@@ -36,8 +36,6 @@ export interface BodyLook {
   sleeves: RGB;
   gloves: RGB;
 }
-
-const lerp = (a: Vec3, b: Vec3, t: number): Vec3 => add(a, mul(sub(b, a), t));
 
 /** Joint positions of one leg (local units). */
 export interface Leg {
@@ -148,7 +146,7 @@ function carryRest(shoulder: Vec3, build: BodyBuild): Vec3 {
 /** An elbow for a shoulder and wrist: halfway between them, pushed out along `dir` by as much as the arm's length needs. */
 function bendElbow(shoulder: Vec3, wrist: Vec3, dir: Vec3): Vec3 {
   const half = Math.hypot(...sub(wrist, shoulder)) / 2;
-  return add(lerp(shoulder, wrist, 0.5), mul(norm(dir), Math.sqrt(Math.max(0, UPPER_ARM ** 2 - half ** 2))));
+  return add(lerp3(shoulder, wrist, 0.5), mul(norm(dir), Math.sqrt(Math.max(0, UPPER_ARM ** 2 - half ** 2))));
 }
 
 /**
@@ -272,7 +270,7 @@ export function buildBody(m: Mesh, look: BodyLook, build: BodyBuild = {}): void 
   for (const sx of [-1, 1] as const) {
     const { hip, knee, ankle } = legJoints(sx);
     m.part(sx > 0 ? 'leg_l' : 'leg_r', hip);
-    const bootTop = lerp(ankle, knee, 0.75);
+    const bootTop = lerp3(ankle, knee, 0.75);
     frustum(m, hip, knee, 0.095, 0.078, 6, look.pants); // thigh
     frustum(m, knee, bootTop, 0.075, 0.07, 6, look.pants); // shin
     frustum(m, bootTop, [ankle[0], 0.04, ankle[2]], 0.08 * boot, 0.077 * boot, 6, look.boots); // boot shaft
@@ -299,7 +297,7 @@ export function buildBody(m: Mesh, look: BodyLook, build: BodyBuild = {}): void 
   m.anchor('quiver_bottom', QUIVER_ON_BACK.bottom);
   m.anchor('quiver_top', QUIVER_ON_BACK.top);
   m.anchor('elbow_r', right.elbow);
-  m.anchor('forearm_l', lerp(left.elbow, left.wrist, 0.5));
+  m.anchor('forearm_l', lerp3(left.elbow, left.wrist, 0.5));
   m.anchor('elbow_l', left.elbow);
   m.anchor('fist_l', left.fist); // where an offhand held dangling hangs from (a focus)
   if (build.hold === 'bow' || build.hold === 'crossbow') m.anchor('hand_l', left.fist);

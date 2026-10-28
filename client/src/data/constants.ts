@@ -40,6 +40,7 @@ export const ATTACK_CATEGORY_COLOR: Record<AttackCategory, string> = {
 export const COMBAT_TEXT_COLOR = {
   damage: 'var(--tone-damage)',
   mpDamage: 'var(--tone-mp-damage)',
+  mpRestore: 'var(--rift-mp)',
   heal: 'var(--tone-heal)',
   dot: 'var(--tone-debuff)',
   stopped: 'var(--rift-bright)',  // missed, dodged, parried, blocked
@@ -56,7 +57,7 @@ export const AGGRO_RANGE = 5;
 /* ----- PACING (ms): how the game's turns and ticks feel ----- */
 
 /** Interval between out-of-combat passive regen ticks. */
-export const OUT_OF_COMBAT_REGEN_INTERVAL_MS = 5000;
+export const OUT_OF_COMBAT_REGEN_INTERVAL_MS = 3000;
 
 /**
  * How long a unit (party member or enemy) turns toward an ability's target before the ability lands. Just

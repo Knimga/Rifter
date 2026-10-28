@@ -49,8 +49,14 @@ Reach for these before writing vertex math by hand. All coordinates are pre-fit 
 | `FaceOpts.from`, `halo(..., from)` | a fading part's start color (an animation's `fades` step) |
 
 **Family helpers** (`designs/_*.ts`): shared shape code for a family of designs. `_character` (bodies, holds,
-clothing), `_sword`, `_axe` and the other weapons, `_armor` and the materials, `_shield`, `_rifter` (its states), `_object`,
-`_glow` (`floorGlow`), `_fungal` (`cap`, `mush`, `shelf`, `antler`). When two designs need the same shape, it goes in a
+clothing), `_sword`, `_axe` and the other weapons (`_bow`'s `bowShape`: the D-bow alone, for a creature to hold),
+`_armor` and the materials (`_cloth`, `_leather`, `_hide`, `_plate`: each armor series' pieces), `_shield`, `_rifter` (its states), `_object`, `_glow` (`floorGlow`), `_fungal` (`cap`,
+`mush`, `shelf`, `antler`), `_goblin` (every goblin's body: `goblinBody` with its helmets, or its pieces
+`goblinLook`, `goblinLegs`, `goblinTorso`, `goblinHead` for a goblin dressed differently; `goblinArm`; a body's
+`eye` for eyes other than the yellow ones, e.g. the Troll Tamer's glowing white, and `pauldronSize` for larger
+pauldrons), `_hood`
+(`archHood`: a creature's hood from a run of arches, round or pointed), `_staff`'s `gnarledStaff` (a creature's
+knotted wooden staff). When two designs need the same shape, it goes in a
 helper, never copied.
 
 **Tinted models** (`core/tint.ts`; Rifts & Keys only): `FaceOpts.tint` (a `Tone`, `[bright, deep]`, or one per corner) paints a
@@ -61,8 +67,9 @@ tint and its deep shade. Shade a tinted glow by its Tone (brighter on top, deepe
 - **Limbs:** chains of `frustum`s through named joints (shoulder, elbow, wrist), a `blob` at each joint for bulk.
   Name the joints as `Vec3` constants first and pose by moving them: the code reads like a pose.
 - **Bodies and robes:** `loft` a stack of rings from bottom to top (`wobbleRing` for organic outlines, or rings
-  you jitter yourself). Shift each ring's center for sway or a hunch (a function of height, `sway(y)`), and color
-  by height with a ColorFn (`(cen) => mixC(bottom, top, (cen[1] - y0) / span)`).
+  you jitter yourself). Shift each ring's center for sway or a hunch (a function of height, `sway(y)`); for a
+  hunched back also deepen the upper rings toward the back (a larger `rz` or a back-only bulge), so the curve is
+  the torso's own outline, never a blob added on the back (style guide, Rules). Color by height with a ColorFn (`(cen) => mixC(bottom, top, (cen[1] - y0) / span)`).
 - **Masses:** overlapping blobs, the big ones `crackedBlob` for patches. To make one feature grow out of another
   (a spine from a back), sink its pieces mostly inside the mass so only their tops show; tacked-on pieces read as
   stuck on.

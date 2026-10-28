@@ -45,13 +45,13 @@ export function memberStatInput(m: PartyMemberConfig, level: number): PlayerStat
 export const memberStats = (m: PartyMemberConfig, level: number, buffs: ActiveBuff[]): Stats =>
   recomputeStats(memberStatInput(m, level), [...buffs, ...getGearBuffs(m.gear)]);
 
-/** A party member's state in play (indexed like the party): HP, MP and the effects on them. */
 /**
  * Whether a party member stands on the map: only while alive. One who fell (the leader too) is off the map
  * until revived: drawn nowhere, blocking no one (its tile is still where it gets back up: spreadOut).
  */
 export const isOnMap = (hp: number) => hp > 0;
 
+/** A party member's state in play (indexed like the party): HP, MP and the effects on them. */
 export interface MemberState {
   hp: number;
   mp: number;

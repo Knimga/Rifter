@@ -1,4 +1,4 @@
-// The party window's Stats panel (UI handoff: party modal stats): seven dark boxes grouped by meaning. Vitals (HP
+// The party window's Stats panel: seven dark boxes grouped by meaning. Vitals (HP
 // and MP bars with their regen), Defense (armor and magic resistance with the damage they stop), Avoidance,
 // Offense (melee / ranged / magic columns), Tempo (initiative, movement), Healing, and Resistances (one per damage
 // element). Every value is marked green / red when gear or an effect raises it, or an effect lowers it (`shift`).

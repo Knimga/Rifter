@@ -6,6 +6,12 @@ export type Pos = { x: number; y: number };
 /** Map/set key for a tile: "x,y". */
 export const posKey = (p: Pos) => `${p.x},${p.y}`;
 
+/** The tile a posKey names: "x,y" → { x, y }. */
+export const keyPos = (key: string): Pos => {
+  const [x, y] = key.split(',').map(Number);
+  return { x, y };
+};
+
 export const samePos = (a: Pos, b: Pos) => a.x === b.x && a.y === b.y;
 
 export function chebyshev(a: Pos, b: Pos): number {
@@ -38,6 +44,10 @@ export function hasLineOfSight(a: Pos, b: Pos, floors: ReadonlySet<string>): boo
   return bresenham(a, b).slice(0, -1).every(p => floors.has(posKey(p)));
 }
 
+/** True if `to` is within `range` tiles of `from` and in its sight: what aiming, aggro and reach all ask. */
+export const inRangeAndSight = (from: Pos, to: Pos, range: number, floors: ReadonlySet<string>) =>
+  chebyshev(from, to) <= range && hasLineOfSight(from, to, floors);
+
 /**
  * Up to `count` tiles passing `isOpen`, searched ring by ring outward from `center`
  * (radius 1..maxRadius, closest ring first). Excludes `center` itself.
@@ -59,14 +69,19 @@ export function findOpenTilesNear(center: Pos, isOpen: (p: Pos) => boolean, coun
 // ─── Movement ─────────────────────────────────────────────────────────────────
 // One set of rules for everyone who walks (party members and enemies): a move is a path of steps to
 // any of the 8 neighbouring tiles, each costing 1 movement. A step must land on a walkable tile, and a
-// diagonal step may not cut a wall corner (both tiles beside it must be walkable too).
+// diagonal step may not squeeze between two wall corners (at least one tile beside it must be walkable; past a
+// single corner is fine). Units never count here: who may be passed is the mover's isBlocked.
 
-const STEPS: readonly [number, number][] = [[0, 1], [1, 0], [0, -1], [-1, 0], [1, 1], [1, -1], [-1, 1], [-1, -1]];
+/** The 8 steps to a neighbouring tile: the 4 straight ones first, then the diagonals. */
+export const STEPS: readonly (readonly [number, number])[] = [[0, 1], [1, 0], [0, -1], [-1, 0], [1, 1], [1, -1], [-1, 1], [-1, -1]];
 
-/** True if one step from `from` by (dx, dy) is allowed: onto a walkable tile, never cutting a wall corner. */
+/** The 8 tiles around `p` (diagonals included). */
+export const neighbors = (p: Pos): Pos[] => STEPS.map(([dx, dy]) => ({ x: p.x + dx, y: p.y + dy }));
+
+/** True if one step from `from` by (dx, dy) is allowed: onto a walkable tile, never between two wall corners. */
 export function canStep(from: Pos, dx: number, dy: number, isWalkable: (p: Pos) => boolean): boolean {
   if (!isWalkable({ x: from.x + dx, y: from.y + dy })) return false;
-  return dx === 0 || dy === 0 || (isWalkable({ x: from.x + dx, y: from.y }) && isWalkable({ x: from.x, y: from.y + dy }));
+  return dx === 0 || dy === 0 || isWalkable({ x: from.x + dx, y: from.y }) || isWalkable({ x: from.x, y: from.y + dy });
 }
 
 /** A tile reached by walking, and how many steps it takes. */

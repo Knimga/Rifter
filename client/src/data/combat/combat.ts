@@ -1,6 +1,6 @@
 import { isAlly, withEnemyBuffs, type EnemyInstance } from '../units/enemies';
 import type { ActiveDot, ActiveHot, Stats } from '../units/stats';
-import { chebyshev, hasLineOfSight, type Pos } from '../world/grid';
+import { inRangeAndSight, type Pos } from '../world/grid';
 import { tickDots, tickDurations, tickHots, type ActionOutcome } from './abilityExecution';
 import { AGGRO_RANGE, COMBAT_TEXT_COLOR } from '../constants';
 import { randInt } from '../random';
@@ -44,13 +44,26 @@ export const INITIAL_COMBAT: CombatState = {
 
 const d20 = () => randInt(1, 20);
 
+/** A creature's place in the turn order (an enemy, or a creature summoned by either side), its initiative rolled. */
+const creatureCombatant = (e: EnemyInstance): Combatant => ({
+  id: e.id,
+  name: e.classData.name,
+  initiativeRoll: d20() + e.stats.initiative,
+  isPlayer: false,
+  ...(isAlly(e) ? { isAlly: true } : {}),
+});
+
+/** Turn order: highest initiative first, the party first on a tie. */
+const byInitiative = (a: Combatant, b: Combatant) =>
+  b.initiativeRoll !== a.initiativeRoll ? b.initiativeRoll - a.initiativeRoll : a.isPlayer ? -1 : 1;
+
 /**
  * The enemies a party member at `pos` stirs: every unaggroed group with a living member within AGGRO_RANGE of it
  * and in sight, whole (`zoneEnemies`: the creatures of its zone; `floors`: the zone's floor, for sight).
  */
 export function aggroedBy(pos: Pos, zoneEnemies: EnemyInstance[], floors: ReadonlySet<string>): EnemyInstance[] {
   const spotted = new Set(zoneEnemies
-    .filter(e => e.currentHp > 0 && !e.aggroed && chebyshev(pos, e.pos) <= AGGRO_RANGE && hasLineOfSight(pos, e.pos, floors))
+    .filter(e => e.currentHp > 0 && !e.aggroed && inRangeAndSight(pos, e.pos, AGGRO_RANGE, floors))
     .map(e => e.groupId));
   return spotted.size ? zoneEnemies.filter(e => e.currentHp > 0 && !e.aggroed && spotted.has(e.groupId)) : [];
 }
@@ -67,20 +80,9 @@ export function startCombat(
       isPlayer: true,
       partyIndex: i,
     })),
-    ...aggroedEnemies
-      .filter(e => e.currentHp > 0)
-      .map(e => ({
-        id: e.id,
-        name: e.classData.name,
-        initiativeRoll: d20() + e.stats.initiative,
-        isPlayer: false,
-      })),
+    ...aggroedEnemies.filter(e => e.currentHp > 0).map(creatureCombatant),
   ];
-
-  combatants.sort((a, b) => {
-    if (b.initiativeRoll !== a.initiativeRoll) return b.initiativeRoll - a.initiativeRoll;
-    return a.isPlayer ? -1 : 1;
-  });
+  combatants.sort(byInitiative);
 
   return {
     active: true,
@@ -101,7 +103,7 @@ export function startCombat(
 
 /** A unit that starts its turn with no AP (stunned) loses it: this shows over it (for STUNNED_PAUSE_MS) before the next turn. */
 export const stunnedOutcome = (pos: Pos): ActionOutcome => ({
-  changes: [], threat: { gain: 0 }, floats: [{ pos, text: 'Stunned', color: COMBAT_TEXT_COLOR.stopped }],
+  changes: [], threat: [], floats: [{ pos, text: 'Stunned', color: COMBAT_TEXT_COLOR.stopped }],
 });
 
 /** AP left this turn for a unit with `apMax`. */
@@ -124,20 +126,8 @@ export function moveCost(steps: number, paidTiles: number, movement: number): { 
 export function joinCombat(state: CombatState, newEnemies: EnemyInstance[]): CombatState {
   if (newEnemies.length === 0) return state;
 
-  const newCombatants: Combatant[] = newEnemies.map(e => ({
-    id: e.id,
-    name: e.classData.name,
-    initiativeRoll: d20() + e.stats.initiative,
-    isPlayer: false,
-    ...(isAlly(e) ? { isAlly: true } : {}),
-  }));
-
   // Build new turn order: merge existing + new, sorted by initiative
-  const merged = [...state.turnOrder, ...newCombatants];
-  merged.sort((a, b) => {
-    if (b.initiativeRoll !== a.initiativeRoll) return b.initiativeRoll - a.initiativeRoll;
-    return a.isPlayer ? -1 : 1;
-  });
+  const merged = [...state.turnOrder, ...newEnemies.map(creatureCombatant)].sort(byInitiative);
 
   // Find where the current combatant ended up in the new order
   const currentId = state.turnOrder[state.currentTurnIndex].id;

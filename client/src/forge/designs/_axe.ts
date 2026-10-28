@@ -1,12 +1,11 @@
 // Axe family shape, shared by every axe design (one design per data entry, e.g. plain-hatchet.ts).
 import type { Design } from '../core/types';
 import { blob, box, frustum } from '../core/primitives';
-import { rotZ, type Vec3 } from '../core/vec';
+import { lerp3, rotZ, type Vec3 } from '../core/vec';
 import { WEAPON_ROLL, weaponEntry } from './_weapon';
 
 /** Width of the honed strip along an axe's cutting edge, as a fraction of the way from edge to head center. */
 const EDGE_BAND = 0.13;
-const lerp = (p: Vec3, q: Vec3, f: number): Vec3 => [p[0] + (q[0] - p[0]) * f, p[1] + (q[1] - p[1]) * f, p[2] + (q[2] - p[2]) * f];
 
 /**
  * A two-hander's blades: how far they reach out from the haft (a multiplier on the base reach) and how far
@@ -84,7 +83,7 @@ export function axeDesign(seriesId: string, weaponType: '1h Axes' | '2h Axes', {
               continue;
             }
             // Cutting edge: only a thin strip along the outline is honed (light); the rest is plain metal
-            const A2 = lerp(A, Oc, EDGE_BAND), B2 = lerp(B, Oc, EDGE_BAND);
+            const A2 = lerp3(A, Oc, EDGE_BAND), B2 = lerp3(B, Oc, EDGE_BAND);
             m.quad(A, B, B2, A2, edge, ctr);
             m.tri(Oc, A2, B2, metal, ctr);
           }

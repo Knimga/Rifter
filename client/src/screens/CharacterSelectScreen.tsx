@@ -1,10 +1,10 @@
-// Character select, "Assemble Your Party" (UI handoff 02): pick three classes (each at most once), name
+// Character select, "Assemble Your Party": pick three classes (each at most once), name
 // them and set their marching order. A focused class shows its dossier: roles, passives, armor and weapon
 // proficiencies, and abilities.
 import { lazy, Suspense, useMemo, useRef, useState, type MouseEvent } from 'react';
 import { CLASSES, ROLE_ICONS, type ClassKey, type ArmorProficiency, type Role } from '../data/units/classes';
 import { capitalizeWords, formatPassiveValue, formatStatLabel } from '../data/detailStrings';
-import { isWeaponItem } from '../data/gear';
+import { heldWeapon } from '../data/gear';
 import { HERO_NAMES, startingGear } from '../data/units/party';
 import { pick } from '../data/random';
 import Backdrop from '../components/ui/Backdrop';
@@ -12,6 +12,9 @@ import RiftButton from '../components/ui/RiftButton';
 import Panel, { PanelTitle } from '../components/ui/Panel';
 import AbilityCard from '../components/ui/AbilityCard';
 import { Hint } from '../components/Tooltip';
+import LoadingCover from '../components/ui/LoadingCover';
+import { useSceneReady } from '../hooks/useSceneReady';
+import { useFadeOut } from '../hooks/useFadeOut';
 
 // The class models (three.js): lazy, so the menu screens don't pull in the renderer up front
 const ClassShowcase = lazy(() => import('../components/ClassShowcase'));
@@ -63,11 +66,12 @@ export default function CharacterSelectScreen({ onStart, onBack }: {
   const [hoverKey, setHoverKey] = useState<ClassKey | null>(null);
   const [slots, setSlots] = useState<Slot[]>(EMPTY);
   const classRowRef = useRef<HTMLDivElement>(null);
-  // Each class's starting weapon, so weapon-based abilities show its damage in the dossier
-  const startingWeapons = useMemo(() => Object.fromEntries(CLASS_KEYS.map((k) => {
-    const w = startingGear(k).mainhand;
-    return [k, w && isWeaponItem(w) ? w : null];
-  })), []);
+  // The screen stays under a dark cover until the class models have drawn (useSceneReady), as the game's map does,
+  // and fades to black before it leaves (useFadeOut)
+  const { loading: showcaseLoading, onReady: onShowcaseReady } = useSceneReady('character-select');
+  const { fading, fadeOut } = useFadeOut();
+  // Each class's starting weapon, so weapon abilities show its AP cost and element in the dossier
+  const startingWeapons = useMemo(() => Object.fromEntries(CLASS_KEYS.map((k) => [k, heldWeapon(startingGear(k))])), []);
 
   const filled = slots.filter((s) => s.classKey).length;
   const named = slots.filter((s) => s.classKey && s.name.trim()).length;
@@ -111,7 +115,7 @@ export default function CharacterSelectScreen({ onStart, onBack }: {
       <div className="relative z-[1] flex-1 w-full max-w-[1600px] mx-auto box-border px-12 pt-9 pb-8 flex flex-col gap-6" onClick={() => setFocusKey(null)}>
 
         <header className="relative box-border px-24 text-center">
-          <button type="button" onClick={(e) => { stop(e); onBack(); }}
+          <button type="button" onClick={(e) => { stop(e); fadeOut(onBack); }}
             className="rf-link absolute left-0 top-1 inline-flex items-center gap-2.5 min-h-[44px] text-xs tracking-[0.16em] uppercase text-rift-muted bg-transparent border-0">
             <svg aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.25"><path d="M13 8H3M7 4L3 8l4 4" /></svg>
             Back
@@ -147,7 +151,7 @@ export default function CharacterSelectScreen({ onStart, onBack }: {
             })}
           </div>
           <Suspense fallback={null}>
-            <ClassShowcase hostRef={classRowRef} items={CLASS_KEYS.map((key) => ({
+            <ClassShowcase hostRef={classRowRef} onReady={onShowcaseReady} items={CLASS_KEYS.map((key) => ({
               classKey: key,
               active: hoverKey === key || focusKey === key,
               focused: focusKey === key,
@@ -271,13 +275,14 @@ export default function CharacterSelectScreen({ onStart, onBack }: {
                 {noHealer && <span className="text-xs tracking-[0.04em] text-rift-warn">Healing class recommended!</span>}
               </span>
               <RiftButton size="lg" className="!min-h-[52px] !px-12" disabled={!ready}
-                onClick={() => onStart(slots.map((s) => ({ classKey: s.classKey!, name: s.name.trim() })))}>
+                onClick={() => fadeOut(() => onStart(slots.map((s) => ({ classKey: s.classKey!, name: s.name.trim() }))))}>
                 Start Game
               </RiftButton>
             </div>
           </Panel>
         </div>
       </div>
+      <LoadingCover loading={showcaseLoading || fading} fadeIn={fading} className="fixed inset-0 z-50" />
     </Backdrop>
   );
 }

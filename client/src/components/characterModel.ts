@@ -1,7 +1,7 @@
 // A party member's character model: their class's body holding their gear, seeded as on the map
 // (classInstanceId), so portraits, character select and the party window show the same character.
 import { CLASSES, type ClassKey } from '../data/units/classes';
-import { isWeaponItem, type GearSlots } from '../data/gear';
+import { heldWeapon, type GearSlots } from '../data/gear';
 import type { Model, ModelLink } from '../forge/core/types';
 import { instanceSeed, linkedDesign } from '../forge/core/link';
 import { buildCharacter, classInstanceId, type HeldWeapon } from '../forge/equip';
@@ -9,7 +9,7 @@ import { designs } from '../forge/registry.vite';
 
 /** The weapon and offhand (a shield, a quiver on the back) a member's model shows, from their gear (none = nothing). */
 export function heldGear(gear: GearSlots): { weapon?: HeldWeapon; offhand?: ModelLink } {
-  const main = gear.mainhand && isWeaponItem(gear.mainhand) ? gear.mainhand : null;
+  const main = heldWeapon(gear);
   return { weapon: main ? { link: main.model, weaponType: main.weaponType } : undefined, offhand: gear.offhand?.model || undefined };
 }
 

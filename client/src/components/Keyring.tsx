@@ -1,4 +1,4 @@
-// The party window's keyring (UI handoff: party modal keys tab): every rift key the party holds, in one dark box,
+// The party window's keyring: every rift key the party holds, in one dark box,
 // two columns of ten filled top to bottom, in the order obtained. A row: the key's icon (the keystone model in
 // its dungeon's color, turned 45° as the mockup has it, with a soft glow), its name, and its dungeon on the right.
 import { DUNGEONS, type DungeonKey } from '../data/world/dungeons';

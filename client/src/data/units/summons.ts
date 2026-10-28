@@ -20,15 +20,16 @@ export const SUMMON_CLASSES: CreatureClassData[] = [
   {
     id: 'void-wisp',
     name: 'Void Wisp',
-    attributes: { mind: 3, finesse: 1 },
+    attributes: { mind: 4 },
     highAttributes: ['mind', 'finesse'],
     lowAttributes: ['strength', 'toughness'],
     baseHp: 10,
-    baseArmor: 0,
+    baseArmor: 2,
     armorPerLevel: 2,
-    resistances: { shadow: 30 },
+    resistances: { shadow: 75 },
     passives: {
-      dodge: { name: 'Ethereal', flat: 10 }
+      dodge: { name: 'Ethereal', flat: 20 },
+      magicHit: { name: 'Shadow Being', flat: 5 }
     },
     abilities: [
       {

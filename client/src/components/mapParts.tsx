@@ -6,7 +6,7 @@ import type { ClassKey } from '../data/units/classes';
 import type { ModelLink } from '../forge/core/types';
 import type { HeldWeapon } from '../forge/equip';
 import type { MapPartyMember } from './ModelLayer';
-import { samePos, type Pos } from '../data/world/grid';
+import { samePos, STEPS, type Pos } from '../data/world/grid';
 import UnitStatus, { type StatusMarker } from './hud/UnitStatus';
 import MoveLine from './MoveLine';
 
@@ -99,7 +99,7 @@ export function UprightAt({ board, x, y, height = 0, className = '', children }:
  * north, west), e.g. a door in a wall facing the floor it opens onto. 0 (south) if none is open.
  */
 export function facingOpenSide(pos: Pos, isOpen: (p: Pos) => boolean): number {
-  for (const [dx, dy] of [[0, 1], [1, 0], [0, -1], [-1, 0]]) if (isOpen({ x: pos.x + dx, y: pos.y + dy })) return yawFromGridMove(dx, dy);
+  for (const [dx, dy] of STEPS.slice(0, 4)) if (isOpen({ x: pos.x + dx, y: pos.y + dy })) return yawFromGridMove(dx, dy);
   return 0;
 }
 
@@ -137,9 +137,14 @@ export function HoverEdgeGlow({ color }: { color: string }) {
 export function ObjectTag({ board, x, y, height, text }: { board: BoardLayout; x: number; y: number; height: number; text: string }) {
   return (
     <UprightAt board={board} x={x} y={y} height={height} className="z-30">
-      <div role="tooltip" className="rf-tip px-2.5 py-1.5 whitespace-nowrap font-tech text-xs text-rift-soft -translate-y-1/2">{text}</div>
+      <MapTag text={text} className="-translate-y-1/2" />
     </UprightAt>
   );
+}
+
+/** The map's name tag (a rift's destination, a key's name, a hovered enemy's name). */
+export function MapTag({ text, className = '' }: { text: string; className?: string }) {
+  return <div role="tooltip" className={`rf-tip px-2.5 py-1.5 whitespace-nowrap font-tech text-xs text-rift-soft ${className}`}>{text}</div>;
 }
 
 /**
@@ -194,7 +199,6 @@ export function useStableHandler<A extends unknown[]>(fn: (...args: A) => void):
   return useCallback((...args: A) => latest.current(...args), []); // eslint-disable-line react-hooks/exhaustive-deps
 }
 
-/** A map's floor grid: `tile(p)` draws each tile (a FloorTile), row by row. */
 /**
  * Tiles deep in the fog: unseen, and no tile around them seen either (`known`: in sight now, or seen before). A
  * map's HTML floor draws them in the fog's color, so the layout never shows through, even before the 3D layer
@@ -214,6 +218,7 @@ export function deepFogTiles(fog: { visible: ReadonlySet<string>; explored: Read
   return deep;
 }
 
+/** A map's floor grid: `tile(p)` draws each tile (a FloorTile), row by row. */
 export function FloorGrid({ cols, rows, tile }: { cols: number; rows: number; tile: (p: Pos) => ReactNode }) {
   return (
     <>

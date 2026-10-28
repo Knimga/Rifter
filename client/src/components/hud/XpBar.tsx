@@ -1,4 +1,4 @@
-// The party's XP (UI handoff: level-up and XP tracking). One pool for the whole party, so it shows once:
+// The party's XP. One pool for the whole party, so it shows once:
 // a slim 3px bar (XpBar) in the party window's rail, and the strip under the game screen's top buttons
 // (XpStrip) with its level, a hover tooltip, and a fading "+N XP" after each award.
 import { xpToNext, type PartyProgress } from '../../data/units/xp';

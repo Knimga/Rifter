@@ -4,7 +4,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 
 import { CLASSES } from '../data/units/classes';
-import { generateLootDrop, isWeaponItem, type Item } from '../data/gear';
+import { generateLootDrops, heldWeapon, type Item } from '../data/gear';
 import { partyCanUseItem } from '../data/gear/inventory';
 import { AUTO_END_TURN_DELAY_MS, COMBAT_TEXT_COLOR, STUNNED_PAUSE_MS } from '../data/constants';
 import { hasPointsToSpend, isOnMap, type PartyMemberConfig } from '../data/units/party';
@@ -17,11 +17,11 @@ import { findOpenTilesNear, isAdjacent, posKey, samePos, type Pos } from '../dat
 import { partyWalk, findFollowerSpawns, spreadOut, trailFollowers } from '../data/world/movement';
 import { SANCTUM, SANCTUM_FLOORS, SANCTUM_RECEPTACLE, isSanctumWalkable } from '../data/world/sanctum';
 import { gameObjectName } from '../data/world/gameObjects';
-import { generateDungeon, isFreeFloor, objectTilesOf, spawnDungeonEnemies, zoneWalkable, type DungeonData, type ZoneData } from '../data/world/dungeonGen';
+import { generateDungeon, isFreeFloor, objectTilesOf, spawnDungeonEnemies, zoneRift, zoneWalkable, type DungeonData, type ZoneData } from '../data/world/dungeonGen';
 import { DUNGEONS, type DungeonKey } from '../data/world/dungeons';
 import { INITIAL_COMBAT, aggroedBy, startCombat, joinCombat, advanceTurn, apLeft, moveBudget, moveCost, stunnedOutcome, getCurrentCombatant, deadPartyIndices, type CombatState } from '../data/combat/combat';
 import { isRooted } from '../data/units/stats';
-import { creatureUnit, executeAction, memberUnit, toAction, type CombatUnit } from '../data/combat/abilityExecution';
+import { creatureUnit, executeAction, memberUnit, toAction, unitKey, type ActionWorld, type CombatUnit } from '../data/combat/abilityExecution';
 import { useEnemyTurn, type EnemyActivity, type EnemyAoePreview } from '../hooks/useEnemyTurn';
 import { useFloatingText } from '../hooks/useFloatingText';
 import { useLatest } from '../hooks/useLatest';
@@ -41,7 +41,9 @@ import { useRoundTick } from '../hooks/useRoundTick';
 import { useActionOutcomes } from '../hooks/useActionOutcomes';
 import { useFogOfWar } from '../hooks/useFogOfWar';
 import { useReach } from '../hooks/useReach';
-import { useMapReady } from '../hooks/useMapReady';
+import { useSceneReady } from '../hooks/useSceneReady';
+import { useFadeOut } from '../hooks/useFadeOut';
+import LoadingCover from '../components/ui/LoadingCover';
 
 import CharacterSheet from '../components/CharacterSheet';
 import ContainerWindow from '../components/ContainerWindow';
@@ -51,6 +53,7 @@ import PanView, { type Insets } from '../components/PanView';
 import type { PartyTokenData } from '../components/mapParts';
 import Backdrop from '../components/ui/Backdrop';
 import RiftButton from '../components/ui/RiftButton';
+import DevKeyTool from '../components/DevKeyTool'; // TEMP (testing only)
 import ActionDock, { type SlotContent } from '../components/hud/ActionDock';
 import ActingStatus from '../components/hud/ActingStatus';
 import { apState } from '../components/hud/ApTracker';
@@ -78,13 +81,12 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
   const { floatingTexts, spawnFloat, removeFloat, clearFloats } = useFloatingText();
   const [showCharSheet, setShowCharSheet] = useState(false);
   const [dungeon, setDungeon] = useState<DungeonData | null>(null);
-  // Which dungeon the party is in (or last entered): its preset gives the map's colors, doors and exit rift
+  // Which dungeon the party is in (or last entered): its preset gives the map's colors and doors
   const [dungeonKey, setDungeonKey] = useState<DungeonKey>('crypt');
   const preset = DUNGEONS[dungeonKey];
   const [enemyAoePreview, setEnemyAoePreview] = useState<EnemyAoePreview | null>(null);
   // The unit (unitKey) a creature is about to hit, highlighted on the map
   const [enemyTargetKey, setEnemyTargetKey] = useState<string | null>(null);
-  // The ability the acting creature is using: named in the status box at the bottom
   // What the acting creature is doing (moving, using an ability): the status box at the bottom says it. `seq`
   // counts activities, so the box can tell a new one from the same (the same ability used again)
   const [enemyActivity, setEnemyActivity] = useState<{ activity: EnemyActivity; seq: number }>({ activity: null, seq: 0 });
@@ -115,8 +117,7 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
   const isPlayerTurn = combat.active && currentCombatant?.isPlayer === true;
   const activePartyIdx = combat.active ? (currentCombatant?.partyIndex ?? 0) : barViewIdx;
   const activePartyPos = activePartyIdx === 0 ? playerPos : (followerPositions[activePartyIdx - 1] ?? playerPos);
-  const activeGear = party[activePartyIdx].gear;
-  const activeWeapon = activeGear.mainhand && isWeaponItem(activeGear.mainhand) ? activeGear.mainhand : null;
+  const activeWeapon = heldWeapon(party[activePartyIdx].gear);
   const activeMp = members[activePartyIdx]?.mp ?? 0;
 
   // Active slot / ability for the currently acting member
@@ -129,7 +130,7 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
   // Every creature of the zone: hostile enemies (summoned ones too), and the party's summoned allies (isAlly)
   const zoneEnemies = enemies.filter(e => e.zoneId === currentZone);
   const zoneSummons = zoneEnemies.filter(e => isAlly(e) && e.currentHp > 0);
-  const riftPos = dungeon && currentZone === dungeon.endZoneId ? dungeon.riftPos : null;
+  const riftPos = dungeon ? zoneRift(dungeon, currentZone) : null;
 
   // Party members as drawn on the maps: the leader always, followers only while alive
   const partyPositions = [playerPos, ...followerPositions].slice(0, party.length);
@@ -187,13 +188,31 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
   const partyStatsRef = useLatest(partyAllStats);
   const partyHpRef = useLatest(partyHp);
   const partyRef = useLatest(party);
-  const partyNamesRef = useLatest(party.map(m => m.characterName));
   const threatRef = useLatest(combat.threat);
   const partyLevelRef = useLatest(progress.level);
   const dungeonRef = useLatest(dungeon);
   const leaderPosRef = useLatest(playerPos);
   // Tiles of the current zone a game object stands on (the rift, chests): enemies can't walk there either
   const zoneObjectsRef = useLatest(dungeon && zone ? objectTilesOf(dungeon, zone) : new Set<string>());
+
+  // The fight's units as they are now, for executeAction: a unit's HP, buffs and weapon drive its triggers
+  /** Party member `i` as a combat unit (where it stands, or at `pos`). */
+  const partyUnit = useCallback((i: number, pos: Pos = partyPosRef.current[i]): CombatUnit => {
+    const m = partyRef.current[i];
+    const weapon = m ? heldWeapon(m.gear) : null;
+    return memberUnit(i, m?.characterName, partyStatsRef.current[i], pos,
+      { hp: partyHpRef.current[i] ?? 0, buffs: membersRef.current[i]?.buffs ?? [], weapon });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  /** What executeAction needs of the fight: the map's floor, and a living unit by unitKey. */
+  const actionWorld = useCallback((): ActionWorld => ({
+    floors: zoneRef.current?.floors ?? SANCTUM_FLOORS,
+    unitByKey: (key) => {
+      const i = partyRef.current.findIndex((_, j) => unitKey({ side: 'party', idx: j }) === key);
+      if (i >= 0) return (partyHpRef.current[i] ?? 0) > 0 ? partyUnit(i) : undefined;
+      const e = enemiesRef.current.find(c => c.id === key && c.currentHp > 0);
+      return e && creatureUnit(e);
+    },
+  }), [partyUnit]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Preload the 3D model layer (three.js, a separate chunk) while the party is still in the sanctum
   useEffect(() => { void import('../components/ModelLayer'); }, []);
@@ -280,8 +299,8 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
     const drops: Record<string, Item[]> = {};
     const keyDrops: { at: Pos; key: DungeonKey }[] = [];
     for (const e of dead) {
-      const item = generateLootDrop(d.level, partyLevelRef.current, e.classData.dropChance, partyCanUse);
-      if (item) (drops[posKey(e.pos)] ??= []).push(item);
+      const items = generateLootDrops(d.level, partyLevelRef.current, e.classData.dropChance ?? 0, partyCanUse);
+      if (items.length) (drops[posKey(e.pos)] ??= []).push(...items);
       if (isBoss(e)) {
         const lying = [...d.zones.flatMap(z => Object.values(z.droppedKeys)), ...keyDrops.map(k => k.key)];
         const key = bossKeyDrop(keysRef.current, lying);
@@ -349,15 +368,19 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
       setPlayerPos(d.playerStart);
       const spawned = spawnDungeonEnemies(d, config);
       setEnemies(spawned);
-      setFollowerPositions(findFollowerSpawns(d.playerStart, isFreeFloor(d, d.zones[d.startZoneId], spawned), 2));
+      // The followers take the tiles around the rift the party came through, beside the leader
+      const isFree = isFreeFloor(d, d.zones[d.startZoneId], spawned);
+      setFollowerPositions(findFollowerSpawns(zoneRift(d, d.startZoneId) ?? d.playerStart, p => isFree(p) && !samePos(p, d.playerStart), 2));
     } else {
       setDungeon(null);
       setCurrentZone(0);
       window.clearTimeout(reopenTimer.current);
       setRifter(DORMANT_RIFTER); // its rift closed after use: dormant again
       setShowRifter(false);
-      setPlayerPos(SANCTUM.playerStart);
-      setFollowerPositions([...SANCTUM.followerStarts]);
+      // Every way back (a rift, a party wipe) arrives in front of the Rifter
+      const [leader, ...followers] = SANCTUM.riftArrival;
+      setPlayerPos(leader);
+      setFollowerPositions(followers);
       setEnemies([]);
     }
   };
@@ -381,10 +404,13 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
   };
 
   useEffect(() => {
-    // A party wipe: everyone wakes in the Sanctum at full HP and MP
+    // A party wipe: everyone wakes in the Sanctum at full HP and MP, once the map has faded to black (a repeat
+    // call while it fades does nothing)
     if (partyHp.every(hp => hp <= 0)) {
-      handleLocationChange('sanctum');
-      restoreAll();
+      fadeOut(() => {
+        changes.current.handleLocationChange('sanctum');
+        changes.current.restoreAll();
+      });
       return;
     }
     // Out of combat: revive any individual dead members to 10%
@@ -442,6 +468,15 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
 
     triggerAggro(spawnPos, enemies.filter(e => e.zoneId === door.targetZoneId), targetZone.floors, false);
   }, [zone, dungeon, combat.active, enemies, triggerAggro, clearFloats]);
+
+  // ─── Fading between maps ──────────────────────────────────────────────
+  // Every change of map (a rift into a dungeon or back to the Sanctum, a door to another zone, a party wipe) first
+  // fades the map to black (useFadeOut); the new one fades in once its 3D layer has drawn (useSceneReady)
+  const { fading, fadeOut } = useFadeOut();
+  // (each change as of when the fade ends, with that render's state)
+  const changes = useLatest({ handleLocationChange, handleDoorClick, restoreAll });
+  const travel = (next: 'sanctum' | DungeonKey) => fadeOut(() => changes.current.handleLocationChange(next));
+  const goThroughDoor = (doorId: string) => fadeOut(() => changes.current.handleDoorClick(doorId));
 
   // ─── Movement handler ────────────────────────────────────────────────────
 
@@ -508,7 +543,6 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
     }
 
     // Who it lands on (aimPartyAction); used where it can't be, it is just put away
-    const partyUnit = (i: number): CombatUnit => memberUnit(i, party[i]?.characterName, partyAllStats[i], partyPosRef.current[i]);
     const caster = partyUnit(activePartyIdx);
     const aimed = aimPartyAction(action, {
       casterPos: activePartyPos, at: targetPos, floors: zone?.floors ?? SANCTUM_FLOORS, inCombat: combat.active,
@@ -523,7 +557,7 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
     });
     if (!aimed) { clearActiveSlot(); return; }
 
-    applyActionOutcome(executeAction(caster, action, aimed.targets, targetPos, aimed.allies), caster, targetPos);
+    applyActionOutcome(executeAction(caster, action, aimed.targets, targetPos, aimed.allies, actionWorld()), caster, targetPos);
     clearActiveSlot();
     if (combat.active) setCombat(prev => ({ ...prev, apSpent: prev.apSpent + action.apCost }));
   }, [combat.active, isPlayerTurn, activeAp, activePartyIdx, activeAction, zoneEnemies, activePartyPos, activeMp, partyAllStats, partyPositions, partyHp, party, zone, zoneSummons, tileTargets, applyActionOutcome, spawnFloat]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -540,9 +574,8 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
     const timers: ReturnType<typeof setTimeout>[] = [];
     timers.push(setTimeout(() => {
       if (!stunned) { endTurnRef.current(); return; }
-      const pos = partyPosRef.current[activePartyIdx];
-      const caster = memberUnit(activePartyIdx, party[activePartyIdx]?.characterName, partyStatsRef.current[activePartyIdx], pos);
-      applyActionOutcome(stunnedOutcome(pos), caster);
+      const caster = partyUnit(activePartyIdx);
+      applyActionOutcome(stunnedOutcome(caster.pos), caster);
       timers.push(setTimeout(() => endTurnRef.current(), STUNNED_PAUSE_MS));
     }, AUTO_END_TURN_DELAY_MS));
     return () => timers.forEach(clearTimeout);
@@ -555,12 +588,13 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
     partyPos: partyPosRef,
     partyStats: partyStatsRef,
     partyHp: partyHpRef,
-    partyNames: partyNamesRef,
     threat: threatRef,
     zone: zoneRef,
     currentZone: currentZoneRef,
     zoneObjects: zoneObjectsRef,
     applyOutcome: applyOutcomeRef,
+    partyUnit,
+    actionWorld,
   }), []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEnemyTurn(
@@ -582,9 +616,10 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
   }, [combat.active, zoneEnemies]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ─── Map loading ─────────────────────────────────────────────────────────
-  // The map stays under a dark cover until its 3D layer has drawn (useMapReady)
+  // The map stays under a dark cover until its 3D layer has drawn (useSceneReady), after fading to black before a
+  // change of map (useFadeOut, above)
   const mapKey = `${location}:${zone?.id ?? ''}`;
-  const { mapLoading, onMapReady } = useMapReady(mapKey);
+  const { loading: mapLoading, onReady: onMapReady } = useSceneReady(mapKey);
 
   // ─── Render ──────────────────────────────────────────────────────────────
 
@@ -615,7 +650,7 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
               onMove={handleMove}
               rifter={rifter}
               onUseRifter={() => setShowRifter(true)}
-              onEnterRift={handleLocationChange}
+              onEnterRift={travel}
               activeTarget={activeTarget}
               onAbilityUse={handlePlayerAttack}
               onAbilityDeselect={clearActiveSlot}
@@ -632,8 +667,8 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
               moveTargets={moveTargets}
               moveApCost={moveApCost}
               onMove={handleMove}
-              onLocationChange={handleLocationChange}
-              onDoorClick={handleDoorClick}
+              onLocationChange={travel}
+              onDoorClick={goThroughDoor}
               chests={chests.zoneChests}
               emptiedChests={chests.emptiedChests}
               onOpenChest={chests.openChestWindow}
@@ -659,8 +694,7 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
               floorColor={preset.floorColor}
               wallColor={preset.wallColor}
               doorObject={preset.doorObject}
-              riftColor={preset.riftColor}
-              enemyAoePreviewTiles={enemyAoePreview?.tiles}
+              enemyAoePreview={enemyAoePreview}
               enemyTargetKey={enemyTargetKey}
               tileTargets={tileTargets}
               droppedItems={zone?.droppedItems}
@@ -672,9 +706,9 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
           )}
         </PanView>
       </div>
-      {/* The map's cover while its 3D layer starts (under the HUD): on at once, fading out when ready */}
-      <div aria-hidden="true"
-        className={`absolute inset-0 z-20 bg-rift-void ${mapLoading ? 'opacity-100' : 'opacity-0 pointer-events-none transition-opacity duration-200'}`} />
+      {/* The map's cover while its 3D layer starts (under the HUD): fading in before a change of map, fading out
+          when the new one is ready */}
+      <LoadingCover loading={mapLoading || fading} fadeIn={fading} className="absolute inset-0 z-20" />
 
       {/* ─── HUD ─── */}
 
@@ -701,6 +735,8 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
         {import.meta.env.DEV && (
           <RiftButton size="sm" onClick={() => addXp(xpToNext(progress.level) - progress.xp)}>Level +1</RiftButton>
         )}
+        {/* TEMP (testing): add any dungeon's key to the keyring (components/DevKeyTool.tsx). Dev builds only. */}
+        {import.meta.env.DEV && <DevKeyTool keys={keyring.keys} onAddKey={keyring.addKey} />}
         <RiftButton size="sm" aria-label={anyoneLeveling ? 'Party (I), level up available' : 'Party (I)'} className={anyoneLeveling ? 'is-levelup' : ''} onClick={() => setShowCharSheet(true)}>Party</RiftButton>
       </div>
       {/* The party's XP, under the top buttons */}

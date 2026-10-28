@@ -1,4 +1,4 @@
-// The Rifter's window (UI handoff: Rifter device modal): pick one of the party's rift keys to set in the device,
+// The Rifter's window: pick one of the party's rift keys to set in the device,
 // then open its rift. Opened from the Sanctum's Rifter (its receptacle, the leader beside it). A centred dialog
 // over the dimmed game, at a fixed design size (it scales down to fit, never up):
 //   - the device: rings around the socket, tinted and turning in the set key's color (faster once open), the key

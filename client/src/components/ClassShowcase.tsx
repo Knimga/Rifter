@@ -9,6 +9,7 @@ import { startingGear } from '../data/units/party';
 import { characterModel, heldGear } from './characterModel';
 import { SHOWCASE_REST_YAW, SHOWCASE_SPIN_MS, ShowcaseRenderer } from '../viewEngine/three/showcase';
 import type { Model } from '../forge/core/types';
+import { useLatest } from '../hooks/useLatest';
 
 export interface ShowcaseItem {
   classKey: ClassKey;
@@ -29,8 +30,10 @@ function classModel(key: ClassKey): Model | null {
   return characterModel(key, weapon, offhand);
 }
 
-export default function ClassShowcase({ hostRef, items }: { hostRef: RefObject<HTMLElement | null>; items: ShowcaseItem[] }) {
+/** `onReady`: called once its first frame is drawn (the screen stops hiding it: useSceneReady). */
+export default function ClassShowcase({ hostRef, items, onReady }: { hostRef: RefObject<HTMLElement | null>; items: ShowcaseItem[]; onReady?: () => void }) {
   const layerRef = useRef<HTMLDivElement>(null);
+  const onReadyRef = useLatest(onReady);
   const models = useMemo(() => new Map(items.map((it) => [it.classKey, classModel(it.classKey)])), []); // eslint-disable-line react-hooks/exhaustive-deps
   const itemsRef = useRef(items);
   itemsRef.current = items;
@@ -42,7 +45,7 @@ export default function ClassShowcase({ hostRef, items }: { hostRef: RefObject<H
     if (!host || !layer) return;
     const r = new ShowcaseRenderer();
     layer.appendChild(r.canvas);
-    let raf = 0, last = 0;
+    let raf = 0, last = 0, drawn = false;
 
     const draw = (now: number) => {
       raf = 0;
@@ -64,6 +67,7 @@ export default function ClassShowcase({ hostRef, items }: { hostRef: RefObject<H
         cells.push({ model, yaw: p.yaw, scale: p.scale, dim: it.dim, rect: { x: b.left - hostBox.left, y: b.top - hostBox.top, w: b.width, h: b.height } });
       }
       r.render(cells, now / 1000);
+      if (!drawn) { drawn = true; onReadyRef.current?.(); }
       if (animating) { last = now; raf = requestAnimationFrame(draw); } else last = 0;
     };
     const request = () => { if (!raf) raf = requestAnimationFrame(draw); };
@@ -79,7 +83,7 @@ export default function ClassShowcase({ hostRef, items }: { hostRef: RefObject<H
       r.dispose();
       r.canvas.remove();
     };
-  }, [hostRef, models]);
+  }, [hostRef, models, onReadyRef]);
 
   // Hover / focus changes start the animation (it stops by itself once everything has settled)
   const stateKey = items.map((it) => `${it.classKey}:${+it.active}${+it.focused}${+it.dim}`).join('|');

@@ -13,7 +13,6 @@ import { STARTER_WEAPON_SERIES, WEAPON_SERIES, WEAPON_TYPE_DATA, weaponInvalidAf
 import { AFFIX_SLOTS_PER_GROUP, rollAffixes, starvedAffixGroups } from './affixes';
 import { chance, pick } from '../random';
 
-
 export const EMPTY_GEAR: GearSlots = {
   helm: null,
   chest: null,
@@ -41,6 +40,9 @@ export function isOffhandItem(item: Item): item is OffhandItem {
 export function isWeaponItem(item: Item): item is WeaponItem {
   return item.slot === 'mainhand';
 }
+
+/** The weapon in a set of gear's main hand, if any. */
+export const heldWeapon = (gear: GearSlots): WeaponItem | null => (gear.mainhand && isWeaponItem(gear.mainhand) ? gear.mainhand : null);
 
 // ─── Equipped gear → stats ────────────────────────────────────────────────────
 
@@ -191,8 +193,6 @@ export function generateOffhand(
 
 // ─── Loot Drops ───────────────────────────────────────────────────────────────
 
-export const LOOT_DROP_CHANCE = 0.10;
-
 type LootEntry =
   | { kind: 'weapon'; weaponType: WeaponType }
   | { kind: 'armor';  slot: ArmorSlot }
@@ -213,11 +213,15 @@ const LOOT_POOL: LootEntry[] = [
 export const USABLE_LOOT_WEIGHT = 4;
 
 /**
- * A loot drop (or none, by `dropChance`): any weapon, armor piece or offhand (shield, quiver, focus). Items the party can use
- * (`usable`, e.g. someone is proficient) come up USABLE_LOOT_WEIGHT times as often as ones it can't.
+ * A creature's loot drops, by `dropChance`: its whole part is that many guaranteed drops, its fraction the chance
+ * of one more (0.3: a 30% chance of one; 1.2: one, and a 20% chance of a second; 2.1: two, and a 10% chance of a
+ * third). Each is any weapon, armor piece or offhand (shield, quiver, focus). Items the party can use (`usable`,
+ * e.g. someone is proficient) come up USABLE_LOOT_WEIGHT times as often as ones it can't.
  */
-export function generateLootDrop(dungeonLevel: number, partyLevel: number, dropChance = LOOT_DROP_CHANCE, usable?: (item: Item) => boolean): Item | null {
-  return chance(dropChance) ? generateLootItem(dungeonLevel, { usable, partyLevel }) : null;
+export function generateLootDrops(dungeonLevel: number, partyLevel: number, dropChance: number, usable?: (item: Item) => boolean): Item[] {
+  const whole = Math.floor(dropChance);
+  const count = whole + (chance(dropChance - whole) ? 1 : 0);
+  return Array.from({ length: count }, () => generateLootItem(dungeonLevel, { usable, partyLevel }));
 }
 
 /**

@@ -3,11 +3,13 @@
 import { warnIgnoredEffects } from '../combat/abilities';
 import type { EnemyClassData, EnemyInstance } from './enemies';
 
+//attributes prop for all bosses should total +20
+
 export const BOSS_CLASSES: EnemyClassData[] = [
   {
     id: 'necromancer',
     name: 'Necromancer',
-    attributes: { toughness: 4, mind: 8, spirit: 4 },
+    attributes: { toughness: 6, mind: 8, spirit: 6 },
     highAttributes: ['mind', 'toughness'],
     lowAttributes: ['finesse', 'speed'],
     baseHp: 25,
@@ -48,7 +50,7 @@ export const BOSS_CLASSES: EnemyClassData[] = [
         ]
       }
     ],
-    dropChance: 1,
+    dropChance: 2,
     xpMultiplier: 6,
     model: 'creature.necromancer',
   },
@@ -103,14 +105,14 @@ export const BOSS_CLASSES: EnemyClassData[] = [
         ]
       }
     ],
-    dropChance: 1,
+    dropChance: 2,
     xpMultiplier: 6,
     model: 'creature.burning-spirit',
   },
   {
     id: 'sporemother',
     name: 'Sporemother',
-    attributes: { toughness: 6, mind: 8, spirit: 8 },
+    attributes: { toughness: 7, mind: 6, spirit: 7 },
     highAttributes: ['toughness', 'spirit'],
     lowAttributes: ['speed', 'finesse'],
     baseHp: 40,
@@ -159,8 +161,78 @@ export const BOSS_CLASSES: EnemyClassData[] = [
         ]
       }
     ],
+    dropChance: 2,
     xpMultiplier: 6,
     model: 'creature.sporemother'
+  },
+  {
+    id: 'troll-tamer',
+    name: 'Troll Tamer',
+    attributes: { toughness: 4, strength: 4, finesse: 6, mind: 6 },
+    highAttributes: ['toughness', 'mind'],
+    lowAttributes: ['strength', 'spirit'],
+    baseHp: 40,
+    baseArmor: 20,
+    armorPerLevel: 5,
+    passives: {
+      initiative: { name: 'Quick-witted', flat: 5 },
+      healing: { name: 'Rearer', flat: 2 },
+      healingReceived: { name: 'Bonded', flat: 4 }
+    },
+    abilities: [
+      {
+        name: "Master's Bond",
+        mpCost: 6,
+        apCost: 1,
+        range: 4,
+        target: 'ally',
+        displayElement: 'nature',
+        effects: [
+          // Each hit the bonded ally lands heals the tamer
+          { type: 'buff', appliesTo: 'target', rounds: 3, trigger: { when: 'attacking', on: 'hit',
+            effects: [{ type: 'heal', appliesTo: 'source', damageElement: 'nature', minHeal: 4, maxHeal: 6 }] } }
+        ]
+      },
+      {
+        name: "Stinky Salve",
+        mpCost: 6,
+        apCost: 1,
+        range: 4,
+        target: 'ally',
+        displayElement: 'nature',
+        effects: [
+          { type: 'heal', appliesTo: 'target', damageElement: 'nature', minHeal: 6, maxHeal: 9 }
+        ]
+      },
+      {
+        name: "Hand Crossbow",
+        mpCost: 0,
+        apCost: 1,
+        range: 4,
+        target: 'enemy',
+        useWeapon: true,
+        attackCategory: 'ranged',
+        effects: [
+          { type: 'damage', appliesTo: 'target', damageElement: 'physical', minDamage: 4, maxDamage: 6 },
+        ]
+      },
+      {
+        name: "Troll Tranquilizer",
+        mpCost: 8,
+        apCost: 2,
+        range: 4,
+        target: 'enemy',
+        useWeapon: true,
+        attackCategory: 'ranged',
+        effects: [
+          { type: 'damage', appliesTo: 'target', damageElement: 'physical', minDamage: 4, maxDamage: 6 },
+          { type: 'debuff', appliesTo: 'target', damageElement: 'poison', stats: { apMax: -2 }, rounds: 2 }
+        ]
+      }      
+    ],
+    dropChance: 3,
+    xpMultiplier: 6,
+    model: 'creature.troll-tamer'
   }
 ];
 

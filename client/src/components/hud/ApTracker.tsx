@@ -1,4 +1,4 @@
-// The action bar's AP tracker (UI handoff, AP): label, one pip per action point, `available / total`, and
+// The action bar's AP tracker: label, one pip per action point, `available / total`, and
 // a chip for AP lost to debuffs. Pips light from the left, so spending dims them from the right. Order: the
 // usable base pips, then lost pips (a stun: black, counted in neither number), then extra pips (a haste:
 // white). An armed ability's cost pulses on the pips it would spend. Hover or focus for the breakdown.

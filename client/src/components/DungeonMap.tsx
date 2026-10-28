@@ -4,30 +4,36 @@ import type { ActiveBuff, ActiveHot, ActiveDot } from '../data/units/stats';
 import { isAlly, type EnemyInstance } from '../data/units/enemies';
 import type { DungeonChest, ZoneData } from '../data/world/dungeonGen';
 import type { FogState } from '../hooks/useFogOfWar';
+import type { EnemyAoePreview } from '../hooks/useEnemyTurn';
 import { yawFromGridMove } from '../forge/core/facing';
 import { affectedKeys, isArea } from '../data/combat/areas';
-import { chebyshev, hasLineOfSight, isAdjacent, posKey, samePos, type Pos } from '../data/world/grid';
+import { inRangeAndSight, isAdjacent, keyPos, posKey, samePos, type Pos } from '../data/world/grid';
 import type { Item } from '../data/gear';
 import { unitKey } from '../data/combat/abilityExecution';
 import FloatingCombatText, { type FloatingText } from './FloatingCombatText';
 import { MoveCostPips } from './MoveLine';
 import { gameObjectGlow, gameObjectModel } from '../data/world/gameObjects';
-import { RIFT_MODELS, riftGlowCss } from '../data/world/rifts';
+import { RIFT_MODELS, SANCTUM_RIFT_COLOR, riftGlowCss } from '../data/world/rifts';
 import { DUNGEONS, type DungeonKey } from '../data/world/dungeons';
+import { Board, FloorGrid, FloorTile, HoverEdgeGlow, deepFogTiles, MapTag, MoveLineOverlay, ObjectTag, RIFT_TAG_HEIGHT, TileHighlight, UprightAt, UsableGlow, facingOpenSide, riftTag, toMapMember, useBoard, useHoveredTile, useStableHandler, type PartyTokenData, TILE_HIGHLIGHT } from './mapParts';
+import UnitStatus, { statusMarkers } from './hud/UnitStatus';
+import type { MapLoot, MapObject, UnitAim } from './ModelLayer';
 
 /** How high (world tiles) a rift key's name tag sits over the floor it lies on. */
 const KEY_TAG_HEIGHT = 0.35;
-import type { RGB } from '../forge/core/vec';
-import { Board, FloorGrid, FloorTile, HoverEdgeGlow, deepFogTiles, MoveLineOverlay, ObjectTag, RIFT_TAG_HEIGHT, TileHighlight, UprightAt, UsableGlow, facingOpenSide, riftTag, toMapMember, useBoard, useHoveredTile, useStableHandler, type PartyTokenData, TILE_HIGHLIGHT } from './mapParts';
-import UnitStatus, { statusMarkers } from './hud/UnitStatus';
-import type { MapLoot, MapObject, UnitAim } from './ModelLayer';
 
 // 3D party, enemy and loot models over the tile grid. Lazy: it pulls in three.js (GameScreen preloads it on mount).
 const ModelLayer = lazy(() => import('./ModelLayer'));
 
-/** Above an enemy's head: its effect markers (hoverable) over its HP bar. */
-function enemyOverlay(enemy: EnemyInstance) {
-  return <UnitStatus markers={statusMarkers(enemy.buffs, enemy.hots, enemy.dots)} hp={enemy.currentHp} maxHp={enemy.stats.hp} />;
+/** Above an enemy's head: its effect markers (hoverable) over its HP bar, and its name over them while it is hovered. */
+function enemyOverlay(enemy: EnemyInstance, hovered: boolean) {
+  return (
+    <>
+      {hovered && <MapTag text={enemy.classData.name} className="mb-1" />}
+      <UnitStatus markers={statusMarkers(enemy.buffs, enemy.hots, enemy.dots)} hp={enemy.currentHp} maxHp={enemy.stats.hp}
+        mp={enemy.currentMp} maxMp={enemy.stats.mp} />
+    </>
+  );
 }
 
 interface Props {
@@ -65,16 +71,17 @@ interface Props {
   floatingTexts: FloatingText[];
   onFloatingTextComplete: (id: number) => void;
   zone: ZoneData;
+  /** The zone's rift back to the Sanctum, if it has one (zoneRift), drawn in SANCTUM_RIFT_COLOR. */
   riftPos: Pos | null;
   partyBuffs: ActiveBuff[][];
   partyHots: ActiveHot[][];
   partyDots: ActiveDot[][];
   floorColor: string;
   wallColor: string;
-  /** GAME_OBJECTS ids of this dungeon's doors and exit rift (DungeonConfig). */
+  /** GAME_OBJECTS id of this dungeon's doors (DungeonConfig). */
   doorObject: string;
-  riftColor: RGB;
-  enemyAoePreviewTiles?: Set<string>;
+  /** A creature's area ability about to land: its tiles, green when it helps (a buff or heal), red when it harms. */
+  enemyAoePreview?: EnemyAoePreview | null;
   /** The unit (unitKey: a party member or summoned ally) a creature is about to hit; null when none. */
   enemyTargetKey: string | null;
   /** Tiles the selected 'tile' ability can be aimed at (GameScreen tileTargets); null when it isn't one. */
@@ -96,7 +103,7 @@ interface Props {
   fog: FogState | null;
 }
 
-export default function DungeonMap({ playerPos, activeMoverPos, party, moveTargets, moveApCost, onMove, onLocationChange, onDoorClick, chests, emptiedChests, onOpenChest, activeTarget, activeAbilityArea, areaTone, actionRange, onAbilityUse, onAbilityDeselect, onMemberSelect, enemies, inCombat, isPlayerTurn, activeCombatantId, floatingTexts, onFloatingTextComplete, zone, riftPos, partyBuffs, partyHots, partyDots, floorColor, wallColor, doorObject, riftColor, enemyAoePreviewTiles, enemyTargetKey, tileTargets = null, droppedItems = {}, droppedKeys = {}, onLootClick, aims, highlightUnitId = null, fog, onReady }: Props) {
+export default function DungeonMap({ playerPos, activeMoverPos, party, moveTargets, moveApCost, onMove, onLocationChange, onDoorClick, chests, emptiedChests, onOpenChest, activeTarget, activeAbilityArea, areaTone, actionRange, onAbilityUse, onAbilityDeselect, onMemberSelect, enemies, inCombat, isPlayerTurn, activeCombatantId, floatingTexts, onFloatingTextComplete, zone, riftPos, partyBuffs, partyHots, partyDots, floorColor, wallColor, doorObject, enemyAoePreview, enemyTargetKey, tileTargets = null, droppedItems = {}, droppedKeys = {}, onLootClick, aims, highlightUnitId = null, fog, onReady }: Props) {
   const { width, height, floors, doors } = zone;
   const hover = useHoveredTile();
   const hoveredTile = hover.hovered;
@@ -112,9 +119,9 @@ export default function DungeonMap({ playerPos, activeMoverPos, party, moveTarge
   const isAdjacentToRift = riftPos ? isAdjacent(playerPos, riftPos) : false;
 
   // Per-tile lookups, built once per render instead of scanning lists for every tile
-  const enemyByKey = useMemo(() => new Map(enemies.filter(e => e.currentHp > 0).map(e => [posKey(e.pos), e])), [enemies]);
   // Living enemies drawn as models (stable array while `enemies` is unchanged, so ModelLayer can memo on it)
   const modelEnemies = useMemo(() => enemies.filter(e => e.currentHp > 0), [enemies]);
+  const enemyByKey = useMemo(() => new Map(modelEnemies.map(e => [posKey(e.pos), e])), [modelEnemies]);
   const memberByKey = useMemo(() => new Map(party.map(m => [posKey(m.pos), m])), [party]);
   // Loot drawn as models: the top item of each pile, and each rift key (the keystone, in its dungeon's color)
   const modelLoot = useMemo(() => {
@@ -122,12 +129,10 @@ export default function DungeonMap({ playerPos, activeMoverPos, party, moveTarge
     for (const [key, items] of Object.entries(droppedItems)) {
       const top = items[0];
       if (!top) continue;
-      const [x, y] = key.split(',').map(Number);
-      out.push({ id: top.id, link: top.model, pos: { x, y } });
+      out.push({ id: top.id, link: top.model, pos: keyPos(key) });
     }
     for (const [key, dungeon] of Object.entries(droppedKeys)) {
-      const [x, y] = key.split(',').map(Number);
-      out.push({ id: `key-${dungeon}`, link: RIFT_MODELS.keystone.model, pos: { x, y }, tint: DUNGEONS[dungeon].riftColor });
+      out.push({ id: `key-${dungeon}`, link: RIFT_MODELS.keystone.model, pos: keyPos(key), tint: DUNGEONS[dungeon].riftColor });
     }
     return out;
   }, [droppedItems, droppedKeys]);
@@ -138,21 +143,21 @@ export default function DungeonMap({ playerPos, activeMoverPos, party, moveTarge
   );
   const doorByKey = useMemo(() => new Map(doors.map(d => [posKey(d.pos), d])), [doors]);
   const chestByKey = useMemo(() => new Map(chests.map(c => [posKey(c.pos), c])), [chests]);
-  // Doors, the exit rift and chests, drawn as their game objects' models. A door stands in its wall tile
+  // Doors, the zone's rift and chests, drawn as their game objects' models. A door stands in its wall tile
   // facing the floor it opens onto; a chest stands with its back to a wall (its `facing`), its lid open once
   // it has been emptied (its 'open' animation).
   const emptiedKey = [...emptiedChests].sort().join('|');
   const mapObjects = useMemo(() => {
     const isFloor = (q: Pos) => floors.has(posKey(q));
     const out: MapObject[] = doors.map(d => ({ id: d.id, link: gameObjectModel(doorObject), pos: d.pos, facing: facingOpenSide(d.pos, isFloor) }));
-    if (riftPos) out.push({ id: 'rift', link: RIFT_MODELS.rift.model, pos: riftPos, facing: facingOpenSide(riftPos, isFloor), tint: riftColor });
+    if (riftPos) out.push({ id: 'rift', link: RIFT_MODELS.rift.model, pos: riftPos, facing: facingOpenSide(riftPos, isFloor), tint: SANCTUM_RIFT_COLOR });
     for (const c of chests) {
       out.push({ id: c.id, link: gameObjectModel(c.object), pos: c.pos, facing: yawFromGridMove(...c.facing), played: emptiedChests.has(c.id) ? ['open'] : undefined });
     }
     return out;
-  }, [doors, floors, riftPos, doorObject, riftColor, chests, emptiedKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [doors, floors, riftPos, doorObject, chests, emptiedKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const inRangeWithLOS = (p: Pos) => chebyshev(activeMoverPos, p) <= actionRange && hasLineOfSight(activeMoverPos, p, floors);
+  const inRangeWithLOS = (p: Pos) => inRangeAndSight(activeMoverPos, p, actionRange, floors);
 
   // AoE preview tiles (computed from hover position)
   const aoeTiles = useMemo(() => {
@@ -263,17 +268,21 @@ export default function DungeonMap({ playerPos, activeMoverPos, party, moveTarge
         )}
         {/* A door, the rift or a chest the leader can use now: a soft pulsing glow on its tile (stronger on hover) */}
         {/* The rift, hovered from farther away: its edges glow faintly */}
-        {isRift && !isAdjacentToRift && hover.isHovered(p) && <HoverEdgeGlow color={riftGlowCss(riftColor)} />}
+        {isRift && !isAdjacentToRift && hover.isHovered(p) && <HoverEdgeGlow color={riftGlowCss(SANCTUM_RIFT_COLOR)} />}
         {((door && isDoorAdjacent && !inCombat) || (isRift && isAdjacentToRift)) && (
-          <UsableGlow color={door ? gameObjectGlow(doorObject) : riftGlowCss(riftColor)} hovered={hover.isHovered(p)} />
+          <UsableGlow color={door ? gameObjectGlow(doorObject) : riftGlowCss(SANCTUM_RIFT_COLOR)} hovered={hover.isHovered(p)} />
         )}
         {chest && isChestUsable && <UsableGlow color={gameObjectGlow(chest.object)} hovered={hover.isHovered(p)} />}
         {highlight && <TileHighlight kind={highlight} />}
         {isHighlightedUnit && <TileHighlight kind="hovered" />}
-        {enemyAoePreviewTiles?.has(key) && <TileHighlight kind="enemyArea" className="z-20 animate-pulse" />}
+        {enemyAoePreview?.tiles.has(key) && <TileHighlight kind={enemyAoePreview.helpful ? 'areaHelp' : 'enemyArea'} className="z-20 animate-pulse" />}
       </FloorTile>
     );
   };
+
+  // The enemy on the hovered tile, if the party sees it now: its name shows over its head
+  const hoveredEnemyId = hoveredTile && isSeenNow(posKey(hoveredTile)) ? enemyByKey.get(posKey(hoveredTile))?.id : undefined;
+  const renderEnemyOverlay = (e: EnemyInstance) => enemyOverlay(e, e.id === hoveredEnemyId);
 
   const showMoveLine = !activeTarget && canAct && !!hoveredTile && moveTargets.has(posKey(hoveredTile));
   const hoveredMoveAp = showMoveLine && moveApCost ? moveApCost(moveTargets.get(posKey(hoveredTile!))!) : 0;
@@ -291,7 +300,7 @@ export default function DungeonMap({ playerPos, activeMoverPos, party, moveTarge
     <Board board={board} floor={floor}>
       <Suspense fallback={null}>
         {/* Keyed by zone: entering another zone places every model fresh instead of gliding it across */}
-        <ModelLayer key={zone.id} board={board} party={modelParty} enemies={modelEnemies} loot={modelLoot} objects={mapObjects} renderEnemyOverlay={enemyOverlay} aims={aims} fog={fog} onReady={onReady} />
+        <ModelLayer key={zone.id} board={board} party={modelParty} enemies={modelEnemies} loot={modelLoot} objects={mapObjects} renderEnemyOverlay={renderEnemyOverlay} aims={aims} fog={fog} onReady={onReady} />
       </Suspense>
 
       {/* The AP the hovered move costs, where its move line ends */}
@@ -303,7 +312,7 @@ export default function DungeonMap({ playerPos, activeMoverPos, party, moveTarge
 
       {/* How many items a pile holds, when more than one */}
       {Object.entries(droppedItems).filter(([key, items]) => items.length > 1 && isKnown(key)).map(([key, items]) => {
-        const [x, y] = key.split(',').map(Number);
+        const { x, y } = keyPos(key);
         return (
           <UprightAt key={key} board={board} x={x} y={y} height={0.2} className="z-10">
             <span className="relative left-3 -top-2 min-w-3.5 h-3.5 px-0.5 box-border flex items-center justify-center bg-rift-panel border border-rift-loot rounded-sm text-[9px] leading-none text-rift-loot">

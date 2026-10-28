@@ -1,8 +1,10 @@
 import type { Design } from '../../core/types';
 import type { ColorFn } from '../../core/mesh';
 import { bipyr, blob, box, fibSphere, frustum, loft, onEllipsoid, tendril, wobbleRing } from '../../core/primitives';
-import { add, hslRGB, lerp3, mixC, mul, mulC, norm, type RGB, type Vec3 } from '../../core/vec';
+import { add, hslRGB, lerp3, mixC, mulC, norm, type RGB, type Vec3 } from '../../core/vec';
 import { antler, mush, shelf } from '../_fungal';
+import { archHood } from '../_hood';
+import { gnarledStaff } from '../_staff';
 
 // Identity: a fungal hag, the Fungal Forest's boss. A squat, stout, hunched crone: a broad, heavy body under a
 // dull, weathered mustard-yellow robe that pools on the floor, a bent back, her gnarled grey-green head
@@ -107,40 +109,16 @@ const design: Design = {
     // along the opening and down its sides. Each arch: depth (z), half-width, top height, the height its sides
     // come down to.
     m.part('torso');
-    const COWL: [number, number, number, number][] = [
-      [0.56, 0.17, 1.0, 0.66], [0.46, 0.18, 0.99, 0.64], [0.36, 0.19, 0.93, 0.62],
-      [0.26, 0.2, 0.83, 0.6], [0.16, 0.22, 0.72, 0.58], [0.06, 0.24, 0.64, 0.56], // the last ones into the robe
-    ];
-    const ARC = 10, THICK = 0.025;
-    /** How far the whole hood sits back from the arches above (z): pulled back to show a little more of her head. */
-    const COWL_BACK = 0.04;
-    const cowlColor = (y: number) => robeColor([0, y, 0.3], [0, 0, -1]);
-    const lining = mulC(robe, 0.45);
-    /** A point of arch k, step i over it (0 = her left side's foot, ARC = her right's), `dr` in from the outside. */
-    const arch = (k: number, i: number, dr = 0): Vec3 => {
-      const [z, w, top, foot] = COWL[k], t = (i / ARC - 0.5) * Math.PI; // -90deg (left foot) .. 0 (top) .. 90deg
-      return [H[0] - Math.sin(t) * (w - dr), foot + Math.cos(t) * (top - foot - dr), z - COWL_BACK];
-    };
-    for (let k = 0; k < COWL.length - 1; k++) {
-      // The hood's axis between these two arches (low, at their feet): the outside faces away from it
-      const axis: Vec3 = [H[0], (COWL[k][3] + COWL[k + 1][3]) / 2, (COWL[k][0] + COWL[k + 1][0]) / 2];
-      for (let i = 0; i < ARC; i++) {
-        m.quad(arch(k, i), arch(k, i + 1), arch(k + 1, i + 1), arch(k + 1, i), cowlColor(COWL[k][2]), axis, { j: 0.16 });
-        // The lining faces in, toward her head (oriented away from a point out past the outside)
-        const mid = lerp3(arch(k, i), arch(k + 1, i + 1), 0.5), out = add(mid, mul(norm([mid[0] - axis[0], mid[1] - axis[1], 0]), 1));
-        m.quad(arch(k, i, THICK), arch(k, i + 1, THICK), arch(k + 1, i + 1, THICK), arch(k + 1, i, THICK), lining, out, { j: 0.12 });
-      }
-      // Lips down its sides, at the feet of the arches
-      for (const i of [0, ARC]) {
-        const below = add(lerp3(arch(k, i), arch(k + 1, i), 0.5), [0, 1, 0]);
-        m.quad(arch(k, i), arch(k + 1, i), arch(k + 1, i, THICK), arch(k, i, THICK), cowlColor(COWL[k][3]), below, { j: 0.12 });
-      }
-    }
-    // The lip along the opening (the first arch), facing forward
-    for (let i = 0; i < ARC; i++) {
-      const behind = add(lerp3(arch(0, i), arch(0, i + 1), 0.5), [0, 0, -1]);
-      m.quad(arch(0, i), arch(0, i + 1), arch(0, i + 1, THICK), arch(0, i, THICK), cowlColor(COWL[0][2]), behind, { j: 0.12 });
-    }
+    archHood(m, {
+      arches: [
+        [0.56, 0.17, 1.0, 0.66], [0.46, 0.18, 0.99, 0.64], [0.36, 0.19, 0.93, 0.62],
+        [0.26, 0.2, 0.83, 0.6], [0.16, 0.22, 0.72, 0.58], [0.06, 0.24, 0.64, 0.56], // the last ones into the robe
+      ],
+      x: H[0],
+      back: 0.04, // pulled back to show a little more of her head
+      color: (y) => robeColor([0, y, 0.3], [0, 0, -1]),
+      lining: mulC(robe, 0.45),
+    });
 
     // ─── Arms: the right holds the staff out to the side; the left reaches forward, clawed ────────────────
     const fingers = (hand: Vec3, dir: Vec3, spread: number) => {
@@ -168,14 +146,7 @@ const design: Design = {
     // ─── The staff: gnarled, planted out to her right, leaning a little outward ───────────────────────────
     m.part('staff', GRIP);
     const BASE: Vec3 = [-0.44, 0, 0.44], TOP: Vec3 = [-0.56, 1.02, 0.36];
-    const knots = [0, 0.22, 0.45, 0.68, 0.86, 1].map((t, i, all) => {
-      const p = lerp3(BASE, TOP, t);
-      return i === 0 || i === all.length - 1 ? p : add(p, [rf(-0.025, 0.025), 0, rf(-0.025, 0.025)]);
-    });
-    for (let i = 0; i < knots.length - 1; i++) {
-      frustum(m, knots[i], knots[i + 1], 0.03 - i * 0.002, 0.028 - i * 0.002, 5, BARK, { j: 0.2 });
-      if (i > 0) blob(m, knots[i], [0.034, 0.03, 0.034], 0, 0.25, mulC(BARK, 1.15));
-    }
+    gnarledStaff(m, rf, BASE, TOP, BARK);
     // Topped with Sporetender antlers, glowing at their tips
     const capTop = capColor(), capGill = mixC(capTop, [230, 220, 190], 0.6);
     for (const sx of [-1, 1]) antler(c, TOP, sx, 0.42, 2, BONE, capTop, capGill, GLOW, { capSides: 5 });

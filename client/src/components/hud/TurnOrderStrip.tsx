@@ -1,4 +1,4 @@
-// Turn order (UI handoff, game screen): "Round N" and a pill per combatant, party grey with a diamond,
+// Turn order: "Round N" and a pill per combatant, party grey with a diamond,
 // summoned allies grey, enemies dark red. The current one glows; those that have acted this round fade. Hovering a pill
 // highlights that unit on the map.
 import type { Combatant } from '../../data/combat/combat';

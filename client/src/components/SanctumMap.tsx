@@ -1,6 +1,6 @@
 import { lazy, Suspense, useMemo } from 'react';
 import type { TargetType } from '../data/combat/abilities';
-import { posKey, type Pos } from '../data/world/grid';
+import { isAdjacent, posKey, samePos, type Pos } from '../data/world/grid';
 import { SANCTUM_FLOOR_COLOR, SANCTUM_WALL_COLOR } from '../data/constants';
 import { SANCTUM, SANCTUM_RECEPTACLE, SANCTUM_SHOWN, isSanctumWall } from '../data/world/sanctum';
 import { gameObjectGlow, gameObjectModel } from '../data/world/gameObjects';
@@ -8,13 +8,12 @@ import { DUNGEONS, type DungeonKey } from '../data/world/dungeons';
 import { riftGlowCss } from '../data/world/rifts';
 import { yawFromGridMove } from '../forge/core/facing';
 import { RIFTER_TINT_PARTS } from '../forge/designs/_rifter';
-import { isAdjacent, samePos } from '../data/world/grid';
 import { Board, FloorGrid, FloorTile, deepFogTiles, HoverEdgeGlow, MoveLineOverlay, ObjectTag, RIFT_TAG_HEIGHT, TileHighlight, UsableGlow, riftTag, toMapMember, useBoard, useHoveredTile, useStableHandler, type PartyTokenData } from './mapParts';
+import type { MapObject, UnitAim } from './ModelLayer';
+import type { FogInput } from '../viewEngine/three/fog';
 
 // 3D party models over the tile grid. Lazy: it pulls in three.js (GameScreen preloads it on mount).
 const ModelLayer = lazy(() => import('./ModelLayer'));
-import type { MapObject, UnitAim } from './ModelLayer';
-import type { FogInput } from '../viewEngine/three/fog';
 
 /**
  * The Sanctum's fog: everything in it always in sight (its floor and the walls around it), so it only darkens the

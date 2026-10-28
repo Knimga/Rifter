@@ -1,4 +1,4 @@
-// Full-screen background of every screen (UI handoff): a near-black radial gradient, on the menu screens a
+// Full-screen background of every screen: a near-black radial gradient, on the menu screens a
 // soft --glow tint behind the content and along the bottom edge, and a film-grain overlay.
 import type { CSSProperties, ReactNode } from 'react';
 

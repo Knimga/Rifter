@@ -1,7 +1,7 @@
 // The UI theme's raised button (.rf-btn in index.css): display font, uppercase, wide tracking, glows on hover.
 import type { ButtonHTMLAttributes } from 'react';
 
-/** Sizes from the UI handoff: `lg` = title / start buttons, `md` = panel actions, `sm` = HUD buttons. */
+/** Sizes: `lg` = title / start buttons, `md` = panel actions, `sm` = HUD buttons. */
 const SIZE = {
   lg: 'min-h-[56px] px-16 text-sm tracking-[0.25em]',
   md: 'min-h-[44px] px-6 text-xs tracking-[0.2em]',

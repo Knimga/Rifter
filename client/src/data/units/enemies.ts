@@ -12,7 +12,7 @@ import { pickWeighted } from '../random';
 // Creature classes (enemies, and allies summoned by the party: data/units/summons.ts) work like player classes
 // but are not selectable at character select. They define a name, a model, innate attribute bonuses,
 // armor scaling, high/low attribute preferences for auto point-buy, and abilities.
-// All attacks are mpCost:0 abilities — no separate weapon field.
+// No weapon field: attacks are abilities, the basic one an mpCost:0 attack (basicAttack).
 
 export interface CreatureClassData {
   id: string;
@@ -47,12 +47,13 @@ export interface CreatureClassData {
   model: ModelLink;
 
   // Hostile creatures only (EnemyClassData); a summon drops nothing and is worth no XP
-  dropChance?: number;   // probability of dropping an item on death (default: LOOT_DROP_CHANCE)
+  dropChance?: number;   // items dropped on death: its whole part guaranteed, its fraction the chance of one more (1.2: one, and 20% for a second)
   xpMultiplier?: number; // XP worth relative to a standard enemy of its level (data/units/xp.ts killXp): tougher = more, bosses ~6
 }
 
 /** A hostile creature's class: one the party fights (and that drops loot and gives XP). */
 export interface EnemyClassData extends CreatureClassData {
+  dropChance: number;
   xpMultiplier: number;
 }
 
@@ -184,6 +185,18 @@ export const isHostile = (e: EnemyInstance) => !e.summon?.allied;
 /** A creature on the party's side: one it summoned. */
 export const isAlly = (e: EnemyInstance): e is EnemyInstance & { summon: SummonInfo } => !!e.summon?.allied;
 
+/**
+ * A creature's basic attack (its "weapon", for a trigger's weaponAttack): its first enemy-target ability with no
+ * MP cost, the cheapest in AP of those.
+ */
+export function basicAttack(classData: CreatureClassData): Ability | undefined {
+  const free = classData.abilities.filter(a => a.target === 'enemy' && a.mpCost === 0);
+  return free.reduce<Ability | undefined>((best, a) => (!best || a.apCost < best.apCost ? a : best), undefined);
+}
+
+/** Whether a creature attacks with a physical weapon (a useWeapon ability): what a weaponOnly trigger needs. */
+export const isArmed = (classData: CreatureClassData) => classData.abilities.some(a => a.useWeapon);
+
 // ─── Buff Helpers ─────────────────────────────────────────────────────────────
 
 /** Return a new EnemyInstance with its buff list replaced and stats recomputed. */
@@ -198,7 +211,7 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
   {
     id: 'skeleton',
     name: 'Skeleton',
-    attributes: { toughness: 2, finesse: 2 },
+    attributes: {},
     highAttributes: ['strength', 'finesse'],
     lowAttributes: ['mind', 'spirit'],
     baseHp: 15,
@@ -216,10 +229,10 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
         range: 1,
         target: 'enemy',
         attackCategory: 'melee',
-        effects: [{ type: 'damage', appliesTo: 'target', damageElement: 'physical', minDamage: 5, maxDamage: 7 }],
+        effects: [{ type: 'damage', appliesTo: 'target', damageElement: 'physical', minDamage: 4, maxDamage: 6 }],
       },
     ],
-    dropChance: 0.4,
+    dropChance: 0.2,
     xpMultiplier: 0.8,
     model: 'creature.skeleton',
   },
@@ -254,12 +267,12 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
         attackCategory: 'melee',
         displayElement: 'poison',
         effects: [
-          {type: 'damage', appliesTo: 'target', damageElement: 'poison', minDamage: 4, maxDamage: 8},
+          {type: 'damage', appliesTo: 'target', damageElement: 'poison', minDamage: 4, maxDamage: 6 },
           {type: 'dot', appliesTo: 'target', damageElement: 'poison', damagePerRound: 5, rounds: 3}
         ]
       }
     ],
-    dropChance: 0.4,
+    dropChance: 0.3,
     xpMultiplier: 1,
     model: 'creature.zombie',
   },
@@ -301,11 +314,12 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
         displayElement: 'ice',
         attackCategory: 'magic',
         effects: [
-          { type: 'damage', appliesTo: 'target', damageElement: 'shadow', minDamage: 4, maxDamage: 7 },
-          { type: 'debuff', appliesTo: 'target', damageElement: 'ice', stats: { movement: -1 }, rounds: 3 }
+          { type: 'damage', appliesTo: 'target', damageElement: 'shadow', minDamage: 3, maxDamage: 6 },
+          { type: 'debuff', appliesTo: 'target', damageElement: 'ice', stats: { dodge: -10 }, rounds: 2 }
         ]
       }
     ],
+    dropChance: 0.4,
     xpMultiplier: 1.3,
     model: 'creature.specter'
   },
@@ -346,7 +360,7 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
         ]
       }
     ],
-    dropChance: 0.3,
+    dropChance: 0.2,
     xpMultiplier: 1.2,
     model: 'creature.lava-slime',
   },
@@ -442,6 +456,7 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
         ]
       }
     ],
+    dropChance: 0.1,
     xpMultiplier: 0.2,
     model: 'creature.fungal-spore'
   },
@@ -492,6 +507,7 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
         ]
       }
     ],
+    dropChance: 0.2,
     xpMultiplier: 2,
     model: 'creature.sporetender'
   },
@@ -537,6 +553,7 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
         ]
       }
     ],
+    dropChance: 0.3,
     xpMultiplier: 2,
     model: 'creature.mirehulk'
   },
@@ -564,7 +581,6 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
         displayElement: 'poison',
         effects: [
           { type: 'damage', appliesTo: 'target', damageElement: 'poison', minDamage: 4, maxDamage: 6 },
-
         ]
       },
       {
@@ -581,6 +597,7 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
         ]
       }
     ],
+    dropChance: 0.1,
     xpMultiplier: 1,
     model: 'creature.rotfly-swarm'
   },
@@ -625,26 +642,222 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
         ]
       }
     ],
+    dropChance: 0.1,
     xpMultiplier: 1.5,
     model: 'creature.gloomtoad'
   },
-  { //in-progress
+  {
     id: 'goblin-warrior',
     name: 'Goblin Warrior',
-    attributes: { toughness: 3, finesse: 2, strength: 3},
+    attributes: { toughness: 2, finesse: 4, strength: 2 },
     highAttributes: ['speed', 'strength'],
     lowAttributes: ['mind', 'spirit'],
+    baseHp: 15,
+    baseArmor: 20,
+    armorPerLevel: 5,
+    passives: {
+      initiative: { name: 'Quick-witted', flat: 5 },
+      block: { name: 'Goblin Buckler', flat: 5 },
+      glancingBlow: { name: 'Rough n Tough', flat: 5 }
+    },
+    abilities: [
+      {
+        name: 'Shortsword',
+        mpCost: 0,
+        apCost: 1,
+        range: 1,
+        useWeapon: true,
+        target: 'enemy',
+        attackCategory: 'melee',
+        displayElement: 'physical',
+        effects: [{ type: 'damage', appliesTo: 'target', damageElement: 'physical', minDamage: 4, maxDamage: 6 }],
+      },
+      {
+        name: 'Battlechant',
+        mpCost: 8,
+        apCost: 2,
+        range: 0,
+        target: 'ally',
+        area: 'blast2',
+        effects: [
+          { type: 'buff', appliesTo: 'allies', stats: { meleeDamage: 1, armor: 5 }, rounds: 3 }
+        ]
+      },
+      {
+        name: 'Shield Bash',
+        mpCost: 5,
+        apCost: 1,
+        range: 1,
+        target: 'enemy',
+        attackCategory: 'melee',
+        displayElement: 'physical',
+        effects: [
+          { type: 'debuff', appliesTo: 'target', stats: { meleeHit: -5 }, rounds: 2 }
+        ]
+      }
+    ],
+    dropChance: 0.4,
+    xpMultiplier: 0.8,
+    model: 'creature.goblin-warrior'
+  },
+  {
+    id: 'goblin-archer',
+    name: 'Goblin Archer',
+    attributes: { toughness: 2, finesse: 4, speed: 2 },
+    highAttributes: ['speed', 'finesse'],
+    lowAttributes: ['mind', 'spirit'],
+    baseHp: 15,
+    baseArmor: 15,
+    armorPerLevel: 3,
+    passives: {
+      initiative: { name: 'Quick-witted', flat: 5 },
+      dodge: { name: 'Shifty', flat: 5 }
+    },
+    abilities: [
+      {
+        name: 'Shortbow',
+        mpCost: 0,
+        apCost: 1,
+        range: 4,
+        useWeapon: true,
+        target: 'enemy',
+        attackCategory: 'ranged',
+        displayElement: 'physical',
+        effects: [
+          { type: 'damage', appliesTo: 'target', damageElement: 'physical', minDamage: 2, maxDamage: 4 }
+        ],
+      },
+      {
+        name: 'Barbed Arrow',
+        mpCost: 8,
+        apCost: 2,
+        range: 4,
+        useWeapon: true,
+        target: 'enemy',
+        attackCategory: 'ranged',
+        displayElement: 'physical',
+        effects: [
+          { type: 'damage', appliesTo: 'target', damageElement: 'physical', minDamage: 2, maxDamage: 4 },
+          { type: 'dot', appliesTo: 'target', damageElement: 'physical', damagePerRound: 4, rounds: 3, maxStacks: 3 }
+        ]
+      }
+    ],
+    dropChance: 0.4,
+    xpMultiplier: 0.8,
+    model: 'creature.goblin-archer'
+  },
+  {
+    id: 'goblin-shaman',
+    name: 'Goblin Shaman',
+    attributes: { toughness: 2, spirit: 4, speed: 2 },
+    highAttributes: ['spirit', 'finesse'],
+    lowAttributes: ['mind', 'strength'],
     baseHp: 20,
+    baseArmor: 10,
+    armorPerLevel: 4,
+    resistances: { nature: 20, shadow: 20 },
+    passives: {
+      initiative: { name: 'Quick-witted', flat: 5 },
+      shadowDamage: { name: 'Voodoo', flat: 3 },
+      magicResistance: { name: 'Strong-willed', flat: 10 }
+    },
+    abilities: [
+      {
+        name: 'Hex',
+        mpCost: 5,
+        apCost: 1,
+        range: 4,
+        target: 'enemy',
+        attackCategory: 'magic',
+        displayElement: 'shadow',
+        effects: [
+          { type: 'dot', appliesTo: 'target', damageElement: 'shadow', damagePerRound: 3, rounds: 3 }
+        ],
+      },
+      {
+        name: 'Restore',
+        mpCost: 7,
+        apCost: 2,
+        range: 4,
+        target: 'ally',
+        displayElement: 'nature',
+        effects: [
+          { type: 'heal', appliesTo: 'target', damageElement: 'nature', minHeal: 4, maxHeal: 8 },
+        ]
+      },
+      {
+        name: 'Cursed Weapon',
+        mpCost: 5,
+        apCost: 1,
+        range: 4,
+        target: 'ally',
+        displayElement: 'shadow',
+        effects: [
+          { type: 'buff', appliesTo: 'target', rounds: 3, 
+            trigger: {
+              when: 'attacking', 
+              categories: ['melee','ranged'], 
+              weaponOnly: true,
+              chance: 100,
+              effects: [{type: 'damage', appliesTo: 'target', damageElement: 'shadow', minDamage: 3, maxDamage: 3}]
+            }}
+        ]
+      }
+    ],
+    dropChance: 0.4,
+    xpMultiplier: 1,
+    model: 'creature.goblin-shaman'
+  },
+  {
+    id: 'troll',
+    name: 'Troll',
+    attributes: { toughness: 4, strength: 4 },
+    highAttributes: ['toughness', 'strength'],
+    lowAttributes: ['mind', 'spirit'],
+    baseHp: 30,
     baseArmor: 15,
     armorPerLevel: 5,
-    resistances: {  },
     passives: {
-
-
+      hpRegen: { name: 'Regeneration', flat: 1 }
     },
-    abilities: [],
-    xpMultiplier: 0.8,
-    model: ''
+    abilities: [
+      {
+        name: 'Club',
+        mpCost: 0,
+        apCost: 2,
+        range: 1,
+        target: 'enemy',
+        useWeapon: true,
+        effects: [
+          { type: 'damage', appliesTo: 'target', damageElement: 'physical', minDamage: 8, maxDamage: 12 }
+        ]
+      },
+      {
+        name: 'Punt',
+        mpCost: 0,
+        apCost: 1,
+        range: 1,
+        target: 'enemy',
+        effects: [
+          { type: 'damage', appliesTo: 'target', damageElement: 'physical', minDamage: 4, maxDamage: 7 }
+        ]
+      },
+      {
+        name: 'Cleave',
+        mpCost: 8,
+        apCost: 3,
+        range: 0,
+        target: 'enemy',
+        useWeapon: true,
+        area: 'blast1',
+        effects: [
+          { type: 'damage', appliesTo: 'target', damageElement: 'physical', minDamage: 6, maxDamage: 8 }
+        ]
+      }
+    ],
+    dropChance: 0.5,
+    xpMultiplier: 2,
+    model: 'creature.troll'
   }
 ];
 

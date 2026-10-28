@@ -24,7 +24,7 @@ export function partialGlowShader(shader: THREE.WebGLProgramParametersWithUnifor
 /**
  * Halos (MeshData.halos): each a quad turned to face the camera in the vertex shader (`haloCorner` -1..1 times
  * `haloRadius`, in view space), brought forward by its radius so the surface it sits on doesn't cut it, then
- * faded from its center like the forge's handoff glow (0.5 at the center, 0.16 at 40%, 0 at the edge) and
+ * faded from its center (0.5 at the center, 0.16 at 40%, 0 at the edge) and
  * added to what is behind it. Depth-tested, so a body in front hides it.
  */
 export function haloShader(shader: THREE.WebGLProgramParametersWithUniforms): void {

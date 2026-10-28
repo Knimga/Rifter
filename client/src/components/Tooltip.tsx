@@ -5,7 +5,7 @@ import { isArmorItem, isOffhandItem, isShieldItem, isWeaponItem, type Item, type
 import { OFFHAND_KIND_NAME } from '../data/gear/offhands';
 import type { Stats } from '../data/units/stats';
 import { RARITY_COLOR } from '../data/constants';
-import { describeEffect, formatModifier } from '../data/detailStrings';
+import { formatModifier, weaponDamageLines } from '../data/detailStrings';
 import { getOffense } from '../data/combat/attackResolution';
 import { weaponDamageEffect } from '../data/combat/abilityExecution';
 import { EffectRow } from './ui/AbilityCard';
@@ -144,7 +144,7 @@ function WeaponTooltipContent({ item, stats, ...rest }: ItemTooltipProps & { ite
   const bonus = stats ? getOffense(stats, item.attackCategory, item.damageElement).damage : 0;
   return (
     <ItemTip item={item} type={`${item.weaponType} · ${item.attackCategory}`} {...rest}>
-      {describeEffect(weaponDamageEffect(item), bonus).map((line, i) => (
+      {weaponDamageLines(weaponDamageEffect(item), bonus).map((line, i) => (
         <EffectRow key={i} label={line.label} value={line.value} tone={line.tone} element={line.element} />
       ))}
       <EffectRow label="Range" value={String(item.range)} tone="base" />
@@ -160,7 +160,7 @@ function ArmorTooltipContent({ item, stats: _stats, ...rest }: ItemTooltipProps 
   );
 }
 
-/** A quiver: no armor, only its implicit and affixes (ItemTip shows them). */
+/** A quiver or a focus: no armor, only its implicit and affixes (ItemTip shows them). */
 function OffhandTooltipContent({ item, stats: _stats, ...rest }: ItemTooltipProps & { item: OffhandItem }) {
   return <ItemTip item={item} type={OFFHAND_KIND_NAME[item.offhandKind]} {...rest} />;
 }

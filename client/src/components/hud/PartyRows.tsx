@@ -1,4 +1,4 @@
-// The party (UI handoff, game screen, bottom left): a row per member with portrait, name, level and class, and HP/MP.
+// The party (bottom left): a row per member with portrait, name, level and class, and HP/MP.
 // The selected member (acting in combat; chosen out of combat) glows. Out of combat a click selects.
 // A member with level-up points to spend gets the pale yellow level-up treatment and a LEVEL UP tag.
 import { CLASSES } from '../../data/units/classes';

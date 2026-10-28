@@ -5,7 +5,7 @@ import { useMemo } from 'react';
 import type { DungeonData, ZoneData } from '../data/world/dungeonGen';
 import { zoneWalkable } from '../data/world/dungeonGen';
 import { isAlly, isHostile, type EnemyInstance } from '../data/units/enemies';
-import { chebyshev, hasLineOfSight, posKey, type Pos } from '../data/world/grid';
+import { inRangeAndSight, keyPos, posKey, type Pos } from '../data/world/grid';
 import { partyMoveTargets } from '../data/world/movement';
 import { isSanctumWalkable } from '../data/world/sanctum';
 import type { FogState } from './useFogOfWar';
@@ -52,9 +52,8 @@ export function useReach({ zone, dungeon, fog, partyTiles, zoneEnemies, mover, m
     const out = new Set<string>();
     for (const key of zone.floors) {
       if (taken.has(key) || (fog && !fog.visible.has(key))) continue;
-      const [x, y] = key.split(',').map(Number);
-      const p = { x, y };
-      if (walkable(p) && chebyshev(mover, p) <= tileRange && hasLineOfSight(mover, p, zone.floors)) out.add(key);
+      const p = keyPos(key);
+      if (walkable(p) && inRangeAndSight(mover, p, tileRange, zone.floors)) out.add(key);
     }
     return out;
   }, [tileRange, combatActive, zone, dungeon, mover.x, mover.y, unitTilesKey, fog]); // eslint-disable-line react-hooks/exhaustive-deps

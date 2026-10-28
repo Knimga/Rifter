@@ -1,4 +1,4 @@
-// The action bar (UI handoff, game screen, bottom centre): the acting member (portrait, name, class,
+// The action bar (bottom centre): the acting member (portrait, name, class,
 // movement and, in combat, its AP tracker), five slots (weapon attack or an ability, its AP cost as dots;
 // right-click to assign; number keys 1-5 use them like clicks) and End Turn (Space). A slot dims when its ability
 // costs more MP or AP than the member has, or the member can't act now.
@@ -7,7 +7,7 @@ import { CLASSES } from '../../data/units/classes';
 import { type Ability } from '../../data/combat/abilities';
 import type { PartyMemberConfig } from '../../data/units/party';
 import type { Stats } from '../../data/units/stats';
-import { isWeaponItem } from '../../data/gear';
+import { heldWeapon } from '../../data/gear';
 import { toAction } from '../../data/combat/abilityExecution';
 import { ClickHint, TextTip, Tooltip } from '../Tooltip';
 import ItemIcon from '../ItemIcon';
@@ -44,7 +44,7 @@ export default function ActionDock({ member, stats, mp, slots, onSlotsChange, ar
 }) {
   const [menuSlot, setMenuSlot] = useState<number | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
-  const weapon = member.gear.mainhand && isWeaponItem(member.gear.mainhand) ? member.gear.mainhand : null;
+  const weapon = heldWeapon(member.gear);
   const abilities = CLASSES[member.selectedClass].abilities;
 
   // The menu closes on a click outside it

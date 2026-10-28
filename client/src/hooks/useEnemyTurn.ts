@@ -1,14 +1,14 @@
 import { useEffect, type MutableRefObject, type Dispatch, type SetStateAction } from 'react';
-import { isAlly, isHostile, type EnemyInstance } from '../data/units/enemies';
+import { isAlly, isArmed, isHostile, type EnemyInstance } from '../data/units/enemies';
 import type { ZoneData } from '../data/world/dungeonGen';
 import type { Stats } from '../data/units/stats';
 import { advanceTurn, apLeft, deadPartyIndices, stunnedOutcome, type CombatState, type Combatant } from '../data/combat/combat';
 import { ENEMY_FOLLOWUP_PAUSE_MS, ENEMY_STEP_PAUSE_MS, STUNNED_PAUSE_MS } from '../data/constants';
-import { computeEnemyTurn, type Foe, type Friend } from '../data/combat/enemyAI';
+import { computeEnemyTurn, pickFocus, type Foe, type Friend } from '../data/combat/enemyAI';
 import type { Ability } from '../data/combat/abilities';
-import { affectedKeys, isArea, unitsInArea } from '../data/combat/areas';
+import { affectedKeys, areaTone, isArea, unitsInArea } from '../data/combat/areas';
 import { posKey, type Pos } from '../data/world/grid';
-import { creatureUnit, executeAction, memberUnit, unitKey, type ActionOutcome, type CombatUnit } from '../data/combat/abilityExecution';
+import { creatureUnit, executeAction, unitKey, type ActionOutcome, type ActionWorld, type CombatUnit } from '../data/combat/abilityExecution';
 import { isOnMap } from '../data/units/party';
 
 type Refs = {
@@ -16,7 +16,6 @@ type Refs = {
   partyPos: MutableRefObject<Pos[]>;
   partyStats: MutableRefObject<Stats[]>;
   partyHp: MutableRefObject<number[]>;
-  partyNames: MutableRefObject<string[]>;
   /** CombatState.threat: party members' and summoned allies' threat, by key. */
   threat: MutableRefObject<Record<string, number>>;
   zone: MutableRefObject<ZoneData | null>;
@@ -28,9 +27,14 @@ type Refs = {
    * delay (ms) before the outcome lands.
    */
   applyOutcome: MutableRefObject<(outcome: ActionOutcome, caster: CombatUnit, aimAt?: Pos) => number>;
+  /** Party member `i` as a combat unit as it is now, standing at `pos` (its HP, buffs, weapon: its triggers). */
+  partyUnit: (i: number, pos: Pos) => CombatUnit;
+  /** What executeAction needs of the fight (the floor, units by key). */
+  actionWorld: () => ActionWorld;
 };
 
-export type EnemyAoePreview = { tiles: Set<string> };
+/** A creature's area ability about to land: its tiles, and whether it only helps (areaTone: a buff or heal). */
+export type EnemyAoePreview = { tiles: Set<string>; helpful: boolean };
 
 /** What the acting creature is doing, for the status box (null: deciding, between beats). */
 export type EnemyActivity = { kind: 'moving' } | { kind: 'ability'; ability: Ability } | null;
@@ -69,6 +73,7 @@ export function useEnemyTurn(
     }
 
     let cancelled = false;
+    let focus: string | undefined;
     const timers: ReturnType<typeof setTimeout>[] = [];
     const later = (ms: number, fn: () => void) => timers.push(setTimeout(() => { if (!cancelled) fn(); }, ms));
 
@@ -91,7 +96,7 @@ export function useEnemyTurn(
         const enemy = liveEnemy();
         const currentZoneEnemies = zoneEnemies();
         if (!enemy) { advanceTurnNow(); return; }
-        const caster = (pos: Pos, stats = enemy.stats): CombatUnit => ({ ...creatureUnit(enemy), stats, pos });
+        const caster = (pos: Pos, as = enemy): CombatUnit => ({ ...creatureUnit(as), pos });
 
         // No AP at the start of its turn (stunned): it loses the turn
         if (apSpent === 0 && enemy.stats.apMax <= 0) {
@@ -104,7 +109,7 @@ export function useEnemyTurn(
         const livingCreatures = currentZoneEnemies.filter(e => e.currentHp > 0);
         const ally = isAlly(enemy);
         const partyUnits = refs.partyPos.current.map((pos, i): CombatUnit & { hp: number; maxHp: number } => ({
-          ...memberUnit(i, refs.partyNames.current[i], refs.partyStats.current[i], pos),
+          ...refs.partyUnit(i, pos),
           hp: refs.partyHp.current[i] ?? 0,
           maxHp: refs.partyStats.current[i]?.hp ?? 1,
         }));
@@ -113,23 +118,30 @@ export function useEnemyTurn(
           .map(e => ({ ...creatureUnit(e), hp: e.currentHp }));
         const foeUnits = ally ? creatureFoes : [...partyUnits, ...creatureFoes];
         const foes: Foe[] = foeUnits.map(u => ({ key: unitKey(u.ref), pos: u.pos, hp: u.hp }));
-        // Its side, for its heals (itself aside): an enemy's, the other enemies in the fight; an ally's, the party
-        // and the other allies
+        // Its side, for its heals and buffs (itself aside): an enemy's, the other enemies in the fight; an ally's, the
+        // party and the other allies. Armed: it attacks with a physical weapon (a member's held one, a creature's
+        // useWeapon ability).
         const friendUnits = [
-          ...(ally ? partyUnits.filter(u => u.hp > 0) : []),
+          ...(ally ? partyUnits.filter(u => u.hp > 0).map(u => ({ ...u, armed: !!u.weaponAttack })) : []),
           ...livingCreatures.filter(e => e.id !== enemy.id && isAlly(e) === ally && (ally || e.aggroed))
-            .map(e => ({ ...creatureUnit(e), hp: e.currentHp, maxHp: e.stats.hp })),
+            .map(e => ({ ...creatureUnit(e), hp: e.currentHp, maxHp: e.stats.hp, armed: isArmed(e.classData) })),
         ];
-        const friends: Friend[] = friendUnits.map(u => ({ key: unitKey(u.ref), pos: u.pos, hp: u.hp, maxHp: u.maxHp }));
+        const friends: Friend[] = friendUnits.map(u => ({ key: unitKey(u.ref), pos: u.pos, hp: u.hp, maxHp: u.maxHp, buffs: u.buffs, armed: u.armed }));
         // Its summons out, by the ability that summoned them
         const summonsOut: Record<string, number> = {};
         for (const c of livingCreatures) if (c.summon?.owner === enemy.id) summonsOut[c.summon.ability] = (summonsOut[c.summon.ability] ?? 0) + 1;
-        // Everyone else on the map blocks its way (not a fallen party member: isOnMap)
+        // Everyone else on the map (not a fallen party member: isOnMap): it can't stop on them, and passes only its
+        // own side (an enemy's, the other enemies; an ally's, the party and the other allies)
         const partyOnMap = refs.partyPos.current.filter((_, i) => isOnMap(refs.partyHp.current[i] ?? 0));
-        const occupied = [...partyOnMap, ...livingCreatures.filter(e => e.id !== enemy.id).map(e => e.pos)];
+        const occupied = [
+          ...partyOnMap.map(pos => ({ pos, passable: ally })),
+          ...livingCreatures.filter(e => e.id !== enemy.id).map(e => ({ pos: e.pos, passable: isAlly(e) === ally })),
+        ];
+        // Its focus for the whole turn, picked on its first step (pickFocus)
+        if (apSpent === 0 && paidTiles === 0) focus = pickFocus(foes, refs.threat.current);
 
         const action = computeEnemyTurn(enemy, foes, occupied, z.floors, refs.threat.current, refs.zoneObjects.current,
-          { ap: apLeft(enemy.stats.apMax, { apSpent }), paidTiles }, { friends, summonsOut });
+          { ap: apLeft(enemy.stats.apMax, { apSpent }), paidTiles }, { friends, summonsOut }, focus);
         const ability = action.abilityUsed;
         // Nothing left worth doing: its turn ends
         if (!action.moveTo && !ability) { advanceTurnNow(); return; }
@@ -156,11 +168,11 @@ export function useEnemyTurn(
           : action.targetKey !== null ? [action.targetKey]
           : [];
 
-        // Show its target: the single-target highlight or the AoE preview
+        // Show its target: the single-target highlight or the AoE preview (an ally area one's too, e.g. Battlechant)
         later(pause, () => {
           showActivity({ kind: 'ability', ability });
           if (action.targetKey !== null && ability.target === 'enemy') setEnemyTargetKey(action.targetKey);
-          if (aoeTiles && targetKeys.length > 0) setEnemyAoePreview({ tiles: aoeTiles });
+          if (aoeTiles) setEnemyAoePreview({ tiles: aoeTiles, helpful: areaTone(ability) === 'help' });
 
           // Then it lands
           later(pause, () => {
@@ -168,8 +180,8 @@ export function useEnemyTurn(
             setEnemyAoePreview(null);
 
             const latest = refs.enemies.current.find(e => e.id === enemy.id) ?? enemy;
-            // The caster where it now stands, with its latest stats
-            const by = caster(finalPos, latest.stats);
+            // The caster where it now stands, as it is now (its stats, HP and buffs)
+            const by = caster(finalPos, latest);
             // Its own side in the area (itself where it now stands, and the rest as they are now): its 'allies'
             // effects, and an ally area ability's targets. An enemy's side is the other enemies; an ally's, the party
             // and its fellow allies.
@@ -178,12 +190,12 @@ export function useEnemyTurn(
               const party = ally ? partyUnits.filter(u => u.hp > 0) : [];
               return [by, ...party, ...creatures.map(creatureUnit)];
             };
-            // As they are now (a creature's latest stats, after anything that landed meanwhile)
+            // As they are now (latest stats, HP and buffs, after anything that landed meanwhile)
             const unitFor = (key: string): CombatUnit[] => {
               if (key === enemy.id) return [by];
               const u = [...foeUnits, ...friendUnits].find(f => unitKey(f.ref) === key);
               if (!u) return [];
-              if (u.ref.side === 'party') return [{ ...u, stats: refs.partyStats.current[u.ref.idx] }];
+              if (u.ref.side === 'party') return [refs.partyUnit(u.ref.idx, u.pos)];
               const id = u.ref.id;
               const e = refs.enemies.current.find(c => c.id === id && c.currentHp > 0);
               return e ? [creatureUnit(e)] : [];
@@ -191,10 +203,11 @@ export function useEnemyTurn(
             const targets = ability.target === 'ally' && aoeTiles ? unitsInArea(aoeTiles, sideUnits()) : targetKeys.flatMap(unitFor);
             // Aimed at the AoE's target tile, else the targeted member
             const aimAt = action.abilityTargetPos ?? targets[0]?.pos;
+            // Its side in the area: an area ability's 'allies' (for an ally one, the same units as its targets)
+            const allies = !aoeTiles ? [] : ability.target === 'ally' ? targets : unitsInArea(aoeTiles, sideUnits());
             // The creature turns to face its target, the ability lands (a 'tile' one on its aimed tile, e.g. where a
             // summon appears), then its next step
-            const allies = ability.target === 'enemy' && aoeTiles ? unitsInArea(aoeTiles, sideUnits()) : [];
-            const landsIn = refs.applyOutcome.current(executeAction(by, ability, targets, action.abilityTargetPos ?? undefined, allies), by, aimAt);
+            const landsIn = refs.applyOutcome.current(executeAction(by, ability, targets, action.abilityTargetPos ?? undefined, allies, refs.actionWorld()), by, aimAt);
             if (landsIn > 0) later(landsIn, next);
             else next();
           });

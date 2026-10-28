@@ -85,7 +85,6 @@ export default function PanView({ children, resetKey, insets = NO_INSETS }: {
         if (e.button !== 2 || !pan.current) return;
         drag.current = { startX: e.clientX, startY: e.clientY, from: { ...pan.current } };
         e.currentTarget.setPointerCapture(e.pointerId);
-        e.currentTarget.style.cursor = 'grabbing';
       }}
       onPointerMove={(e) => {
         const d = drag.current;
@@ -95,12 +94,8 @@ export default function PanView({ children, resetKey, insets = NO_INSETS }: {
         if (e.button !== 2 || !drag.current) return;
         drag.current = null;
         e.currentTarget.releasePointerCapture(e.pointerId);
-        e.currentTarget.style.cursor = '';
       }}
-      onPointerCancel={(e) => {
-        drag.current = null;
-        e.currentTarget.style.cursor = '';
-      }}
+      onPointerCancel={() => { drag.current = null; }}
     >
       <div ref={contentRef} className="absolute left-0 top-0 w-max">
         {children}

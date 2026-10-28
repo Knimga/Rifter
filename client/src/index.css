@@ -2,7 +2,7 @@
 @tailwind components;
 @tailwind utilities;
 
-/* ─── UI theme ("slab", from the UI handoff) ──────────────────────────────────
+/* ─── UI theme ("slab") ──────────────────────────────────────────────────────
    Fonts (OFL, bundled): Metamorphous for display text, IBM Plex Mono for everything else.
    The palette lives here, once: Tailwind's `rift-*` colors (tailwind.config.js), the .rf-* classes below
    and the TS color constants (constants.ts, detailStrings.ts) all read these variables. */
@@ -386,7 +386,7 @@
   .rf-tiplabel:hover { color: var(--rift-soft); }
   .rf-tiplabel:focus-visible { outline: 1px solid color-mix(in srgb, var(--glow) 60%, transparent); outline-offset: 2px; }
 
-  /* ─── Level-up and XP (UI handoff: level-up and XP tracking) ─── */
+  /* ─── Level-up and XP ─── */
 
   /* A party row (party window rail, game party panels) whose member has points to spend: pale yellow border,
      a 3px left edge and a faint glow. Selection keeps its own treatment, so the two read separately. */

@@ -1,7 +1,7 @@
-// The party window (UI handoff, 04 party modal): party rail, the member's model and equipment, the shared
+// The party window: party rail, the member's model and equipment, the shared
 // inventory (or, its Keys tab, the keyring), and their attributes, skills and stats (StatsPanel). Values raised or
 // lowered by gear, buffs and debuffs show green / red with an arrow.
-// Level-up (UI handoff: level-up and XP tracking): the party's XP bar on the rail; a member with points to
+// Level-up: the party's XP bar on the rail; a member with points to
 // spend is marked on the rail, gets a header banner (Reset, Confirm) and + / - on their attribute and skill
 // rows. Placed points stay pending (kept by GameScreen, so closing the window keeps them) until Confirm.
 import { lazy, Suspense, useMemo, useState, type ComponentType, type MouseEvent } from 'react';
@@ -285,7 +285,7 @@ export default function CharacterSheet({ party, partyHp, partyMp, partyStats, pa
               </div>
 
               <section aria-label="Inventory" className="rf-panel flex-none p-3.5">
-                {/* Two tabs, the shared inventory and the keyring (UI handoff: party modal keys tab); the panel keeps its
+                {/* Two tabs, the shared inventory and the keyring; the panel keeps its
                     size between them */}
                 <div className="flex items-baseline justify-between mb-2.5">
                   <div role="tablist" aria-label="Shared storage" className="flex items-baseline gap-[18px]">

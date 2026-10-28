@@ -11,6 +11,10 @@ export default defineConfig({
     // Dev server only (apply: 'serve'): approve/discard/snapshot endpoints for the /dev/forge page.
     forgePlugin({ forgeDir: here('./src/forge'), snapshotDir: here('./forge-snapshots') }),
   ],
+  build: {
+    // Vite warns past 500 kB per chunk (minified, before gzip); ours are well within what a browser game loads fine
+    chunkSizeWarningLimit: 1000,
+  },
   server: {
     proxy: {
       '/api': 'http://localhost:3001',

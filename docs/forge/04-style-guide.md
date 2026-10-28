@@ -33,13 +33,7 @@ and bright. That contrast is the look, and it is what reads at game scale.
 
 ### Dungeon palettes
 Creatures belong to their dungeon: bodies in its ambient colors, light from its glow family. A glow from another
-dungeon's family is rare and deliberate (it marks something foreign).
-
-| Dungeon | Bodies (ambient) | Light (glows) |
-|---|---|---|
-| The Crypt | bone and ivory, ash grey, cold grey-green flesh, dark violet cloth | necrotic green-white, pale violet |
-| The Firelands | charred basalt, black-brown and red-brown rock, soot | ember orange, molten yellow, deep red |
-| The Fungal Forest | dark earth and bark browns, moss green, rust and ochre fungus | sickly yellow-green spores, amber, teal |
+dungeon's family is rare and deliberate.
 
 Items are not tied to a dungeon: their materials read by value and hue (iron grey-blue, leather brown, gold), and
 their rarity glow is the renderer's, never the design's.
@@ -56,6 +50,12 @@ their rarity glow is the renderer's, never the design's.
 - **Budgets.** Regular creatures aim for about 900 triangles; an elaborate one (lots of fungus, strands, a showpiece) can go to about 2,000–2,800 when the look needs it. Items <= 600. Set `budget` a little above what the design uses (lint fails over it), and spend triangles where they read: silhouette and glow, not hidden undersides.
 - **Loot is motionless** on the ground and in the inventory. Build items facing +z (their outline in the x-y plane): they're shown flat on the tile in game and straight-on in icons, so the x-y outline is what players see.
 - **Weapons** lean with the tip up and to the LEFT (`WEAPON_ROLL`), matching the character sheet's left-hand weapon slot. Never pitch a weapon toward or away from the camera. Weapon designs draw `series` and `weaponType` from the game's weapon data (`weaponPalette`): the series sets the material, and the display name comes from `WEAPON_SERIES`.
+- **Shields** are strapped to the forearm, never pinned to the fist: the shield's face lies parallel to the forearm,
+  its back against the forearm's outside, the fist behind it (never through it). To show its face to the camera,
+  tip it about the forearm, not off it.
+- **Hunched backs** are a natural curve of the spine in the upper back, shaped into the torso itself: shift the
+  torso's upper rings forward and bulge their back edge outward (the hunch grows out of the body). Never a separate
+  round blob on the back: it reads as a boulder carried there.
 - **Don't** add detail smaller than about 3% of the model; it is invisible at game scale and costs triangles.
 
 ## Camera (read this before posing anything)

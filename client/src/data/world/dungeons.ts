@@ -13,10 +13,15 @@ const sporetender = ENEMY_CLASSES.find(c => c.id === 'sporetender')!;
 const mirehulk = ENEMY_CLASSES.find(c => c.id === 'mirehulk')!;
 const rotflySwarm = ENEMY_CLASSES.find(c => c.id === 'rotfly-swarm')!;
 const gloomtoad = ENEMY_CLASSES.find(c => c.id === 'gloomtoad')!;
+const goblinWarrior = ENEMY_CLASSES.find(c => c.id === 'goblin-warrior')!;
+const goblinArcher = ENEMY_CLASSES.find(c => c.id === 'goblin-archer')!;
+const goblinShaman = ENEMY_CLASSES.find(c => c.id === 'goblin-shaman')!;
+const troll = ENEMY_CLASSES.find(c => c.id === 'troll')!;
 
 const Necromancer = BOSS_CLASSES.find(c => c.id === 'necromancer')!;
 const BurningSpirit = BOSS_CLASSES.find(c => c.id === 'burning-spirit')!;
 const Sporemother = BOSS_CLASSES.find(c => c.id === 'sporemother')!;
+const TrollTamer = BOSS_CLASSES.find(c => c.id === 'troll-tamer')!;
 
 export const DUNGEONS: Record<string, DungeonConfig> = {
   crypt: {
@@ -147,6 +152,50 @@ export const DUNGEONS: Record<string, DungeonConfig> = {
       corridorWidth: 2,
       layout: 'caverns',
       bossGroup: [Sporemother, sporetender, sporetender]
+    }
+  },
+  goblin: {
+    name: 'The Goblin Fortress',
+    width: 30,
+    height: 28,
+    floorColor: '#28331f',
+    wallColor: '#0b160c',
+    doorObject: 'heavy-door',
+    riftColor: [32, 107, 35], // rich green (#206b23)
+    keyName: 'Goblin Key',
+    chestObject: 'basic-treasure-chest',
+    zones: [
+      {
+        // Many small square-cut rooms (about 12 a zone) joined by 1-tile hallways
+        minRoomSize: 5,
+        maxRoomSize: 7,
+        splitDepth: 4,
+        corridorWidth: 1,
+        enemyGroups: [
+          [goblinWarrior,goblinWarrior,goblinArcher,],
+          [goblinWarrior,goblinWarrior,goblinWarrior,goblinShaman],
+          [troll,goblinArcher,goblinArcher],
+          [goblinWarrior,goblinWarrior,goblinArcher,goblinShaman],
+
+        ],
+      },
+      {
+        minRoomSize: 5,
+        maxRoomSize: 7,
+        splitDepth: 4,
+        corridorWidth: 1,
+        enemyGroups: [
+          [troll,goblinWarrior,goblinArcher],
+          [goblinWarrior,goblinWarrior,goblinShaman,goblinArcher],
+          [troll,goblinArcher,goblinShaman],
+          [troll,troll,goblinShaman]
+        ],
+      }
+    ],
+    bossZone: {
+      roomSize: 12,
+      corridorWidth: 1,
+      bossGroup: [TrollTamer,troll,troll]
     }
   }
 } satisfies Record<string, DungeonConfig>;

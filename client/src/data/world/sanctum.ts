@@ -1,4 +1,4 @@
-import { posKey, type Pos } from './grid';
+import { keyPos, neighbors, posKey, type Pos } from './grid';
 
 // ─── The Sanctum: fixed, hand-authored hub map (never procedurally generated) ──
 // On screen north is up-left (-y) and east up-right (+x). The main room (9 x 9), a hallway 3 wide and 3 long
@@ -32,6 +32,8 @@ export const SANCTUM = {
    * uses it from). Centered against the east room's east wall, facing west, its three tiles along the wall.
    */
   rifter: { pos: at(17, 5), facing: [-1, 0] as const },
+  /** Where the party arrives back from a dungeon (by a rift, or waking after a wipe): in front of the Rifter, in a line facing it, leader first. */
+  riftArrival: [at(15, 5), at(14, 5), at(13, 5)],
 } as const;
 
 /** How many tiles the Rifter spans, side by side across the way it faces (its middle tile, and one each side). */
@@ -68,10 +70,7 @@ export const SANCTUM_FLOORS: ReadonlySet<string> = new Set(
  * What the Sanctum's fog shows: its floor and every wall touching it (diagonally too), always in sight. Its fog
  * isn't fog of war (nothing is hidden); it only darkens the wall mass beyond, as the dungeons' does at their edges.
  */
-export const SANCTUM_SHOWN: ReadonlySet<string> = new Set([...SANCTUM_FLOORS].flatMap((key) => {
-  const [x, y] = key.split(',').map(Number);
-  return [-1, 0, 1].flatMap((dx) => [-1, 0, 1].map((dy) => posKey({ x: x + dx, y: y + dy })));
-}));
+export const SANCTUM_SHOWN: ReadonlySet<string> = new Set([...SANCTUM_FLOORS].flatMap((key) => [key, ...neighbors(keyPos(key)).map(posKey)]));
 
 /** Anything that isn't the Sanctum's floor is wall. */
 export const isSanctumWall = (p: Pos) => !SANCTUM_FLOORS.has(posKey(p));

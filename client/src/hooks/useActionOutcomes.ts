@@ -10,7 +10,7 @@ import { isFreeFloor, type DungeonData } from '../data/world/dungeonGen';
 import { isAlly, withEnemyBuffs, type EnemyInstance } from '../data/units/enemies';
 import { createSummon, summonsOf } from '../data/units/summons';
 import type { MemberState } from '../data/units/party';
-import type { Stats } from '../data/units/stats';
+import { addBuffs, addTicking, type Stats } from '../data/units/stats';
 import type { UnitAim } from '../components/ModelLayer';
 import type { SpawnFloat } from './useFloatingText';
 import { useLatest } from './useLatest';
@@ -56,17 +56,18 @@ export function useActionOutcomes({ spawnFloat, updateMembers, partyStatsRef, pa
       else enemyChanges.set(c.ref.id, c);
     }
     const nextHp = (hp: number, c: UnitChange, maxHp: number) => (c.slain ? 0 : Math.max(0, Math.min(maxHp, hp - c.damage + c.heal)));
+    // MP regained (restoresMP heals) never takes it past its max
+    const nextMp = (mp: number, c: UnitChange, maxMp: number) => Math.max(0, Math.min(Math.max(mp, maxMp), mp - c.mpSpent + c.mpRestored));
 
     if (partyChanges.size > 0) {
-      const add = <T,>(list: T[], more: T[]) => (more.length ? [...list, ...more] : list);
       updateMembers((m, i) => {
         const c = partyChanges.get(i)!;
         return {
           hp: nextHp(m.hp, c, partyStatsRef.current[i]?.hp ?? m.hp),
-          mp: Math.max(0, m.mp - c.mpSpent),
-          buffs: add(m.buffs, c.buffs),
-          hots: add(m.hots, c.hots),
-          dots: add(m.dots, c.dots),
+          mp: nextMp(m.mp, c, partyStatsRef.current[i]?.mp ?? m.mp),
+          buffs: addBuffs(m.buffs, c.buffs),
+          hots: addTicking(m.hots, c.hots),
+          dots: addTicking(m.dots, c.dots),
         };
       }, i => partyChanges.has(i));
     }
@@ -76,41 +77,48 @@ export function useActionOutcomes({ spawnFloat, updateMembers, partyStatsRef, pa
       setEnemies(prev => prev.map(e => {
         const c = enemyChanges.get(e.id);
         if (!c) return e;
-        const next = c.buffs.length ? withEnemyBuffs(e, [...e.buffs, ...c.buffs]) : e;
+        const next = c.buffs.length ? withEnemyBuffs(e, addBuffs(e.buffs, c.buffs)) : e;
         return {
           ...next,
           currentHp: nextHp(e.currentHp, c, next.stats.hp),
-          currentMp: Math.max(0, e.currentMp - c.mpSpent),
-          hots: [...e.hots, ...c.hots],
-          dots: [...e.dots, ...c.dots],
+          currentMp: nextMp(e.currentMp, c, next.stats.mp),
+          hots: addTicking(e.hots, c.hots),
+          dots: addTicking(e.dots, c.dots),
         };
       }));
     }
 
-    // Threat, for a party-side caster (party member or summoned ally)
-    const key = threatKey(caster);
-    if (key && changesThreat(outcome.threat)) {
-      const mult = caster.stats.threatMultiplier;
-      setCombat(prev => prev.active
-        ? { ...prev, threat: { ...prev.threat, [key]: applyThreatChange(prev.threat[key] ?? 0, outcome.threat, mult) } }
-        : prev);
+    // Threat, for each party-side unit that acted (party member or summoned ally): the caster, trigger bearers
+    const threatChanges = outcome.threat.flatMap(t => {
+      const key = threatKey(t.unit);
+      return key && changesThreat(t.change) ? [{ key, ...t }] : [];
+    });
+    if (threatChanges.length > 0) {
+      setCombat(prev => {
+        if (!prev.active) return prev;
+        const threat = { ...prev.threat };
+        for (const t of threatChanges) threat[t.key] = applyThreatChange(threat[t.key] ?? 0, t.change, t.unit.stats.threatMultiplier);
+        return { ...prev, threat };
+      });
     }
 
-    // Summoned creatures (in a dungeon fight), on the caster's side: a party member's or its ally's fight for the
-    // party, an enemy's against it. With the ability's max already out, the oldest of them goes. Each appears on
-    // its aimed tile (or the free tile nearest the caster) and joins the turn order.
+    // Summoned creatures (in a dungeon fight), on their summoner's side (the caster, or a trigger's bearer): a party
+    // member's or its ally's fight for the party, an enemy's against it. With the ability's max already out, the
+    // oldest of them goes. Each appears on its aimed tile (or the free tile nearest its summoner) and joins the turn
+    // order.
     const d = dungeonRef.current;
     if (outcome.summons && d) {
-      const owner = unitKey(caster.ref);
-      const casterRef = caster.ref;
-      const casterCreature = casterRef.side === 'enemy' ? enemiesRef.current.find(e => e.id === casterRef.id) : undefined;
-      // A party member's, or a summoned ally's; an enemy's stays hostile even if it is gone by now
-      const allied = casterRef.side === 'party' || (!!casterCreature && isAlly(casterCreature));
-      const level = casterCreature?.level ?? partyLevelRef.current;
       const zone = d.zones[currentZoneRef.current];
       let creatures = enemiesRef.current;
       const added: EnemyInstance[] = [];
       for (const req of outcome.summons) {
+        const by = req.by ?? caster;
+        const owner = unitKey(by.ref);
+        const byRef = by.ref;
+        const byCreature = byRef.side === 'enemy' ? enemiesRef.current.find(e => e.id === byRef.id) : undefined;
+        // A party member's, or a summoned ally's; an enemy's stays hostile even if it is gone by now
+        const allied = byRef.side === 'party' || (!!byCreature && isAlly(byCreature));
+        const level = byCreature?.level ?? partyLevelRef.current;
         const out = summonsOf([...creatures, ...added], owner, req.ability);
         const gone = new Set(out.slice(0, Math.max(0, out.length - req.max + 1)));
         creatures = creatures.filter(e => !gone.has(e));
@@ -119,8 +127,8 @@ export function useActionOutcomes({ spawnFloat, updateMembers, partyStatsRef, pa
         const free = isFreeFloor(d, zone, [...creatures, ...added]);
         const isOpen = (p: Pos) => free(p) && !partyTiles.has(posKey(p));
         // On the aimed tile (a 'tile' ability), or the nearest free one to it if something moved there meanwhile;
-        // otherwise beside the caster
-        const pos = req.at && isOpen(req.at) ? req.at : findOpenTilesNear(req.at ?? caster.pos, isOpen, 1, SUMMON_MAX_RADIUS)[0];
+        // otherwise beside its summoner
+        const pos = req.at && isOpen(req.at) ? req.at : findOpenTilesNear(req.at ?? by.pos, isOpen, 1, SUMMON_MAX_RADIUS)[0];
         const summon = pos && createSummon(req, owner, allied, level, pos, zone.id);
         if (summon) added.push(summon);
       }

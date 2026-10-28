@@ -1,6 +1,6 @@
 // Interactable things on the map that aren't units or loot: doors, treasure chests, the Rifter, and later
 // craftbenches and the like. Each is drawn by its forge design (`model`, forge category "Game Objects").
-// Rifts are their own: one model in every dungeon's color (data/world/rifts.ts).
+// Rifts are their own: one model, painted in the color of where each leads (data/world/rifts.ts).
 import type { ModelLink } from '../../forge/core/types';
 
 export interface GameObjectData {

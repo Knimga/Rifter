@@ -3,7 +3,7 @@
 import { useCallback, useEffect, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
 import { COMBAT_TEXT_COLOR, OUT_OF_COMBAT_REGEN_INTERVAL_MS } from '../data/constants';
 import { applyTopOfRound, tickChangesNothing, tickRound, type CombatState, type RoundTick } from '../data/combat/combat';
-import { applyThreatChange, tickDurations, unitKey } from '../data/combat/abilityExecution';
+import { applyThreatChange, healThreat, tickDurations, unitKey } from '../data/combat/abilityExecution';
 import type { Pos } from '../data/world/grid';
 import { isAlly, type EnemyInstance } from '../data/units/enemies';
 import type { MemberState } from '../data/units/party';
@@ -43,7 +43,7 @@ export function useRoundTick({ combatActive, round, membersRef, updateMembers, p
       if (m.hp <= 0) return null;
       const tick = tickRound(partyStatsRef.current[i], m.hp, m.mp, m.hots, m.dots);
       showTick(partyPosRef.current[i], tick);
-      addThreat(unitKey({ side: 'party', idx: i }), tick.heal * 1.5);
+      addThreat(unitKey({ side: 'party', idx: i }), healThreat(tick.heal));
       return tick;
     });
     updateMembers((m, i) => {

@@ -66,7 +66,6 @@ export const nonWeaponAffixes: BuffableStat[] = ['armor', 'block', 'hpRegen', 'm
 export const rangedStats: BuffableStat[] = ['rangedCrit', 'rangedDamage', 'rangedHit', 'rangedPenetration'];
 export const magicStats: BuffableStat[] = ['magicCrit', 'magicDamage', 'magicHit', 'magicPenetration'];
 export const meleeStats: BuffableStat[] = ['meleeCrit', 'meleeDamage', 'meleeHit', 'meleePenetration'];
-/** Which damage elements an affix list covers: one, several, or a whole group. */
 /** A damage type to select: one element ('fire', 'physical'), or a group: 'magic' (every non-physical one) or 'all'. */
 export type DamageTypeSelector = DamageElement | 'magic' | 'all';
 

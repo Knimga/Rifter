@@ -8,7 +8,8 @@ Read next: [03-design-contract.md](03-design-contract.md) (how to write a design
 ```
 src/forge/
   core/           pure TS, no three.js; runs in the browser and in Node
-                  rng, vec, mesh, primitives, ctx, finalize, build, link, hold, facing, stage-config, folders, types
+                  rng, vec, mesh, primitives, ctx, finalize, build, link, hold, facing, animate, embed, tint,
+                  stage-config, folders, slug, types
   designs/        APPROVED designs, one file per design, in a folder per category
                   (creature.skeleton -> creatures/skeleton.ts; core/folders.ts); shared helpers (_x.ts) at its top
     _weapon.ts    shared helpers (files starting "_" are not designs)
@@ -49,7 +50,7 @@ The forge folder holds the forge UI and the link between its models and game dat
 4. Item rarity glow (Superior and up) is applied by the renderer, never baked into a mesh. Loot never animates.
 
 ## Linking designs to game objects
-Every enemy class, item base (weapon, armor slot, shield), class and game object has a required `model` field on its own data entry: the id of its design. The Rift and the Keystone are one tinted model each (`data/world/rifts.ts`): every dungeon's rifts and key are drawn with them, painted in its `riftColor` (see the contract's Rifts & Keys).
+Every enemy class, item base (weapon, armor slot, shield), class and game object has a required `model` field on its own data entry: the id of its design. The Rift and the Keystone are one tinted model each (`data/world/rifts.ts`): every rift and key is drawn with them, painted in its dungeon's `riftColor` (or, for a rift back to the Sanctum, `SANCTUM_RIFT_COLOR`; see the contract's Rifts & Keys).
 
 ```ts
 model: 'creature.zombie',

@@ -1,8 +1,7 @@
 import { CLASSES } from './classes';
 import { capitalize } from '../detailStrings';
 import type { ClassKey, ClassData, Passive, ScalingPassive } from './classes';
-
-//
+import type { Effect, Trigger } from '../combat/abilities';
 
 export const ATTRIBUTE_KEYS = ['strength', 'toughness', 'finesse', 'mind', 'spirit', 'speed'] as const;
 export const SKILL_KEYS = ['perception', 'subtlety', 'expertise', 'spellcraft', 'evasion', 'redoubt', 'devotion'] as const;
@@ -31,8 +30,8 @@ export type BuffableStat =
   | typeof MISC_STATS[number]
   | ElementStatKey;
 
-  /** Element-specific stat keys: e.g. 'fireResistance', 'iceHit', 'shadowDamage' */
-export const ELEMENT_STAT_KEYS: ElementStatKey[] = DAMAGE_ELEMENTS.flatMap(el =>
+/** Element-specific stat keys: e.g. 'fireResistance', 'iceHit', 'shadowDamage' */
+const ELEMENT_STAT_KEYS: ElementStatKey[] = DAMAGE_ELEMENTS.flatMap(el =>
   ELEMENT_STAT_SUFFIXES.map(suffix => `${el}${suffix}` as ElementStatKey)
 );
 
@@ -44,7 +43,7 @@ export const BUFFABLE_STATS: BuffableStat[] = [
 ];
 
 interface AttackCategoryStats {
-  hit:    number;
+  hit:         number;
   damage:      number;
   crit:        number;
   penetration: number;
@@ -87,7 +86,7 @@ export interface Stats {
 }
 
 export interface ActiveBuff {
-  id: string;              // source key — prevents double-applying the same buff source
+  id: string;              // its ability, recipient and stat (effectToBuffs)
   source?: string;         // ability name for grouping/tooltip
   damageElement?: DamageElement;
   stat: BuffableStat;
@@ -96,16 +95,88 @@ export interface ActiveBuff {
   roundsRemaining: number;
   /** A root (Effect 'root'): while it lasts the unit can't move (isRooted). Its stat change is none. */
   roots?: boolean;
+  /**
+   * A trigger (a buff or debuff effect's): while it lasts the unit reacts to attacks and heals. Its stat change is
+   * none. `sourceKey`: the unitKey of who put it on (its effects on 'source'); `debuff`: it came from a debuff.
+   */
+  trigger?: { def: Trigger; sourceKey: string; debuff: boolean };
+  /**
+   * Its stack (a buff or debuff effect's): `id` is one application of the effect (all its entries share it), `key`
+   * the effect it is of (stackKey), `max` how many stacks of it a unit can have at once (stackCap).
+   */
+  stack?: { key: string; id: number; max: number };
 }
 
 /** Whether a root is on the unit (a condition, not a stat): in combat it can't move at all (moveBudget). */
 export const isRooted = (buffs: ActiveBuff[]) => buffs.some(b => b.roots);
+
+type BuffEffect = Extract<Effect, { type: 'buff' | 'debuff' }>;
+
+/** What stacks of a buff or debuff effect have in common: its ability (`source`) and kind, whoever casts it. */
+export const stackKey = (source: string, eff: BuffEffect) => `${source}:${eff.type}`;
+
+/** How many stacks of an effect a unit can have: one if it has a trigger (triggers never stack), else maxStacks. */
+export const stackCap = (eff: BuffEffect) => (eff.trigger ? 1 : eff.maxStacks ?? Infinity);
+
+/** How many stacks of `key` are on a unit. */
+export const stackCount = (buffs: readonly ActiveBuff[], key: string) =>
+  new Set(buffs.filter(b => b.stack?.key === key).map(b => b.stack!.id)).size;
+
+/**
+ * Add new buff entries to a unit's (an outcome landing). A stack that would go past its effect's cap replaces the
+ * oldest stack of it, so the count stays at the cap and the new one's full duration (and source) is what's left.
+ */
+export function addBuffs(buffs: ActiveBuff[], added: readonly ActiveBuff[]): ActiveBuff[] {
+  if (added.length === 0) return buffs;
+  let out = buffs;
+  const seen = new Set<number>();
+  for (const b of added) {
+    if (b.stack && !seen.has(b.stack.id)) {
+      seen.add(b.stack.id);
+      const { key, max } = b.stack;
+      while (stackCount(out, key) >= max) {
+        const oldest = out.find(x => x.stack?.key === key)!.stack!.id;
+        out = out.filter(x => x.stack?.id !== oldest);
+      }
+    }
+    out = [...out, b];
+  }
+  return out;
+}
+
+/** A HoT's or DoT's stacking: what its stacks share (its ability and element: tickStack) and how many fit (maxStacks). */
+export interface TickStack { key: string; max: number }
+
+/** The stacking of a HoT or DoT effect of ability `name`, when it sets maxStacks. */
+export const tickStack = (name: string, eff: { damageElement: DamageElement; maxStacks?: number }): { stack?: TickStack } =>
+  eff.maxStacks === undefined ? {} : { stack: { key: `${name}:${eff.damageElement}`, max: eff.maxStacks } };
+
+/**
+ * Add new HoTs or DoTs to a unit's (an outcome landing). One that would go past its effect's cap (TickStack)
+ * replaces the oldest of it, so the count stays at the cap.
+ */
+export function addTicking<T extends { stack?: TickStack }>(list: T[], added: readonly T[]): T[] {
+  if (added.length === 0) return list;
+  let out = list;
+  for (const t of added) {
+    if (t.stack) {
+      const { key, max } = t.stack;
+      while (out.filter(x => x.stack?.key === key).length >= max) {
+        const oldest = out.findIndex(x => x.stack?.key === key);
+        out = out.filter((_, i) => i !== oldest);
+      }
+    }
+    out = [...out, t];
+  }
+  return out;
+}
 
 export interface ActiveHot {
   name?: string;
   damageElement?: DamageElement;
   healPerRound: number;
   roundsRemaining: number;
+  stack?: TickStack;
 }
 
 export interface ActiveDot {
@@ -117,12 +188,13 @@ export interface ActiveDot {
   penetration?: number;       // % points reducing armor/MR DR on each tick
   elementPenetration?: number; // % points reducing element resistance on each tick
   damagesMP?: boolean;        // ticks drain MP instead of HP
+  stack?: TickStack;
 }
 
 // ─── Stat Display Helpers ─────────────────────────────────────────────────────
 
 /** Stat keys (BuffableStat with 'Bonus' stripped) whose values display as percentages. */
-export const PERCENT_STATS = new Set([
+const PERCENT_STATS = new Set([
   'dodge', 'parry', 'block', 'glancingBlow',
   'meleeHit', 'meleeCrit', 'meleePenetration',
   'rangedHit', 'rangedCrit', 'rangedPenetration',
@@ -137,7 +209,7 @@ export function statSuffix(key: string): string {
 }
 
 /** Formats a stat value for display: 1 decimal place for percent stats, raw otherwise. */
-export function formatStatValue(key: string, value: number): string {
+function formatStatValue(key: string, value: number): string {
   return PERCENT_STATS.has(key) ? value.toFixed(1) : String(value);
 }
 
@@ -289,8 +361,8 @@ export type EnemyStatInput = {
 // ─── Stat Calculation ─────────────────────────────────────────────────────────
 
 /** Action points per combat turn (Stats.apMax): the party's and every enemy's. */
-export const PLAYER_AP_MAX = 3;
-export const ENEMY_AP_MAX = 3;
+const PLAYER_AP_MAX = 3;
+const ENEMY_AP_MAX = 3;
 
 /** Phase 1 — pure attribute + skill formulas, no passives. */
 function buildRawStats(
@@ -312,11 +384,11 @@ function buildRawStats(
     mp:              fl(10 + spr + (mnd * level)),
     hpRegen:         1 + fl((spr / 6) + (tou / 12)),
     mpRegen:         1 + fl((spr / 6) + (mnd / 12) + (devotion / 6)),
-    initiative:      fl(3 + (spd / 4) + (fin / 8) + (perception / 3) + (subtlety / 6)),
+    initiative:      fl((spd / 4) + (fin / 8) + (perception / 2) + (subtlety / 6)),
     movement:        movement + fl(spd / 12),
     apMax,
     armor:           fl(tou + (armorBonus * (1 + redoubt * 0.02))),
-    dodge:           3 + (spd / 3) + (fin / 6) + (evasion / 4),
+    dodge:           3 + (spd / 3) + (fin / 6) + (evasion / 3) + (perception / 5),
     parry:           (spd / 6) + (fin / 6) + (evasion / 6),
     block:           0,
     glancingBlow:    (armorBonus * (0.05 + redoubt * 0.01)) + (spd / 4) + (evasion / 4),
@@ -434,8 +506,6 @@ function applyStatMinimums(stats: Stats): Stats {
   for (const a of low) a.set(s, a.min!);
   return s;
 }
-
-
 
 /**
  * Apply buffs/debuffs on derived stats (everything but attributes and skills) to a Stats block.
