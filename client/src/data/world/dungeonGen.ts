@@ -1,10 +1,11 @@
 import type { EnemyClassData, EnemyInstance } from '../units/enemies';
 import type { Item } from '../gear';
 import type { RGB } from '../../forge/core/vec';
-import { generateEnemyInstance } from '../units/enemies';
-import { findOpenTilesNear, keyPos, neighbors, posKey, reachableTiles, STEPS, type Pos } from './grid';
+import { bodySize, creatureTiles, generateEnemyInstance } from '../units/enemies';
+import { findOpenTilesNear, fits, footprint, keyPos, neighbors, posKey, reachableTiles, STEPS, type Pos } from './grid';
 import { chance, pick, randFloat, randInt, shuffle } from '../random';
 import { AGGRO_RANGE } from '../constants';
+import { BASE_MOVEMENT } from '../units/stats';
 
 // ─── Core Types ──────────────────────────────────────────────────────────────
 
@@ -39,7 +40,10 @@ export interface ZoneData {
   droppedGold: Record<string, number>;
 }
 
-/** A treasure chest on the map: its id (keys its contents), zone, tile, look (INTERACTIVE_OBJECTS id) and the floor side its lock faces. */
+/**
+ * A container on the map (a chest, a dead adventurer: data/gear/containers.ts): its id (keys its contents), zone,
+ * tile, look (INTERACTIVE_OBJECTS id) and the floor side it faces.
+ */
 export interface DungeonChest {
   id: string;
   zoneId: number;
@@ -63,7 +67,7 @@ export interface DungeonData {
   playerStart: Pos;
   /** The ways back to the Sanctum, at most one per zone (zoneRift). */
   rifts: DungeonRift[];
-  /** Treasure chests: one in the boss room (the only place chests are found for now). */
+  /** Containers (chests and the like), where each zone's config places them (placeContainers). */
   chests: DungeonChest[];
   /** The party's level when it entered: the first zone's enemies are this level, each zone after one higher; loot is this level. */
   level: number;
@@ -91,7 +95,7 @@ export function zoneWalkable(d: DungeonData, zone: ZoneData): (p: Pos) => boolea
 /** A tile of `zone` where a party member can be placed: walkable, with no living enemy of that zone on it. */
 export function isFreeFloor(d: DungeonData, zone: ZoneData, enemies: EnemyInstance[]): (p: Pos) => boolean {
   const walkable = zoneWalkable(d, zone);
-  const taken = new Set(enemies.filter(e => e.zoneId === zone.id && e.currentHp > 0).map(e => posKey(e.pos)));
+  const taken = creatureTiles(enemies.filter(e => e.zoneId === zone.id && e.currentHp > 0));
   return (p) => walkable(p) && !taken.has(posKey(p));
 }
 
@@ -115,13 +119,14 @@ export interface ZoneConfig {
   minRoomSize: number;
   maxRoomSize: number;
   splitDepth: number;
-  /** Width of the corridors ('rooms') or of the openings between rooms ('caverns'). */
+  /** Width of the corridors ('rooms'), of the openings between rooms ('caverns'), or of the tunnels ('tunnels'). */
   corridorWidth: number;
   /**
    * How the rooms are shaped and joined. 'rooms' (default): rectangles joined by straight corridors. 'caverns':
-   * round, organic rooms, each nearly filling its space, joined to their neighbours by short openings.
+   * round, organic rooms, each nearly filling its space, joined to their neighbours by short openings. 'tunnels':
+   * round rooms of any size in the range (small ones leave rock around them) joined by long winding tunnels.
    */
-  layout?: 'rooms' | 'caverns';
+  layout?: 'rooms' | 'caverns' | 'tunnels';
   /** Wall islands inside rooms (none if absent). */
   islands?: IslandConfig;
   /**
@@ -130,6 +135,12 @@ export interface ZoneConfig {
    * groups in one room.
    */
   enemyGroups: EnemyClassData[][];
+  /**
+   * Containers in the zone (INTERACTIVE_OBJECTS ids, e.g. 'worn-treasure-chest', 'dead-adventurer'), one each; list
+   * one twice for two. Each stands against a wall in a room the party doesn't enter the zone by, as far from its
+   * entry as fits (placeContainers). None if absent.
+   */
+  containers?: string[];
 }
 
 export interface BossZoneConfig {
@@ -139,6 +150,8 @@ export interface BossZoneConfig {
   layout?: 'rooms' | 'caverns';
   /** The boss first, then its guard: the boss in the boss room's center, the rest flanking it (spawnDungeonEnemies). */
   bossGroup: EnemyClassData[];
+  /** Containers in the boss room (as ZoneConfig.containers), against its walls, far from its door. */
+  containers?: string[];
 }
 
 export interface DungeonConfig {
@@ -157,7 +170,6 @@ export interface DungeonConfig {
   riftColor: RGB;
   /** Its rift key's name ("Necrotic Key"): the key that opens a rift to it (data/world/rifts.ts), painted in riftColor. */
   keyName: string;
-  chestObject: string;    // INTERACTIVE_OBJECTS id of the treasure chest in the boss room
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -341,13 +353,21 @@ function carveCavern(floors: Set<string>, room: Rect): void {
 function carveOpening(floors: Set<string>, a: Pos, b: Pos, width: number, zw: number, zh: number): void {
   const off = -Math.floor((width - 1) / 2);
   const steps = Math.max(Math.abs(b.x - a.x), Math.abs(b.y - a.y), 1);
-  for (let i = 0; i <= steps; i++) {
-    const px = Math.round(a.x + ((b.x - a.x) * i) / steps), py = Math.round(a.y + ((b.y - a.y) * i) / steps);
+  const stamp = (px: number, py: number) => {
     for (let ox = 0; ox < width; ox++)
       for (let oy = 0; oy < width; oy++) {
         const x = px + off + ox, y = py + off + oy;
         if (x >= 1 && y >= 1 && x < zw - 1 && y < zh - 1) floors.add(posKey({ x, y }));
       }
+  };
+  let last: Pos | null = null;
+  for (let i = 0; i <= steps; i++) {
+    const px = Math.round(a.x + ((b.x - a.x) * i) / steps), py = Math.round(a.y + ((b.y - a.y) * i) / steps);
+    // A 1-wide line's diagonal step only touches at a corner, which can't be walked through (canStep): fill one
+    // of the two tiles beside it. A wider brush already overlaps itself there.
+    if (width === 1 && last && last.x !== px && last.y !== py) stamp(px, last.y);
+    stamp(px, py);
+    last = { x: px, y: py };
   }
 }
 
@@ -392,6 +412,55 @@ function smoothCaverns(floors: Set<string>, zw: number, zh: number): void {
     }
   }
   for (const k of add) floors.add(k);
+}
+
+// ─── Tunnels ─────────────────────────────────────────────────────────────────
+
+/** How often a tunnel veers off sideways at a step, and how many steps a veer lasts: [fewest, most]. */
+const TUNNEL_VEER_CHANCE = 0.18, TUNNEL_VEER_STEPS: [number, number] = [2, 4];
+
+/**
+ * A winding tunnel `width` tiles wide from `a` to `b`: it steps toward `b` (along the axis with more of the way
+ * left, mostly), now and then veering sideways for a few steps, so it wanders instead of running straight. Within
+ * the zone's inner tiles (its outer ring stays wall).
+ */
+function carveTunnel(floors: Set<string>, a: Pos, b: Pos, width: number, zw: number, zh: number): void {
+  const lo = 1 - Math.floor((width - 1) / 2), hiX = zw - 2 - Math.ceil((width - 1) / 2), hiY = zh - 2 - Math.ceil((width - 1) / 2);
+  const inside = (q: Pos) => q.x >= lo && q.y >= lo && q.x <= hiX && q.y <= hiY;
+  let p = a, veer: Pos | null = null, veerLeft = 0;
+  carveOpening(floors, p, p, width, zw, zh);
+  for (let guard = 0; guard < 4 * (zw + zh) && (p.x !== b.x || p.y !== b.y); guard++) {
+    const dx = b.x - p.x, dy = b.y - p.y;
+    if (veerLeft === 0 && chance(TUNNEL_VEER_CHANCE)) {
+      // Sideways to the way it is mostly going
+      const side = chance(0.5) ? 1 : -1;
+      veer = Math.abs(dx) >= Math.abs(dy) ? { x: 0, y: side } : { x: side, y: 0 };
+      veerLeft = randInt(...TUNNEL_VEER_STEPS);
+    }
+    let step: Pos;
+    if (veerLeft > 0 && veer) { step = veer; veerLeft--; }
+    else step = chance(Math.abs(dx) / (Math.abs(dx) + Math.abs(dy))) ? { x: Math.sign(dx), y: 0 } : { x: 0, y: Math.sign(dy) };
+    const next = { x: p.x + step.x, y: p.y + step.y };
+    if (!inside(next)) { veerLeft = 0; continue; }
+    p = next;
+    carveOpening(floors, p, p, width, zw, zh);
+  }
+  // A walk that ran out of steps finishes straight
+  carveOpening(floors, p, b, width, zw, zh);
+}
+
+/** Join the two halves of every split with a winding tunnel (carveTunnel) between their closest rooms, so each tunnel stays local. */
+function connectTunnels(node: BSPNode, floors: Set<string>, width: number, zw: number, zh: number): void {
+  if (!node.left || !node.right) return;
+  connectTunnels(node.left, floors, width, zw, zh);
+  connectTunnels(node.right, floors, width, zw, zh);
+  let best: [Pos, Pos] | null = null, bestD = Infinity;
+  for (const a of collectRooms(node.left).map(roomCenter))
+    for (const b of collectRooms(node.right).map(roomCenter)) {
+      const d = Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
+      if (d < bestD) { best = [a, b]; bestD = d; }
+    }
+  if (best) carveTunnel(floors, best[0], best[1], width, zw, zh);
 }
 
 // ─── Islands ─────────────────────────────────────────────────────────────────
@@ -458,6 +527,9 @@ function generateZone(id: number, width: number, height: number, zoneConfig: Zon
     rooms.forEach(r => carveCavern(floors, r));
     connectCaverns(root, floors, zoneConfig.corridorWidth, width, height);
     smoothCaverns(floors, width, height);
+  } else if (zoneConfig.layout === 'tunnels') {
+    rooms.forEach(r => carveCavern(floors, r));
+    connectTunnels(root, floors, zoneConfig.corridorWidth, width, height);
   } else {
     rooms.forEach(r => fillRect(floors, r));
     connectBSP(root, floors, zoneConfig.corridorWidth);
@@ -658,53 +730,86 @@ export function generateDungeon(config: DungeonConfig, partyLevel: number): Dung
   const entryDoor = bossZone.doors[0];
   const entryDir = entryDoor ? getEntryDirection(entryDoor.pos, bossRoom) : 'south';
   const riftPos = addBossAntechamber(bossZone, bossRoom, entryDir, config.bossZone.corridorWidth, config.bossZone.layout);
-  const chestSpot = entryDoor ? bossChestSpot(bossZone, bossRoom, entryDoor.pos) : null;
+  // (no rift at the start when the boss zone is the only one: its antechamber's serves)
+  const rifts = [...(bossZoneId > 0 ? [{ zoneId: 0, pos: startRift }] : []), { zoneId: bossZoneId, pos: riftPos }];
 
-  return {
-    zones,
-    startZoneId: 0,
-    endZoneId: bossZoneId,
-    playerStart,
-    // (no rift at the start when the boss zone is the only one: its antechamber's serves)
-    rifts: [...(bossZoneId > 0 ? [{ zoneId: 0, pos: startRift }] : []), { zoneId: bossZoneId, pos: riftPos }],
-    chests: chestSpot ? [{ id: 'boss-chest', zoneId: bossZoneId, object: config.chestObject, ...chestSpot }] : [],
-    level: partyLevel,
-  };
+  // Each zone's containers: the boss zone's in the boss room, far from its door; a regular zone's in its rooms
+  // but the one it is entered by, far from its entry (placeContainers)
+  const chests = zones.flatMap((zone) => {
+    const boss = zone.id === bossZoneId;
+    const objects = boss ? config.bossZone.containers : config.zones[zone.id]?.containers;
+    const entry = zone.id === 0 ? playerStart : zone.doors.find(d => d.targetZoneId < zone.id)?.pos;
+    if (!objects?.length || !entry) return [];
+    const steps = walkDistances(zone, entry);
+    const toEntry = (r: Room) => Math.min(...roomFloor(zone, r).map(p => steps.get(posKey(p)) ?? Infinity));
+    const entryRoom = zone.rooms.reduce<Room | null>((best, r) => (!best || toEntry(r) < toEntry(best) ? r : best), null);
+    const others = zone.rooms.filter(r => r !== entryRoom);
+    const rooms = boss ? [bossRoom] : others.length ? others : zone.rooms;
+    return placeContainers(zone, objects, rooms, entry, rifts.filter(r => r.zoneId === zone.id).map(r => r.pos), zone.id === 0 ? [playerStart] : []);
+  });
+
+  return { zones, startZoneId: 0, endZoneId: bossZoneId, playerStart, rifts, chests, level: partyLevel };
 }
 
-// ─── Treasure chest ──────────────────────────────────────────────────────────
+// ─── Containers ──────────────────────────────────────────────────────────────
 
-/** How far from the door the boss room's chest must be: among the spots within this share of the farthest (by walking). */
-const CHEST_FAR_SHARE = 0.6;
+/** How far from the zone's entry a container must be: among the spots within this share of the farthest (by walking). */
+const CONTAINER_FAR_SHARE = 0.6;
 
 /**
- * Where the boss room's chest stands: against a wall, its back to it (facing into the room), never in a
- * corner, never beside an opening (the door, the corridor to the antechamber: it must not block a way in or
- * out), and far from the door. A random pick among the spots far enough away.
+ * Place a zone's containers (`objects`: INTERACTIVE_OBJECTS ids, one container each) in `rooms`, each on a random
+ * spot among those far from `entry` (CONTAINER_FAR_SHARE, by walking). A spot:
+ * - stands against a wall, its back to it, facing into the room: exactly one wall beside it (never a corner), and
+ *   that wall is the room's edge (rock behind it too), not an island standing in the room;
+ * - never blocks a way: not beside an opening out of its room (a corridor, a tunnel, the way to the antechamber),
+ *   not within a tile of a door, a rift (`rifts`, which nobody walks onto either), `keepClear` (the party's start)
+ *   or another container, and the zone's floor stays connected with it there.
+ * A container with no spot left is skipped. Ids are `container-<zone>-<index>`.
  */
-function bossChestSpot(zone: ZoneData, room: Room, door: Pos): { pos: Pos; facing: readonly [number, number] } | null {
+function placeContainers(zone: ZoneData, objects: string[], rooms: Room[], entry: Pos, rifts: Pos[], keepClear: Pos[]): DungeonChest[] {
   const isFloor = (p: Pos) => zone.floors.has(posKey(p));
-  const inRoom = (p: Pos) => inRect(p, room);
-  const steps = walkDistances(zone, door);
+  const steps = walkDistances(zone, entry);
+  const placed: DungeonChest[] = [];
+  const clear = [...zone.doors.map(d => d.pos), ...rifts, ...keepClear];
+  const near = (p: Pos, q: Pos) => Math.max(Math.abs(p.x - q.x), Math.abs(p.y - q.y)) <= 1;
+  // Whether every floor tile but the taken ones (containers and rifts: nobody walks there) is still reached from the
+  // entry (a door's own tile, in the wall, doesn't count)
+  const keepsConnected = (taken: Pos[]) => {
+    const blocked = new Set(taken.map(posKey));
+    const walk = (p: Pos) => isFloor(p) && !blocked.has(posKey(p));
+    const reached = [...reachableTiles(entry, Infinity, walk).keys()].filter(key => zone.floors.has(key)).length;
+    return reached === zone.floors.size - blocked.size;
+  };
+
   const spots: { pos: Pos; facing: readonly [number, number]; d: number }[] = [];
-  for (let x = room.x; x < room.x + room.w; x++) {
-    for (let y = room.y; y < room.y + room.h; y++) {
-      const pos = { x, y };
-      // The walls around it: exactly one (a corner has two) gives its back
-      const walls = DIRS4.filter(([dx, dy]) => !isFloor({ x: x + dx, y: y + dy }));
-      if (walls.length !== 1) continue;
-      // Not beside an opening: no floor outside the room around it, and not next to the door
-      if (Math.max(Math.abs(door.x - x), Math.abs(door.y - y)) <= 1 || neighbors(pos).some(q => isFloor(q) && !inRoom(q))) continue;
-      const d = steps.get(posKey(pos));
-      if (d === undefined) continue;
-      const [wx, wy] = walls[0];
-      spots.push({ pos, facing: [-wx, -wy], d });
+  for (const room of rooms) {
+    for (let x = room.x; x < room.x + room.w; x++) {
+      for (let y = room.y; y < room.y + room.h; y++) {
+        const pos = { x, y };
+        if (!isFloor(pos)) continue;
+        const walls = DIRS4.filter(([dx, dy]) => !isFloor({ x: x + dx, y: y + dy }));
+        if (walls.length !== 1) continue;
+        const [wx, wy] = walls[0];
+        if (isFloor({ x: x + 2 * wx, y: y + 2 * wy })) continue; // an island's side, not the room's edge
+        if (neighbors(pos).some(q => isFloor(q) && !inRect(q, room))) continue;
+        const d = steps.get(posKey(pos));
+        if (d === undefined) continue;
+        spots.push({ pos, facing: [-wx, -wy], d });
+      }
     }
   }
-  if (spots.length === 0) return null;
-  const far = Math.max(...spots.map(s => s.d));
-  const { pos, facing } = pick(spots.filter(s => s.d >= far * CHEST_FAR_SHARE));
-  return { pos, facing };
+
+  objects.forEach((object, k) => {
+    const open = spots.filter(s => !clear.some(c => near(c, s.pos)) && !placed.some(c => near(c.pos, s.pos)));
+    if (open.length === 0) return;
+    const far = Math.max(...open.map(s => s.d));
+    for (const s of shuffle(open.filter(o => o.d >= far * CONTAINER_FAR_SHARE))) {
+      if (!keepsConnected([...placed.map(c => c.pos), ...rifts.filter(isFloor), s.pos])) continue;
+      placed.push({ id: `container-${zone.id}-${k}`, zoneId: zone.id, object, pos: s.pos, facing: s.facing });
+      return;
+    }
+  });
+  return placed;
 }
 
 // ─── Enemy Spawning ──────────────────────────────────────────────────────────
@@ -717,6 +822,9 @@ const ENTRY_CLEAR_STEPS = AGGRO_RANGE + 3;
 
 /** Share of a regular zone's rooms (not counting the one the party enters by) that get an enemy group. */
 const ROOM_FILL_SHARE = 0.75;
+
+/** Fewest other places a large creature must fit within a move of where it is placed (spawnDungeonEnemies canRoamFrom). */
+const LARGE_MIN_STOPS = 8;
 
 export function spawnDungeonEnemies(dungeon: DungeonData, config: DungeonConfig): EnemyInstance[] {
   const instances: EnemyInstance[] = [];
@@ -762,15 +870,52 @@ export function spawnDungeonEnemies(dungeon: DungeonData, config: DungeonConfig)
     return free;
   };
 
-  /** Place one enemy group, member i on spots[i]. */
+  /** Place one enemy group, member i on spots[i] (a large one's top-left tile). */
   const placeAt = (zone: ZoneData, group: EnemyClassData[], spots: Pos[]) => {
     const groupId = nextGroupId++;
     group.forEach((type, i) => {
       const pos = spots[i];
-      occupied.add(`${zone.id}:${posKey(pos)}`);
+      for (const p of footprint({ pos, size: bodySize(type) })) occupied.add(`${zone.id}:${posKey(p)}`);
       const level = dungeon.level + zone.id;
       instances.push(generateEnemyInstance(type, level, `${type.id}-${globalIdx++}`, pos, zone.id, groupId));
     });
+  };
+
+  /**
+   * Whether a large body (`size`) with its top-left at `pos` isn't boxed in: it has LARGE_MIN_STOPS other places
+   * it fits within a move (BASE_MOVEMENT tiles, squeezing between them), on the empty zone. Rules out rooms full
+   * of 1-tile islands and pinched coves, where it could hardly move.
+   */
+  const canRoamFrom = (zone: ZoneData, pos: Pos, size: number): boolean => {
+    const walkable = zoneWalkable(dungeon, zone);
+    let stops = 0;
+    for (const r of reachableTiles(pos, BASE_MOVEMENT, walkable, undefined, size).values()) {
+      if (r.steps > 0 && fits(r.pos, size, walkable) && ++stops >= LARGE_MIN_STOPS) return true;
+    }
+    return false;
+  };
+
+  /**
+   * Where a member of `type` can stand, of the `open` tiles (keys): a tile, or for a large one the top-left of a
+   * square that is all open and from which it isn't boxed in (canRoamFrom).
+   */
+  const canStand = (zone: ZoneData, type: EnemyClassData, open: ReadonlyMap<string, Pos>) => (p: Pos) =>
+    fits(p, bodySize(type), q => open.has(posKey(q))) && (bodySize(type) === 1 || canRoamFrom(zone, p, bodySize(type)));
+
+  /**
+   * Members of a group on the `open` tiles, its large ones first (they need a whole free square), each on the
+   * first tile `order` gives it that it can stand on (canStand). Null if one has nowhere to go.
+   */
+  const spotsFor = (zone: ZoneData, group: EnemyClassData[], open: Map<string, Pos>, order: (i: number) => Pos[]): Pos[] | null => {
+    const spots: Pos[] = [];
+    const byLargeFirst = group.map((_, i) => i).sort((a, b) => bodySize(group[b]) - bodySize(group[a]));
+    for (const i of byLargeFirst) {
+      const spot = order(i).find(canStand(zone, group[i], open));
+      if (!spot) return null;
+      for (const p of footprint({ pos: spot, size: bodySize(group[i]) })) open.delete(posKey(p));
+      spots[i] = spot;
+    }
+    return spots;
   };
 
   /**
@@ -778,40 +923,37 @@ export function spawnDungeonEnemies(dungeon: DungeonData, config: DungeonConfig)
    * (nothing placed) if the group doesn't fit there.
    */
   const placeGroup = (zone: ZoneData, area: Rect, group: EnemyClassData[]): boolean => {
-    const free = freeTiles(zone, area, false);
-    if (free.length < group.length) return false;
-    placeAt(zone, group, shuffle(free));
+    const free = shuffle(freeTiles(zone, area, false));
+    const open = new Map(free.map(p => [posKey(p), p]));
+    const spots = spotsFor(zone, group, open, () => free);
+    if (!spots) return false;
+    placeAt(zone, group, spots);
     return true;
   };
 
   /**
    * Place a boss group: the boss (its first member) on a random free tile inside `area`, the rest flanking it in
-   * `room`: beside it on the line across the party's way in (`across`), one each side, then a step further out.
-   * A flank tile that isn't free (a wall, a cavern's edge) gives way to the free tile nearest it. False (nothing
-   * placed) if the group doesn't fit.
+   * `room`: beside it on the line across the party's way in (`across`), one each side, then a step further out
+   * (past the whole of a large boss). A flank tile that isn't free (a wall, a cavern's edge) gives way to the free
+   * tile nearest it. False (nothing placed) if the group doesn't fit.
    */
   const placeBossGroup = (zone: ZoneData, area: Rect, room: Rect, group: EnemyClassData[], across: 'x' | 'y', nearEntryOk = false): boolean => {
-    const bossSpots = freeTiles(zone, area, nearEntryOk);
     const open = new Map(freeTiles(zone, room, nearEntryOk).map(p => [posKey(p), p]));
-    if (bossSpots.length === 0 || open.size < group.length) return false;
-    const boss = pick(bossSpots);
-    open.delete(posKey(boss));
-    const spots = [boss];
-    for (let i = 1; i < group.length; i++) {
+    const boss = shuffle(freeTiles(zone, area, nearEntryOk)).find(canStand(zone, group[0], open));
+    if (!boss) return false;
+    for (const p of footprint({ pos: boss, size: bodySize(group[0]) })) open.delete(posKey(p));
+    const bossSize = bodySize(group[0]);
+    // Nearest the flank tile first; on a tie, nearest the boss
+    const d2 = (p: Pos, q: Pos) => (p.x - q.x) ** 2 + (p.y - q.y) ** 2;
+    const flank = (i: number): Pos[] => {
       const out = (i % 2 ? 1 : -1) * Math.ceil(i / 2);
-      const want = across === 'x' ? { x: boss.x + out, y: boss.y } : { x: boss.x, y: boss.y + out };
-      let spot = open.get(posKey(want));
-      if (!spot) {
-        // Nearest to the flank tile; on a tie, nearest the boss
-        const d2 = (p: Pos, q: Pos) => (p.x - q.x) ** 2 + (p.y - q.y) ** 2;
-        for (const p of open.values()) {
-          if (!spot || d2(p, want) < d2(spot, want) || (d2(p, want) === d2(spot, want) && d2(p, boss) < d2(spot, boss))) spot = p;
-        }
-      }
-      open.delete(posKey(spot!));
-      spots.push(spot!);
-    }
-    placeAt(zone, group, spots);
+      const step = out > 0 ? out + bossSize - 1 : out;
+      const want = across === 'x' ? { x: boss.x + step, y: boss.y } : { x: boss.x, y: boss.y + step };
+      return [...open.values()].sort((p, q) => d2(p, want) - d2(q, want) || d2(p, boss) - d2(q, boss));
+    };
+    const rest = spotsFor(zone, group.slice(1), open, i => flank(i + 1));
+    if (!rest) return false;
+    placeAt(zone, group, [boss, ...rest]);
     return true;
   };
 

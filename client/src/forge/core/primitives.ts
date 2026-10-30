@@ -5,6 +5,11 @@ type Col = RGB | ColorFn;
 export interface PrimOpts extends FaceOpts {
   /** loft/frustum: add end caps (default true). */
   caps?: boolean;
+  /**
+   * loft: face each band (between two rings) away from its own center, not the whole loft's. For a column that
+   * flares or leans (a robe's hem, a hunch), whose overall center can fall outside a band, turning its faces inward.
+   */
+  bandCenters?: boolean;
 }
 
 function basis(u: Vec3): [Vec3, Vec3] {
@@ -28,11 +33,13 @@ export function loft(m: Mesh, rings: Vec3[][], col: Col, o: PrimOpts = {}): void
   const n = rings[0].length;
   const all = rings.flat();
   const ctr: Vec3 = [0, 1, 2].map((i) => all.reduce((s, p) => s + p[i], 0) / all.length) as Vec3;
-  for (let k = 0; k < rings.length - 1; k++)
+  for (let k = 0; k < rings.length - 1; k++) {
+    const band = o.bandCenters ? mul([...rings[k], ...rings[k + 1]].reduce((s, p) => add(s, p), [0, 0, 0] as Vec3), 1 / (2 * n)) : ctr;
     for (let i = 0; i < n; i++) {
       const j = (i + 1) % n;
-      m.quad(rings[k][i], rings[k][j], rings[k + 1][j], rings[k + 1][i], col, ctr, o);
+      m.quad(rings[k][i], rings[k][j], rings[k + 1][j], rings[k + 1][i], col, band, o);
     }
+  }
   if (o.caps !== false)
     for (const r of [rings[0], rings[rings.length - 1]]) {
       const c = mul(
@@ -60,6 +67,30 @@ export function tube(m: Mesh, pts: Vec3[], r0: number, r1: number, sides: number
   const r = (t: number) => r0 + (r1 - r0) * t;
   for (let i = 0; i < last; i++)
     frustum(m, pts[i], pts[i + 1], perSegment ? r0 : r(i / last), perSegment ? r1 : r((i + 1) / last), sides, col, face);
+}
+
+/**
+ * A jointed limb (a leg, an arm, a feeler) through its `joints`, root first: a tapered prism (frustum) per segment,
+ * capless where they meet (`caps` to change that). `r`: its radius at each joint (one taper all along it), or each
+ * segment's own [start, end] (`(seg) => ...`: a bone per segment, each tapering on its own). `col`: one color, or one
+ * per segment (the last for any after it). `knobs`: a lump at each joint but the tip (a knee, an elbow), `scale` times
+ * the segment's start radius, drawn after all the segments. Face options (`j`) are the segments'.
+ */
+export function jointedLimb(
+  m: Mesh, joints: Vec3[], r: number[] | ((seg: number) => [number, number]), col: Col | Col[],
+  o: PrimOpts & { sides?: number; knobs?: { scale: number; jit: number } } = {},
+): void {
+  const { sides = 5, knobs, ...face } = o;
+  const radii = (i: number): [number, number] => (typeof r === 'function' ? r(i) : [r[i], r[i + 1]]);
+  const perSeg = Array.isArray(col) && (Array.isArray(col[0]) || typeof col[0] === 'function');
+  const colOf = (i: number): Col => (perSeg ? (col as Col[])[Math.min(i, (col as Col[]).length - 1)] : (col as Col));
+  const segs = joints.length - 1;
+  for (let i = 0; i < segs; i++) frustum(m, joints[i], joints[i + 1], radii(i)[0], radii(i)[1], sides, colOf(i), { caps: false, ...face });
+  if (!knobs) return;
+  for (let i = 0; i < segs; i++) {
+    const k = radii(i)[0] * knobs.scale;
+    blob(m, joints[i], [k, k, k], 0, knobs.jit, colOf(i));
+  }
 }
 
 /** Axis-aligned box with optional corner jitter (jit = fraction of size). */

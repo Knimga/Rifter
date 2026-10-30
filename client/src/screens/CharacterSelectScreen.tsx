@@ -3,14 +3,14 @@
 // proficiencies, and abilities.
 import { lazy, Suspense, useMemo, useRef, useState, type MouseEvent } from 'react';
 import { CLASSES, ROLE_ICONS, type ClassKey, type ArmorProficiency, type Role } from '../data/units/classes';
-import { capitalizeWords, formatPassiveValue, formatStatLabel } from '../data/detailStrings';
+import { capitalizeWords, formatPassiveValue, formatStatLabel, triggerSentence } from '../data/detailStrings';
 import { heldWeapon } from '../data/gear';
 import { HERO_NAMES, startingGear } from '../data/units/party';
 import { pick } from '../data/random';
 import Backdrop from '../components/ui/Backdrop';
 import RiftButton from '../components/ui/RiftButton';
 import Panel, { PanelTitle } from '../components/ui/Panel';
-import AbilityCard from '../components/ui/AbilityCard';
+import AbilityCard, { EffectSentence } from '../components/ui/AbilityCard';
 import { Hint } from '../components/Tooltip';
 import LoadingCover from '../components/ui/LoadingCover';
 import { useSceneReady } from '../hooks/useSceneReady';
@@ -186,6 +186,13 @@ export default function CharacterSelectScreen({ onStart, onBack }: {
                         <span className="text-rift-muted">{formatStatLabel(stat)}</span>
                         <span className="block text-[11px] text-rift-label">{p.name}</span>
                       </p>
+                    ))}
+                    {/* Its passive triggers: what each does, in words, and its name */}
+                    {focus.passiveTriggers?.map((p) => (
+                      <div key={p.name} className="mb-2 text-[13px] leading-[1.4] text-rift-muted">
+                        <EffectSentence parts={triggerSentence(p.trigger, undefined, 'you')} />
+                        <span className="block text-[11px] text-rift-label">{p.name}</span>
+                      </div>
                     ))}
                   </div>
                   <div>

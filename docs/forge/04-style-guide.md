@@ -48,8 +48,9 @@ their rarity glow is the renderer's, never the design's.
 - **Sizes.** Creatures about one tile (bosses larger via `fit`). Items are `fit.size` about 0.8: they sit on a tile and fill an icon.
 - **Facing.** Front (eyes, face) toward +z. Make the front obviously the front. Models turn when they move (toward the move, before gliding there) or use an ability (toward the tile it was aimed at).
 - **Budgets.** Regular creatures aim for about 900 triangles; an elaborate one (lots of fungus, strands, a showpiece) can go to about 2,000–2,800 when the look needs it. Items <= 600. Set `budget` a little above what the design uses (lint fails over it), and spend triangles where they read: silhouette and glow, not hidden undersides.
+- **No animation unless asked.** A design has no `motion` (spinning parts) and no `animations` unless the request asks for them by name. Movement in a description ("flapping wings", "wheeling") is posed into the still model (wings caught mid-beat, bats banked into a turn), not animated.
 - **Loot is motionless** on the ground and in the inventory. Build items facing +z (their outline in the x-y plane): they're shown flat on the tile in game and straight-on in icons, so the x-y outline is what players see.
-- **Weapons** lean with the tip up and to the LEFT (`WEAPON_ROLL`), matching the character sheet's left-hand weapon slot. Never pitch a weapon toward or away from the camera. Weapon designs draw `series` and `weaponType` from the game's weapon data (`weaponPalette`): the series sets the material, and the display name comes from `WEAPON_SERIES`.
+- **Weapons** lean with the tip up and to the LEFT (`WEAPON_ROLL`), matching the character sheet's left-hand weapon slot. Never pitch a weapon toward or away from the camera. Weapon designs take their identity and palette from the game's weapon data (`weaponEntry(seriesId, weaponType)` in `designs/_weapon.ts`): the series sets the material, and the display name comes from `WEAPON_SERIES`.
 - **Shields** are strapped to the forearm, never pinned to the fist: the shield's face lies parallel to the forearm,
   its back against the forearm's outside, the fist behind it (never through it). To show its face to the camera,
   tip it about the forearm, not off it.
@@ -57,6 +58,15 @@ their rarity glow is the renderer's, never the design's.
   torso's upper rings forward and bulge their back edge outward (the hunch grows out of the body). Never a separate
   round blob on the back: it reads as a boulder carried there.
 - **Don't** add detail smaller than about 3% of the model; it is invisible at game scale and costs triangles.
+
+## Large creatures
+A large creature (`large: true` on its entry: 2×2 tiles, about 100 px across in game) is seen twice as big as a regular one, so it is built with more fidelity, not just scaled up:
+- **Size.** Fill the square: `fit.maxRadius` about 1, height to match its build (a hulking brute well over a regular creature's head height). Check it standing on its 2×2 in the builder and on the sheet.
+- **More detail, where it reads.** The 3% rule still holds, but 3% of a model twice the size is half the detail of a regular one in tiles: secondary forms that a 1-tile creature leaves out now show (fingers and claws, plates and their rims, straps and buckles, layered hide, teeth, scars, growths). Keep the one strong silhouette idea; the extra detail clusters on the focal parts (head, hands, weapon, chest), not spread evenly.
+- **More faceting.** Rounder forms take more sides (rings of 8–10 where a regular creature uses 5–6), so curves don't read as blocky at the larger screen size; keep the hard, flat-shaded edges.
+- **Budgets.** About 2× a regular creature's: aim for about 1,800–2,500 triangles, up to about 4,000–5,000 for a showpiece (a large boss).
+- **Glows** scale with it: a few more, still small, still reading as light (eyes, a core, runes), never a fog over it.
+- **Limbs** keep the camera rule: lean outward, never toward or away from the camera; at this size a limb toward the camera hides half the body.
 
 ## Camera (read this before posing anything)
 The game uses an isometric orthographic view looking down steeply (`GAME_CAMERA` in `src/viewEngine/camera.ts`: steep elevation, turned 45° so north is up-left). A point's height lifts it on screen by only `y * cos(elevation)` (half a tile per unit at 60°, 0.71 at 45°).

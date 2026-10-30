@@ -11,7 +11,7 @@ import { TbBow, TbFocus2 } from "react-icons/tb";
 import type { IconType } from 'react-icons';
 import type { DamageElement, OffhandKind, WeaponType } from '../gear';
 import type { AttributeKey, SkillKey } from './stats';
-import { warnIgnoredEffects, type Ability } from '../combat/abilities';
+import { warnIgnoredEffects, warnIgnoredTriggers, type Ability, type PassiveTrigger } from '../combat/abilities';
 import type { ModelLink } from '../../forge/core/types';
 
 export type ClassKey = 'knight' | 'rogue' | 'barbarian' | 'arcanist' | 'archer' | 'primalist' | 'occultist' | 'acolyte';
@@ -64,6 +64,8 @@ export interface ClassData {
   skills: Partial<Record<SkillKey, number>>;
   passives: Record<string, Passive>;
   scalingPassives?: ScalingPassive[];
+  /** Triggers the class always has (always on, never run out: PassiveTrigger), e.g. striking back when parried. */
+  passiveTriggers?: PassiveTrigger[];
   armorProficiencies: ArmorProficiency[];
   weaponProficiencies: WeaponProficiency[];
   startingGear: StartingGear;
@@ -555,7 +557,7 @@ export const CLASSES: Record<ClassKey, ClassData> = {
         area: 'blast1',
         displayElement: 'holy',
         effects: [
-          { type: 'damage', appliesTo: 'target', damageElement: 'holy', minDamage: 4, maxDamage: 8 },
+          { type: 'damage', appliesTo: 'target', damageElement: 'holy', minDamage: 5, maxDamage: 7 },
           { type: 'heal',   appliesTo: 'allies', damageElement: 'holy', minHeal: 4, maxHeal: 6 }
         ]
       },
@@ -575,5 +577,9 @@ export const CLASSES: Record<ClassKey, ClassData> = {
   }
 };
 
-// Effects an ability would silently ignore (e.g. a 'target' heal on an enemy-target ability): warned at load
-for (const [key, c] of Object.entries(CLASSES)) warnIgnoredEffects(`classes › ${key}`, c.abilities);
+// Effects an ability (or a passive trigger) would silently ignore (e.g. a 'target' heal on an enemy-target
+// ability): warned at load
+for (const [key, c] of Object.entries(CLASSES)) {
+  warnIgnoredEffects(`classes › ${key}`, c.abilities);
+  warnIgnoredTriggers(`classes › ${key}`, c.passiveTriggers);
+}

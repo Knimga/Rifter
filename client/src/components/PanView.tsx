@@ -34,15 +34,22 @@ function axisRange(view: number, size: number, a: number, b: number): [number, n
 }
 const clamp = (v: number, [lo, hi]: [number, number]) => Math.min(hi, Math.max(lo, v));
 
-export default function PanView({ children, resetKey, insets = NO_INSETS }: {
+export default function PanView({ children, resetKey, insets = NO_INSETS, focus }: {
   children: ReactNode;
   /** Changes when a different map is shown (location, zone): the view recenters on it. */
   resetKey: string;
   /** Space covered by HUD along each edge: the map centres in, and pans little past, the area inside it. */
   insets?: Insets;
+  /**
+   * The point (content px) a new map centers on, e.g. the party as it arrives; within the usual bounds, so near a
+   * map's edge it stops short. Absent: the map's own center.
+   */
+  focus?: { left: number; top: number };
 }) {
   const insetsRef = useRef(insets);
   insetsRef.current = insets;
+  const focusRef = useRef(focus);
+  focusRef.current = focus;
   const viewRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   // Offset of the content in the viewport; null until measured (then centered). Applied straight to the
@@ -61,10 +68,11 @@ export default function PanView({ children, resetKey, insets = NO_INSETS }: {
     pan.current = { x: clamp(x, axisRange(vw, cw, ins.left, ins.right)), y: clamp(y, axisRange(vh, ch, ins.top, ins.bottom)) };
     contentRef.current!.style.transform = `translate(${pan.current.x}px, ${pan.current.y}px)`;
   };
+  /** Center the focus point (or the map) in the free area, as far as the bounds allow. */
   const center = () => {
     const { vw, vh, cw, ch } = sizes();
-    const ins = insetsRef.current;
-    place(ins.left + (vw - ins.left - ins.right - cw) / 2, ins.top + (vh - ins.top - ins.bottom - ch) / 2);
+    const ins = insetsRef.current, f = focusRef.current ?? { left: cw / 2, top: ch / 2 };
+    place(ins.left + (vw - ins.left - ins.right) / 2 - f.left, ins.top + (vh - ins.top - ins.bottom) / 2 - f.top);
   };
 
   // Center on a new map; keep the view in bounds when the viewport or the map changes size

@@ -95,7 +95,7 @@ function abilityElement(ability: Ability): DamageElement | null {
 }
 
 /** One effect sentence: plain text, its highlights in their tone (or element) color. */
-function EffectSentence({ parts }: { parts: Sentence }) {
+export function EffectSentence({ parts }: { parts: Sentence }) {
   return (
     <p className="m-0">
       {parts.map((p, i) => (p.tone

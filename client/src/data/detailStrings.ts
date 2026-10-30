@@ -1,4 +1,5 @@
 import { statSuffix, type AttributeKey, type BuffableStat, type DamageElement, type SkillKey } from "./units/stats";
+import { scaledRange } from "./random";
 import { isAttackTrigger, type Ability, type AreaType, type Effect, type TargetType, type Trigger, type TriggerEffect } from "./combat/abilities";
 import type { GearSlot, WeaponType } from "./gear";
 
@@ -141,7 +142,7 @@ export interface EffectLine {
  */
 export function weaponDamageLines(eff: Extract<Effect, { type: 'damage' }>, damageBonus = 0): EffectLine[] {
     const lines: EffectLine[] = [{ label: 'Base Damage', value: `${eff.minDamage}–${eff.maxDamage}`, element: eff.damageElement, tone: 'base' }];
-    if (damageBonus) lines.push({ label: 'Damage', value: `${eff.minDamage + damageBonus}–${eff.maxDamage + damageBonus}`, element: eff.damageElement, tone: 'damage' });
+    if (damageBonus) lines.push({ label: 'Damage', value: span(...scaledRange(eff.minDamage, eff.maxDamage, damageBonus)), element: eff.damageElement, tone: 'damage' });
     return lines;
 }
 

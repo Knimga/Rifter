@@ -6,7 +6,7 @@ import { isArmorItem, isJewelryItem, isOffhandItem, isShieldItem, isWeaponItem, 
 import { OFFHAND_KIND_NAME } from '../data/gear/offhands';
 import { JEWELRY_KIND_NAME } from '../data/gear/jewelry';
 import type { Stats } from '../data/units/stats';
-import type { EquipCompare, StatDelta } from '../data/units/party';
+import type { EquipCompare } from '../data/units/party';
 import { RARITY_COLOR } from '../data/constants';
 import { WEAPON_TYPE_SINGULAR, formatModifier, weaponDamageLines } from '../data/detailStrings';
 import { getOffense } from '../data/combat/attackResolution';
@@ -129,7 +129,22 @@ interface ItemTooltipProps {
   clickAction?: ItemClickAction;  // shows the right-click hint
   canCompare?: boolean;           // shows the Ctrl "Compare" hint (the viewer can equip it: equipCompare)
   trade?: ItemTrade;              // its price and trade action (the vendor window), in place of its sell value
-  deltas?: StatDelta[];           // while comparing: the stats equipping it adds and removes (equipCompare), at the very bottom
+  /** While comparing: what equipping it changes (equipCompare): a weapon's damage, then the stats it adds and removes, at the very bottom. */
+  compare?: Pick<EquipCompare, 'deltas' | 'damage'>;
+}
+
+/** A damage range as tooltips show it: '6–9', or '7' when it can only roll one number. */
+const damageText = ([lo, hi]: [number, number]) => (lo === hi ? `${lo}` : `${lo}–${hi}`);
+
+/**
+ * Comparing a weapon's damage: the held weapon's range, then this one's, colored by whether its average is higher
+ * (up), lower (down) or the same.
+ */
+function DamageDelta({ before, after }: NonNullable<EquipCompare['damage']>) {
+  const avg = (r: [number, number]) => (r[0] + r[1]) / 2;
+  const change = avg(after) - (before ? avg(before) : 0);
+  const tone = change > 0 ? 'text-rift-up' : change < 0 ? 'text-rift-down' : 'text-rift-muted';
+  return <div className={tone}>Damage {before ? `${damageText(before)} → ` : ''}{damageText(after)}</div>;
 }
 
 /**
@@ -150,7 +165,7 @@ export function KeyHint({ keyName, children, className = '' }: { keyName: string
  * armor), rolled affixes, what it sells for, then the hints: right-click at the left, Ctrl to compare at the right.
  * While comparing, how equipping it changes the stats comes last: gains green, losses red.
  */
-function ItemTip({ item, type, proficient, clickAction, canCompare, trade, deltas, children }: Omit<ItemTooltipProps, 'stats'> & { item: Item; type: string; children?: ReactNode }) {
+function ItemTip({ item, type, proficient, clickAction, canCompare, trade, compare, children }: Omit<ItemTooltipProps, 'stats'> & { item: Item; type: string; children?: ReactNode }) {
   return (
     <div className="w-[236px] box-border px-3.5 py-3 text-xs">
       <div className="font-display text-sm tracking-[0.03em]" style={{ color: RARITY_COLOR[item.rarity] }}>{item.name}</div>
@@ -184,10 +199,11 @@ function ItemTip({ item, type, proficient, clickAction, canCompare, trade, delta
           {canCompare && <KeyHint keyName="Ctrl" className="ml-auto">Compare</KeyHint>}
         </div>
       )}
-      {deltas && (
+      {compare && (
         <div className="mt-2 pt-2 border-t border-rift-line text-[11px] leading-[1.6]">
-          {deltas.length === 0 ? <div className="text-rift-muted">No stat changes</div>
-            : deltas.map(({ stat, delta }) => <div key={stat} className={delta > 0 ? 'text-rift-up' : 'text-rift-down'}>{formatModifier(stat, delta)}</div>)}
+          {compare.damage && <DamageDelta {...compare.damage} />}
+          {compare.deltas.length === 0 && !compare.damage ? <div className="text-rift-muted">No stat changes</div>
+            : compare.deltas.map(({ stat, delta }) => <div key={stat} className={delta > 0 ? 'text-rift-up' : 'text-rift-down'}>{formatModifier(stat, delta)}</div>)}
         </div>
       )}
     </div>
@@ -235,7 +251,7 @@ export function ItemCompareTooltip({ compareWith, comparing, ...props }: ItemToo
   const on = comparing && compare;
   return (
     <div className="relative">
-      <div className="rf-tip text-sm overflow-hidden"><ItemTooltipContent {...props} canCompare={!!compare} deltas={on ? compare.deltas : undefined} /></div>
+      <div className="rf-tip text-sm overflow-hidden"><ItemTooltipContent {...props} canCompare={!!compare} compare={on ? compare : undefined} /></div>
       {on && compare.equipped && (
         <div className="rf-tip text-sm overflow-hidden absolute left-full bottom-0 ml-2">
           <ItemTooltipContent item={compare.equipped} stats={props.stats} />

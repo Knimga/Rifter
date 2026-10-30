@@ -1,7 +1,9 @@
 import { CLASSES, type ClassKey } from './classes';
-import { EMPTY_GEAR, generateArmor, generateOffhand, generateShield, generateWeapon, getGearArmorBonus, getGearBuffs, type GearSlots, type Item } from '../gear';
+import { EMPTY_GEAR, generateArmor, generateOffhand, generateShield, generateWeapon, getGearArmorBonus, getGearBuffs, heldWeapon, isWeaponItem, type GearSlots, type Item, type WeaponItem } from '../gear';
 import { equipSlotFor, gearWith, isProficient } from '../gear/inventory';
 import { ATTRIBUTE_KEYS, ATTRIBUTE_POINTS_PER_LEVEL, BUFFABLE_STATS, SKILL_KEYS, SKILL_POINTS_PER_LEVEL, recomputeStats, type ActiveBuff, type BuffableStat, type ActiveDot, type ActiveHot, type AttributeKey, type PlayerStatInput, type SkillKey, type Stats } from './stats';
+import { getOffense } from '../combat/attackResolution';
+import { scaledRange } from '../random';
 
 export interface PartyMemberConfig {
   characterName: string;
@@ -51,11 +53,15 @@ export interface StatDelta { stat: BuffableStat; delta: number }
 
 /**
  * Comparing an item with what a member wears (item tooltips, Ctrl): the item in its slot now, and the stats the
- * swap adds and removes: the items' own (implicits, affixes, armor), not what they feed (an attribute's HP).
+ * swap adds and removes: the items' own (implicits, affixes, armor), not what they feed (an attribute's HP). For a
+ * weapon, also the damage its wielder deals with it: the held weapon's range now and after, with the wielder's
+ * damage bonus (each with the gear it would have: an affix on either weapon can change it), as its tooltip shows.
  */
 export interface EquipCompare {
   equipped: Item | null;
   deltas: StatDelta[];
+  /** A weapon's: the held weapon's damage range now (null: none held) and with it equipped. */
+  damage?: { before: [number, number] | null; after: [number, number] };
 }
 
 /** The gear's own stats, summed by stat: its implicits and affixes, and its armor. */
@@ -67,15 +73,32 @@ function gearStatTotals(gear: GearSlots): Map<BuffableStat, number> {
 
 /**
  * What comparing `item` shows for a member (gearWith: as equipping it would, the other hand's item pushed off
- * too), or null when they aren't proficient with it. Its stat changes in BUFFABLE_STATS order, unchanged ones left out.
+ * too), or null when they aren't proficient with it. Its stat changes in BUFFABLE_STATS order, unchanged ones left
+ * out; for a weapon, its damage (EquipCompare.damage). `stats`: the member's now (its buffs count toward its damage).
  */
-export function equipCompare(m: PartyMemberConfig, item: Item): EquipCompare | null {
+export function equipCompare(m: PartyMemberConfig, item: Item, stats: Stats): EquipCompare | null {
   if (!isProficient(CLASSES[m.selectedClass], item)) return null;
-  const before = gearStatTotals(m.gear), after = gearStatTotals(gearWith(m.gear, item));
+  const gear = gearWith(m.gear, item);
+  const before = gearStatTotals(m.gear), after = gearStatTotals(gear);
   return {
     equipped: m.gear[equipSlotFor(m.gear, item)],
     deltas: BUFFABLE_STATS.map(stat => ({ stat, delta: (after.get(stat) ?? 0) - (before.get(stat) ?? 0) })).filter(d => d.delta !== 0),
+    ...(isWeaponItem(item) ? { damage: weaponDamageCompare(m, gear, stats) } : {}),
   };
+}
+
+/**
+ * The held weapon's damage range now and with `gear` on (EquipCompare.damage): its base range stretched by the
+ * wielder's damage bonus for it (scaledRange, as an attack rolls it). Now: from `stats`, as they are. After: from
+ * the stats `gear` gives, plus what the member's buffs add to that bonus now (they stay through a swap).
+ */
+function weaponDamageCompare(m: PartyMemberConfig, gear: GearSlots, stats: Stats): EquipCompare['damage'] {
+  const bonus = (w: WeaponItem, s: Stats) => getOffense(s, w.attackCategory, w.damageElement).damage;
+  const range = (w: WeaponItem, b: number) => scaledRange(w.minDamage, w.maxDamage, b);
+  const gearOnly = memberStats(m, stats.level, []), withNew = memberStats({ ...m, gear }, stats.level, []);
+  const now = heldWeapon(m.gear), next = heldWeapon(gear)!;
+  const fromBuffs = bonus(next, stats) - bonus(next, gearOnly);
+  return { before: now && range(now, bonus(now, stats)), after: range(next, bonus(next, withNew) + fromBuffs) };
 }
 
 /**

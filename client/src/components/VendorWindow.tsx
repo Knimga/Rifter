@@ -77,7 +77,7 @@ export default function VendorWindow({ vendor, party, partyStats, state, onTrade
   // With a member picked: their stats in the tooltips, and Ctrl compares an item they can use with what they wear
   // in its slot
   const memberTips = chosen && member !== null
-    ? { stats: partyStats[member], compareWith: (item: Item) => equipCompare(chosen, item) }
+    ? { stats: partyStats[member], compareWith: (item: Item) => equipCompare(chosen, item, partyStats[member]) }
     : {};
 
   return (

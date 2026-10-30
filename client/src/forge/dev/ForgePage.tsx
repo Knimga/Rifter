@@ -97,6 +97,8 @@ export default function ForgePage() {
   const tint: RGB = tintKey === 'custom' ? customTint : DUNGEONS[tintKey].riftColor;
   // The exact game data entry this design is the model for (lint guarantees it exists and the names match)
   const source = shownDesign ? dataEntry(shownDesign.source) : undefined;
+  // The tiles a side it stands on in game (a large creature's 2×2): its floor shows that square
+  const tiles = source?.tiles ?? 1;
   // Items have one look (every item of a name is identical: ITEM_SEED); creatures and characters get a
   // page of seeds, each one a possible game instance.
   const single = shownDesign ? oneLook(shownDesign) : false;
@@ -199,7 +201,7 @@ export default function ForgePage() {
           // The chosen animation plays on a loop: rest, play, hold the end pose, back to rest
           const anim = playing ? model.animations?.find((a) => a.name === playing) : undefined;
           const progress = anim ? { [anim.name]: animationLoop(now - loopStart, anim.ms) } : undefined;
-          cells.push({ model, yaw, rect: rectOf(b, i), progress });
+          cells.push({ model, yaw, rect: rectOf(b, i), progress, tiles });
         }),
       );
       view.render(cells, { camera, wireframe, ground }, { w: width, h: height }, now / 1000);
@@ -257,7 +259,7 @@ export default function ForgePage() {
   const floorRects = camera === 'game' && ground ? built.flatMap((block, b) => block.map((_, i) => rectOf(b, i))) : [];
   const snapshot = () =>
     run('Snapshot', async () => {
-      const png = composeSnapshot(viewRef.current!.canvas, { w: width, h: height }, floorRects);
+      const png = composeSnapshot(viewRef.current!.canvas, { w: width, h: height }, floorRects, tiles);
       return (await post('snapshot', { name: `${stemOf(entry!.id)}-${Date.now()}`, pngBase64: png })).path;
     });
   const focusModel = focusSeed !== null ? built[built.length - 1]?.[0]?.model : null;
@@ -369,7 +371,7 @@ export default function ForgePage() {
         </div>
 
         <div ref={hostRef} className="relative" style={{ width, height }}>
-          {floorRects.map((r) => <FloorCell key={`${r.x},${r.y}`} rect={r} />)}
+          {floorRects.map((r) => <FloorCell key={`${r.x},${r.y}`} rect={r} tiles={tiles} />)}
           {built.map((block, b) => (
             <div key={b}>
               <div className="absolute left-0 font-bold text-gray-300" style={{ top: blockTop(b) + 4 }}>
@@ -447,25 +449,27 @@ const PAGE_BG = '#111827'; // Tailwind gray-900, the page background
 type Rect = { x: number; y: number; w: number; h: number };
 
 /**
- * The floor around the model's tile, as the game draws it: flat tiles in floor px (the model's tile
- * spans -TILE_SIZE/2..+TILE_SIZE/2 around its center), laid on the floor by the game view's transform
- * (floorMatrix) with the tile center at GAME_VIEW_ANCHOR. Enough tiles to cover the cell (it clips them);
- * a block per cell, so neighbouring cells' grids never meet out of step.
+ * The floor around the model's square, as the game draws it: flat tiles in floor px (a 1-tile model's tile
+ * spans -TILE_SIZE/2..+TILE_SIZE/2 around its center; a large creature's 2×2 square meets at its center),
+ * laid on the floor by the game view's transform (floorMatrix) with the model's center at GAME_VIEW_ANCHOR.
+ * Enough tiles to cover the cell (it clips them); a block per cell, so neighbouring cells' grids never meet out
+ * of step.
  */
-function floorTiles(r: Rect): { left: number; top: number }[] {
+function floorTiles(r: Rect, square: number): { left: number; top: number }[] {
   const half = Math.ceil(Math.max(r.w, r.h) / TILE_SIZE);
+  const offset = (square % 2) * (TILE_SIZE / 2);
   const tiles: { left: number; top: number }[] = [];
-  for (let i = -half; i <= half; i++) for (let j = -half; j <= half; j++) tiles.push({ left: i * TILE_SIZE - TILE_SIZE / 2, top: j * TILE_SIZE - TILE_SIZE / 2 });
+  for (let i = -half; i <= half; i++) for (let j = -half; j <= half; j++) tiles.push({ left: i * TILE_SIZE - offset, top: j * TILE_SIZE - offset });
   return tiles;
 }
 /** The floor transform for a cell: floorMatrix, translated to the cell's anchor (cell-relative px). */
 const cellFloor = (r: Rect): [number, number, number, number, number, number] => [...floorMatrix(), r.w * GAME_VIEW_ANCHOR.x, r.h * GAME_VIEW_ANCHOR.y];
 
-function FloorCell({ rect }: { rect: Rect }) {
+function FloorCell({ rect, tiles }: { rect: Rect; tiles: number }) {
   return (
     <div className="absolute overflow-hidden" style={{ left: rect.x, top: rect.y, width: rect.w, height: rect.h }}>
       <div className="absolute left-0 top-0" style={{ transform: `matrix(${cellFloor(rect).join(', ')})`, transformOrigin: '0 0' }}>
-        {floorTiles(rect).map((t) => (
+        {floorTiles(rect, tiles).map((t) => (
           <div
             key={`${t.left},${t.top}`}
             className="absolute border"
@@ -478,7 +482,7 @@ function FloorCell({ rect }: { rect: Rect }) {
 }
 
 /** Snapshot of the view as it looks on screen: page background, game-view floors, then the WebGL canvas on top. */
-function composeSnapshot(gl: HTMLCanvasElement, size: { w: number; h: number }, floorRects: Rect[]): string {
+function composeSnapshot(gl: HTMLCanvasElement, size: { w: number; h: number }, floorRects: Rect[], tiles: number): string {
   const out = document.createElement('canvas');
   out.width = gl.width;
   out.height = gl.height;
@@ -493,7 +497,7 @@ function composeSnapshot(gl: HTMLCanvasElement, size: { w: number; h: number }, 
     ctx.clip();
     const [a, b, c, d, tx, ty] = cellFloor(r);
     ctx.transform(a, b, c, d, r.x + tx, r.y + ty);
-    for (const t of floorTiles(r)) {
+    for (const t of floorTiles(r, tiles)) {
       ctx.fillStyle = FLOOR;
       ctx.fillRect(t.left, t.top, TILE_SIZE, TILE_SIZE);
       ctx.strokeStyle = TILE_BORDER_COLOR;

@@ -1,6 +1,6 @@
-import { isAlly, withEnemyBuffs, type EnemyInstance } from '../units/enemies';
+import { bodyOf, isAlly, withEnemyBuffs, type EnemyInstance } from '../units/enemies';
 import type { ActiveDot, ActiveHot, Stats } from '../units/stats';
-import { inRangeAndSight, type Pos } from '../world/grid';
+import { bodyCenter, inRangeAndSight, type Pos } from '../world/grid';
 import { tickDots, tickDurations, tickHots, type ActionOutcome } from './abilityExecution';
 import { AGGRO_RANGE, COMBAT_TEXT_COLOR } from '../constants';
 import { randInt } from '../random';
@@ -63,7 +63,7 @@ const byInitiative = (a: Combatant, b: Combatant) =>
  */
 export function aggroedBy(pos: Pos, zoneEnemies: EnemyInstance[], floors: ReadonlySet<string>): EnemyInstance[] {
   const spotted = new Set(zoneEnemies
-    .filter(e => e.currentHp > 0 && !e.aggroed && inRangeAndSight(pos, e.pos, AGGRO_RANGE, floors))
+    .filter(e => e.currentHp > 0 && !e.aggroed && inRangeAndSight(pos, bodyOf(e), AGGRO_RANGE, floors))
     .map(e => e.groupId));
   return spotted.size ? zoneEnemies.filter(e => e.currentHp > 0 && !e.aggroed && spotted.has(e.groupId)) : [];
 }
@@ -238,7 +238,7 @@ export function applyTopOfRound(enemies: EnemyInstance[], zoneId: number): { ene
     const tick = tickRound(next.stats, e.currentHp, e.currentMp, e.hots, e.dots);
     if (tickChangesNothing(tick, e.currentHp, e.currentMp, [e.buffs, e.hots, e.dots])) return e;
     changed = true;
-    events.push({ pos: e.pos, tick });
+    events.push({ pos: bodyCenter(bodyOf(e)), tick });
     return { ...next, currentHp: tick.hp, currentMp: tick.mp, hots: tickDurations(e.hots), dots: tickDurations(e.dots) };
   });
 

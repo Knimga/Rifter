@@ -363,6 +363,8 @@ export type EnemyStatInput = {
 /** Action points per combat turn (Stats.apMax): the party's and every enemy's. */
 const PLAYER_AP_MAX = 3;
 const ENEMY_AP_MAX = 3;
+/** Tiles a move's worth of AP walks before speed (Stats.movement adds speed / 12): everyone's. */
+export const BASE_MOVEMENT = 3;
 
 /** Phase 1 — pure attribute + skill formulas, no passives. */
 function buildRawStats(
@@ -460,7 +462,7 @@ export function calculateStats(input: PlayerStatInput | EnemyStatInput): Stats {
   const classData: EnemyClassStats | ClassData = input.mode === 'player' ? CLASSES[input.classKey] : input.classData;
   const level = input.mode === 'player' ? (input.level ?? 1) : input.level;
   const armorBonus = input.mode === 'player' ? (input.gearArmorBonus ?? 0) : input.classData.baseArmor + input.classData.armorPerLevel * level;
-  const movement = 3;
+  const movement = BASE_MOVEMENT;
   const apMax = input.mode === 'player' ? PLAYER_AP_MAX : ENEMY_AP_MAX;
   const skillPointsSpent = input.mode === 'player' ? input.skillPointsSpent : undefined;
 

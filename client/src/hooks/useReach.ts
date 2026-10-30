@@ -4,7 +4,7 @@
 import { useMemo } from 'react';
 import type { DungeonData, ZoneData } from '../data/world/dungeonGen';
 import { zoneWalkable } from '../data/world/dungeonGen';
-import { isAlly, isHostile, type EnemyInstance } from '../data/units/enemies';
+import { creatureTiles, isAlly, isHostile, type EnemyInstance } from '../data/units/enemies';
 import { inRangeAndSight, keyPos, posKey, type Pos } from '../data/world/grid';
 import { partyMoveTargets } from '../data/world/movement';
 import { isSanctumWalkable } from '../data/world/sanctum';
@@ -36,8 +36,8 @@ export function useReach({ zone, dungeon, fog, partyTiles, zoneEnemies, mover, m
   // an occupied tile (party members and summoned allies can be walked through). Never into unseen fog.
   const moveTargets = useMemo(() => {
     const isWalkable = zone && dungeon ? zoneWalkable(dungeon, zone) : isSanctumWalkable;
-    const enemyTiles = new Set(living.filter(isHostile).map(e => posKey(e.pos)));
-    const unitTiles = new Set([...living.map(e => posKey(e.pos)), ...partyTiles.map(posKey)]);
+    const enemyTiles = creatureTiles(living.filter(isHostile));
+    const unitTiles = new Set([...creatureTiles(living), ...partyTiles.map(posKey)]);
     const targets = partyMoveTargets(mover, movement, isWalkable, p => enemyTiles.has(posKey(p)), p => unitTiles.has(posKey(p)));
     for (const key of targets.keys()) if (!known(key)) targets.delete(key);
     return targets;
@@ -48,7 +48,7 @@ export function useReach({ zone, dungeon, fog, partyTiles, zoneEnemies, mover, m
   const tileTargets = useMemo(() => {
     if (tileRange === null || !combatActive || !zone || !dungeon) return null;
     const walkable = zoneWalkable(dungeon, zone);
-    const taken = new Set([...partyTiles.map(posKey), ...living.map(e => posKey(e.pos))]);
+    const taken = new Set([...partyTiles.map(posKey), ...creatureTiles(living)]);
     const out = new Set<string>();
     for (const key of zone.floors) {
       if (taken.has(key) || (fog && !fog.visible.has(key))) continue;

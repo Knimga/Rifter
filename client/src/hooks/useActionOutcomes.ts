@@ -5,10 +5,10 @@ import { useCallback, useEffect, useRef, useState, type Dispatch, type MutableRe
 import { AIM_TURN_LEAD_MS } from '../data/constants';
 import { applyThreatChange, changesThreat, threatKey, unitKey, type ActionOutcome, type CombatUnit, type UnitChange } from '../data/combat/abilityExecution';
 import { joinCombat, type CombatState } from '../data/combat/combat';
-import { findOpenTilesNear, posKey, samePos, type Pos } from '../data/world/grid';
+import { covers, findOpenTilesNear, fits, posKey, type Pos } from '../data/world/grid';
 import { isFreeFloor, type DungeonData } from '../data/world/dungeonGen';
-import { isAlly, withEnemyBuffs, type EnemyInstance } from '../data/units/enemies';
-import { createSummon, summonsOf } from '../data/units/summons';
+import { bodySize, isAlly, withEnemyBuffs, type EnemyInstance } from '../data/units/enemies';
+import { createSummon, summonClass, summonsOf } from '../data/units/summons';
 import type { MemberState } from '../data/units/party';
 import { addBuffs, addTicking, type Stats } from '../data/units/stats';
 import type { UnitAim } from '../components/ModelLayer';
@@ -125,7 +125,9 @@ export function useActionOutcomes({ spawnFloat, updateMembers, partyStatsRef, pa
         for (let i = added.length - 1; i >= 0; i--) if (gone.has(added[i])) added.splice(i, 1);
         const partyTiles = new Set(partyPosRef.current.map(posKey));
         const free = isFreeFloor(d, zone, [...creatures, ...added]);
-        const isOpen = (p: Pos) => free(p) && !partyTiles.has(posKey(p));
+        // A large summon needs its whole square free (its top-left tile is where it is placed)
+        const size = bodySize(summonClass(req.creature) ?? {});
+        const isOpen = (p: Pos) => fits(p, size, q => free(q) && !partyTiles.has(posKey(q)));
         // On the aimed tile (a 'tile' ability), or the nearest free one to it if something moved there meanwhile;
         // otherwise beside its summoner
         const pos = req.at && isOpen(req.at) ? req.at : findOpenTilesNear(req.at ?? by.pos, isOpen, 1, SUMMON_MAX_RADIUS)[0];
@@ -145,7 +147,7 @@ export function useActionOutcomes({ spawnFloat, updateMembers, partyStatsRef, pa
    * before the outcome lands, so callers can wait for it.
    */
   const applyActionOutcome = useCallback<ApplyOutcome>((outcome, caster, aimAt) => {
-    if (!aimAt || samePos(aimAt, caster.pos)) {
+    if (!aimAt || covers(caster, aimAt)) {
       landRef.current(outcome, caster);
       return 0;
     }

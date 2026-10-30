@@ -1,4 +1,5 @@
-// What containers on the map (treasure chests) hold: how many items, how likely each rarity is, and gold. Keyed
+// What containers on the map (treasure chests, a dead adventurer) hold: how many items, how likely each rarity is,
+// and gold. Where each stands: its zone's config (ZoneConfig.containers, data/world/dungeonGen.ts). Keyed
 // by the container's interactive object (INTERACTIVE_OBJECTS id, data/world/interactiveObjects.ts). Tune values here.
 import type { Item, Rarity } from './types';
 import { generateLootItem } from '.';
@@ -13,7 +14,7 @@ export const CONTAINER_SIZE = CONTAINER_COLS * CONTAINER_ROWS;
 export interface ContainerLoot {
   /** How many items it holds: an even pick from min to max (at most CONTAINER_SIZE). */
   items: [min: number, max: number];
-  /** Relative chance of each rarity per item (0 = never). Common is never found in chests. */
+  /** Relative chance of each rarity per item (0 = never). */
   rarityWeights: Record<Rarity, number>;
   /**
    * Gold in it, read like an enemy's: rolls of 5-10 x its level (data/gear/loot.ts rollGold), the whole part
@@ -25,13 +26,24 @@ export interface ContainerLoot {
 }
 
 export const CONTAINER_LOOT: Record<string, ContainerLoot> = {
-  'basic-treasure-chest': {
+  'worn-treasure-chest': {
+    items: [3, 5],
+    // Every rarity, most of it Quality and Superior: 1 in 10 items Common, 1 in 10 Exquisite
+    rarityWeights: { Common: 10, Quality: 30, Superior: 30, Rare: 20, Exquisite: 10 },
+    dropsGold: 2
+  },
+  'solid-treasure-chest': {
     items: [4, 6],
-    // Skewed well toward the rare end: about 1 in 6 items is Quality, 1 in 6 Exquisite
+    // Skewed well toward the rare end: never Common, about 1 in 7 items Quality, 1 in 7 Exquisite
     rarityWeights: { Common: 0, Quality: 15, Superior: 35, Rare: 35, Exquisite: 15 },
     dropsGold: 2,
     goldBonus: 50
   },
+  'dead-adventurer': {
+    items: [2, 4],
+    rarityWeights: { Common: 20, Quality: 30, Superior: 30, Rare: 15, Exquisite: 5 },
+    dropsGold: 1
+  }
 };
 
 /** What a container holds: its items, and its gold (0: none), which shows in its first slot. */

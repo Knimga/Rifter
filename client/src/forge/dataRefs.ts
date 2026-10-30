@@ -3,7 +3,7 @@
 // and by the builder page. No three.js; reads game data only.
 import type { DataRef, Design, ModelLink } from './core/types';
 import { slug } from './core/slug';
-import { ENEMY_CLASSES } from '../data/units/enemies';
+import { ENEMY_CLASSES, bodySize } from '../data/units/enemies';
 import { BOSS_CLASSES } from '../data/units/bosses';
 import { SUMMON_CLASSES } from '../data/units/summons';
 import { STARTER_WEAPON_SERIES, WEAPON_SERIES, weaponName } from '../data/gear/weapons';
@@ -26,9 +26,14 @@ export interface DataEntry {
   path: string;
   /** The entry's model link (the id of its design). */
   link: ModelLink;
+  /** A large creature's square, in tiles a side (2: it stands on 2×2 in game); absent: one tile. */
+  tiles?: number;
 }
 
 export const refKey = (r: DataRef) => `${r.table}:${r.key}`;
+
+/** How many tiles a side a design's model stands on in game: its entry's (a large creature's 2), else 1. */
+export const designTiles = (d: Pick<Design, 'source'>): number => dataEntry(d.source)?.tiles ?? 1;
 
 /** Every game data entry that can have a model. */
 export function allDataEntries(): DataEntry[] {
@@ -41,12 +46,14 @@ export function allDataEntries(): DataEntry[] {
     name: c.name,
     path: `data/units/${file}.ts › ${c.id}`,
     link: c.model,
+    ...(c.large ? { tiles: bodySize(c) } : {}),
   }));
   const summons: DataEntry[] = SUMMON_CLASSES.map((c) => ({
     ref: { table: 'summons', key: c.id },
     name: c.name,
     path: `data/units/summons.ts › ${c.id}`,
     link: c.model,
+    ...(c.large ? { tiles: bodySize(c) } : {}),
   }));
   const weapons: DataEntry[] = WEAPON_SERIES.flatMap((s) =>
     (Object.entries(s.weapons) as [WeaponType, { model: ModelLink }][]).map(([type, w]) => ({

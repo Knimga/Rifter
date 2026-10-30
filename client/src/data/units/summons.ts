@@ -5,7 +5,7 @@
 import { ENEMY_CLASSES, generateEnemyInstance, type CreatureClassData, type EnemyInstance } from './enemies';
 import { BOSS_CLASSES } from './bosses';
 import type { Pos } from '../world/grid';
-import { warnIgnoredEffects } from '../combat/abilities';
+import { warnIgnoredEffects, warnIgnoredTriggers } from '../combat/abilities';
 
 /** A creature an action summons (executeAction's outcome; placed where the outcome lands). */
 export interface SummonRequest {
@@ -40,15 +40,18 @@ export const SUMMON_CLASSES: CreatureClassData[] = [
         target: 'enemy',
         attackCategory: 'magic',
         displayElement: 'shadow',
-        effects: [{ type: 'damage', appliesTo: 'target', damageElement: 'shadow', minDamage: 2, maxDamage: 4 }],
+        effects: [{ type: 'damage', appliesTo: 'target', damageElement: 'shadow', minDamage: 3, maxDamage: 4 }],
       },
     ],
     model: 'summon.void-wisp',
   },
 ];
 
-// Effects an ability would silently ignore: warned at load
-for (const c of SUMMON_CLASSES) warnIgnoredEffects(`summons › ${c.id}`, c.abilities);
+// Effects an ability (or a passive trigger) would silently ignore: warned at load
+for (const c of SUMMON_CLASSES) {
+  warnIgnoredEffects(`summons › ${c.id}`, c.abilities);
+  warnIgnoredTriggers(`summons › ${c.id}`, c.passiveTriggers);
+}
 
 /** A summonable creature's class, by id: a summon-only creature, else an enemy class. */
 export const summonClass = (id: string): CreatureClassData | undefined =>

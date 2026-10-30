@@ -327,7 +327,7 @@ export default function CharacterSheet({ party, partyHp, partyMp, partyStats, pa
                     canUse={(item) => isProficient(classData, item)}
                     action={(item) => (onEquipItem && canEquip(classData, item, inventory, gear) ? 'Equip' : null)}
                     onAction={(i) => onEquipItem?.(i, selectedIdx)} unusableNote=", not proficient"
-                    compareWith={(item) => equipCompare(member, item)} />
+                    compareWith={(item) => equipCompare(shown, item, stats)} />
                 ) : <Keyring keys={keys} />}
               </section>
             </div>

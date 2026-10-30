@@ -38,6 +38,8 @@ export interface MapUnit {
   played?: string[];
   /** One the fog is seen from (a party member): the fog's clouds drift only while one of these moves. */
   viewer?: boolean;
+  /** Its square's side in tiles (a large creature's 2; default 1): `pos` is its top-left tile, the model stands at its center. */
+  size?: number;
 }
 
 interface Entry {
@@ -58,6 +60,8 @@ interface Entry {
   anims: Record<string, { t: number; ms: number }>;
   /** See MapUnit.viewer. */
   viewer?: boolean;
+  /** See MapUnit.size. */
+  size: number;
 }
 
 /** Each played animation's progress (0..1), for animateParts. */
@@ -173,7 +177,7 @@ export class MapModelRenderer {
       if (!e) {
         // A new unit adopts any existing aim without turning to it (a remount never replays an old attack)
         const yaw = u.lying ? lootYaw() : (u.facing ?? 0);
-        e = { model: u.model, obj: makeObject(u, this.fog), pos: u.pos, at: { ...u.pos }, yaw, targetYaw: yaw, aimSeq: u.aim?.seq, anims: {}, viewer: u.viewer };
+        e = { model: u.model, obj: makeObject(u, this.fog), pos: u.pos, at: { ...u.pos }, yaw, targetYaw: yaw, aimSeq: u.aim?.seq, anims: {}, viewer: u.viewer, size: u.size ?? 1 };
         this.scene.add(e.obj);
         this.entries.set(u.id, e);
         this.place(u.id, e);
@@ -197,8 +201,10 @@ export class MapModelRenderer {
       // A new ability aim: turn toward the aimed tile (from wherever the unit now stands)
       if (u.aim && u.aim.seq !== e.aimSeq) {
         e.aimSeq = u.aim.seq;
-        if (u.aim.x !== u.pos.x || u.aim.y !== u.pos.y) {
-          const yaw = yawFromGridMove(u.aim.x - u.pos.x, u.aim.y - u.pos.y);
+        // From its center (a large unit's lies between its tiles), so it never faces a tile of itself
+        const half = (e.size - 1) / 2, dx = u.aim.x - (u.pos.x + half), dy = u.aim.y - (u.pos.y + half);
+        if (Math.abs(dx) > half || Math.abs(dy) > half) {
+          const yaw = yawFromGridMove(dx, dy);
           // Mid-glide: finish the glide (still facing it), then turn
           if (e.move) e.afterMoveYaw = yaw;
           else e.targetYaw = yaw;
@@ -217,8 +223,8 @@ export class MapModelRenderer {
   }
 
   private place(id: string, e: Entry): void {
-    e.obj.position.x = e.at.x + 0.5;
-    e.obj.position.z = e.at.y + 0.5;
+    e.obj.position.x = e.at.x + e.size / 2;
+    e.obj.position.z = e.at.y + e.size / 2;
     this.onPlace?.(id, e.at);
   }
 

@@ -1,7 +1,7 @@
-import { isArmed, type EnemyInstance } from '../units/enemies';
+import { bodySize, isArmed, type EnemyInstance } from '../units/enemies';
 import type { Ability, Effect } from './abilities';
-import { affectedKeys, isArea, isSelfBurst } from './areas';
-import { chebyshev, hasLineOfSight, inRangeAndSight, posKey, reachableTiles, samePos, type Pos } from '../world/grid';
+import { aimedArea, isArea, isSelfBurst, unitsInArea } from './areas';
+import { bodyDistance, bodySight, covers, fits, footprint, footprintKeys, inRangeAndSight, posKey, reachableTiles, samePos, type Body, type Pos } from '../world/grid';
 import { shuffle } from '../random';
 import { moveBudget, moveCost } from './combat';
 import { isRooted, stackCap, stackCount, stackKey, type ActiveBuff } from '../units/stats';
@@ -9,9 +9,8 @@ import { isRooted, stackCap, stackCount, stackKey, type ActiveBuff } from '../un
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 /** A unit the AI fights: a party member or summoned ally (for an enemy), an enemy (for a summoned ally). */
-export interface Foe {
+export interface Foe extends Body {
   key: string;  // unitKey: identifies it in the result, and its threat (CombatState.threat)
-  pos: Pos;
   hp: number;
 }
 
@@ -95,7 +94,8 @@ const summonOf = (a: Ability) => a.effects.find((e): e is Extract<Effect, { type
  *  0. Before anything else:
  *     a. Heal: with a heal it can use, a unit of its side below half HP (itself, for a self heal; itself or
  *        an ally in reach, for an ally heal) is healed, the most hurt first.
- *     b. Summon: with nothing summoned out, it casts a summon it can use (a summoner keeps something out).
+ *     b. Summon: with fewer out than a summon of its allows (its max), it casts it (a summoner fills its cap,
+ *        one a step, before it fights; a summon it can't afford or place now waits).
  *  1. Attack, from a tile it can reach this step (by the shared movement rules: reachableTiles, through its
  *     own side but never its foes, never stopping on anyone; at most one more move's worth of tiles, 1 AP),
  *     moving as little as needed:
@@ -111,7 +111,7 @@ const summonOf = (a: Ability) => a.effects.find((e): e is Extract<Effect, { type
  *     side in reach that hasn't got it: the one nearest its foes; an area one only where it takes in another
  *     unit of its side, as many as it can), it uses that instead, so buffs and attacks
  *     share its turns by chance. If it can attack no one, it uses a usable self ability or ally buff if it has
- *     one, or summons more (up to the max).
+ *     one.
  *  3. Otherwise it closes in on the highest-priority foe it can get nearer to.
  * All within its AP, by the party's rules (combat.ts): 1 AP buys a move's worth of tiles (unused ones carry
  * over to its next step), an ability costs its apCost.
@@ -119,8 +119,11 @@ const summonOf = (a: Ability) => a.effects.find((e): e is Extract<Effect, { type
 export function computeEnemyTurn(
   enemy: EnemyInstance,
   foes: Foe[],
-  /** Every other unit's tile (either side): it never stops on one, and walks through only its own side's (`passable`). */
-  occupied: { pos: Pos; passable: boolean }[],
+  /**
+   * Every other unit (either side), its body: it never stops on one, and walks through only its own side's
+   * (`passable`).
+   */
+  occupied: (Body & { passable: boolean })[],
   floors: Set<string>,
   /** Foes' threat, by key (CombatState.threat); none = 0. Enemies hold none, so a summon picks the closest. */
   threat: Record<string, number> = {},
@@ -138,23 +141,31 @@ export function computeEnemyTurn(
 
   // Targets by priority: its focus → highest threat → closest if tied → random if still tied
   // (shuffle first so the stable sort breaks remaining ties randomly)
+  // Its body standing at `pos` (a large creature's square has `pos` as its top-left tile)
+  const size = bodySize(enemy.classData);
+  const me = (pos: Pos): Body => ({ pos, size });
   const targets = shuffle(foes.filter(m => m.hp > 0))
     .sort((a, b) =>
       (Number(b.key === focus) - Number(a.key === focus)) ||
       ((threat[b.key] ?? 0) - (threat[a.key] ?? 0)) ||
-      (chebyshev(enemy.pos, a.pos) - chebyshev(enemy.pos, b.pos)));
+      (bodyDistance(me(enemy.pos), a) - bodyDistance(me(enemy.pos), b)));
   if (targets.length === 0) return noAction;
 
   // Where it can stand after this step (nearest first, its own tile included): over floor, through its own side
   // but never its foes or a map object, never on anyone, within the tiles it has paid for plus one more move
-  // (1 AP), if it has the AP
+  // (1 AP), if it has the AP. A large creature squeezes through narrow ways, but stops only where it fits.
   const movement = enemy.stats.movement;
   const isFloor = (p: Pos) => floors.has(posKey(p)) && !objectTiles.has(posKey(p));
-  const units = new Set(occupied.map(u => posKey(u.pos)));
-  const foeTiles = new Set(occupied.filter(u => !u.passable).map(u => posKey(u.pos)));
-  const reachMap = reachableTiles(enemy.pos, moveBudget(paidTiles, Math.min(ap, 1), movement, isRooted(enemy.buffs)), isFloor, p => foeTiles.has(posKey(p)));
-  const reach = [...reachMap.values()].filter(r => !units.has(posKey(r.pos)));
-  const moveOf = (pos: Pos) => moveCost(reachMap.get(posKey(pos))?.steps ?? 0, paidTiles, movement);
+  const units = new Set(occupied.flatMap(footprintKeys));
+  const foeTiles = new Set(occupied.filter(u => !u.passable).flatMap(footprintKeys));
+  const reachIn = (apUsed: number) => reachableTiles(enemy.pos, moveBudget(paidTiles, apUsed, movement, isRooted(enemy.buffs)), isFloor, p => foeTiles.has(posKey(p)), size);
+  const standsAt = (r: { pos: Pos }) => fits(r.pos, size, p => isFloor(p) && !units.has(posKey(p)));
+  const reachMap = reachIn(Math.min(ap, 1));
+  const reach = [...reachMap.values()].filter(standsAt);
+  // A large creature stops only where it fits, so a narrow way longer than one move's worth would hold it up: to
+  // close in it may spend all its AP on one move (3). Shortest walks, so the steps agree with the 1-AP ones.
+  const longMap = size > 1 && ap > 1 ? reachIn(ap) : reachMap;
+  const moveOf = (pos: Pos) => moveCost(longMap.get(posKey(pos))?.steps ?? 0, paidTiles, movement);
   const moveTo = (pos: Pos) => (samePos(pos, enemy.pos) ? null : pos);
 
   // A step: where it moves (null = stays), then the ability it uses there, if any; what that costs
@@ -166,13 +177,15 @@ export function computeEnemyTurn(
   const affordableFrom = (a: Ability, pos: Pos) => a.apCost + moveOf(pos).apSpent <= ap;
   const canUse = (a: Ability) => enemy.currentMp >= a.mpCost && a.apCost <= ap;
   const selfAction = (a: Ability): EnemyAction => act(null, a, enemy.id, { ...enemy.pos });
-  // Is `to` within `range` of `from`, and in sight?
-  const inReach = (from: Pos, to: Pos, range: number) => inRangeAndSight(from, to, range, floors);
+  // Is `to` (a unit or a tile) within `range` of it standing at `from`, and in sight?
+  const inReach = (from: Pos, to: Pos | Body, range: number) => inRangeAndSight(me(from), to, range, floors);
   // Itself, as a unit of its side
   const self: Friend = {
-    key: enemy.id, pos: enemy.pos, hp: enemy.currentHp, maxHp: enemy.stats.hp, buffs: enemy.buffs,
+    key: enemy.id, pos: enemy.pos, size, hp: enemy.currentHp, maxHp: enemy.stats.hp, buffs: enemy.buffs,
     armed: isArmed(enemy.classData),
   };
+  // The tiles an area ability it uses standing at `pos`, aimed at `aim`, takes in (aimedArea, with everyone else in place)
+  const areaFrom = (a: Ability, pos: Pos, aim: Pos) => aimedArea(me(pos), aim, a.area, floors, [...targets, ...side.friends]);
 
   // 3. Close in on the highest-priority target it can get nearer to (distance over floor, ignoring units,
   //    so enemies queue up behind each other in a corridor rather than wander off)
@@ -180,17 +193,22 @@ export function computeEnemyTurn(
   //    turn): a ranged enemy keeps its distance instead of walking up to the party with AP left over.
   const closeIn = (): EnemyAction => {
     const inRangeNow = enemy.classData.abilities.some(a => a.target === 'enemy' && a.mpCost <= enemy.currentMp &&
-      targets.some(t => inReach(enemy.pos, t.pos, a.range)));
+      targets.some(t => inReach(enemy.pos, t, a.range)));
     if (inRangeNow) return noAction;
-    for (const target of targets) {
-      const toTarget = reachableTiles(target.pos, Infinity, isFloor);
-      const stepsFrom = (p: Pos) => toTarget.get(posKey(p))?.steps ?? Infinity;
-      let best: Pos | null = null, bestSteps = stepsFrom(enemy.pos);
-      for (const { pos } of reach) {
-        const s = stepsFrom(pos);
-        if (s < bestSteps) { best = pos; bestSteps = s; }
+    // One move's worth first; a large creature with nowhere nearer it fits on that, as far as its AP takes it
+    const reaches = longMap === reachMap ? [reach] : [reach, [...longMap.values()].filter(standsAt)];
+    for (const stops of reaches) {
+      for (const target of targets) {
+        const toTarget = reachableTiles(target.pos, Infinity, isFloor);
+        // A large body is as near as its nearest tile
+        const stepsFrom = (p: Pos) => Math.min(...footprint(me(p)).map(t => toTarget.get(posKey(t))?.steps ?? Infinity));
+        let best: Pos | null = null, bestSteps = stepsFrom(enemy.pos);
+        for (const { pos } of stops) {
+          const s = stepsFrom(pos);
+          if (s < bestSteps) { best = pos; bestSteps = s; }
+        }
+        if (best) return act(best, null, null, null);
       }
-      if (best) return act(best, null, null, null);
     }
     return noAction;
   };
@@ -207,7 +225,7 @@ export function computeEnemyTurn(
         if (f.key === self.key) return selfAction(a);
         if (a.target !== 'ally') continue;
         for (const { pos } of reach) {
-          if (!affordableFrom(a, pos) || !inReach(pos, f.pos, a.range)) continue;
+          if (!affordableFrom(a, pos) || !inReach(pos, f, a.range)) continue;
           return act(moveTo(pos), a, f.key, f.pos);
         }
       }
@@ -219,11 +237,12 @@ export function computeEnemyTurn(
   const summonAction = (a: Ability): EnemyAction | null => {
     if (a.target !== 'tile') return selfAction(a);
     let best: Pos | null = null, bestDist = Infinity;
-    for (let dx = -a.range; dx <= a.range; dx++) {
-      for (let dy = -a.range; dy <= a.range; dy++) {
+    const body = me(enemy.pos);
+    for (let dx = -a.range; dx < size + a.range; dx++) {
+      for (let dy = -a.range; dy < size + a.range; dy++) {
         const p = { x: enemy.pos.x + dx, y: enemy.pos.y + dy };
-        if ((dx === 0 && dy === 0) || !isFloor(p) || units.has(posKey(p)) || !hasLineOfSight(enemy.pos, p, floors)) continue;
-        const d = chebyshev(p, targets[0].pos);
+        if (covers(body, p) || !isFloor(p) || units.has(posKey(p)) || !bodySight(body, p, floors)) continue;
+        const d = bodyDistance(p, targets[0]);
         if (d < bestDist) { best = p; bestDist = d; }
       }
     }
@@ -232,12 +251,11 @@ export function computeEnemyTurn(
   const summons = shuffle(enemy.classData.abilities.filter(a => summonOf(a) && canUse(a)));
   const out = (a: Ability) => side.summonsOut[a.name] ?? 0;
 
-  // 0b. Nothing summoned out: summon
-  if (summons.length > 0 && Object.values(side.summonsOut).every(n => n === 0)) {
-    for (const a of summons) {
-      const s = summonAction(a);
-      if (s) return s;
-    }
+  // 0b. Fewer out than a summon allows: summon (a summoner fills its cap before anything else)
+  for (const a of summons) {
+    if (out(a) >= (summonOf(a)?.max ?? 1)) continue;
+    const s = summonAction(a);
+    if (s) return s;
   }
 
   // An ally buff: on the unit of its side (itself too) without it that stands nearest its foes, from the nearest
@@ -256,10 +274,9 @@ export function computeEnemyTurn(
         if (!affordableFrom(a, pos)) continue;
         const sideHere = [{ ...self, pos }, ...side.friends];
         const aims = isSelfBurst(a) ? [pos]
-          : sideHere.filter(f => f.hp > 0 && inReach(pos, f.pos, a.range)).map(f => f.pos);
+          : sideHere.filter(f => f.hp > 0 && inReach(pos, f, a.range)).map(f => f.pos);
         for (const aim of aims) {
-          const area = affectedKeys(pos, aim, a.area, floors);
-          const gain = sideHere.filter(f => needs(f) && area.has(posKey(f.pos)));
+          const gain = unitsInArea(areaFrom(a, pos, aim), sideHere).filter(needs);
           if (gain.length > most && gain.some(f => f.key !== self.key)) {
             most = gain.length;
             action = act(moveTo(pos), a, gain[0].key, aim);
@@ -267,11 +284,11 @@ export function computeEnemyTurn(
         }
       }
     } else {
-      const toFoes = (f: Friend) => Math.min(...targets.map(t => chebyshev(f.pos, t.pos)));
+      const toFoes = (f: Friend) => Math.min(...targets.map(t => bodyDistance(f, t)));
       const candidates = [self, ...side.friends].filter(needs).sort((x, y) => toFoes(x) - toFoes(y));
       for (const f of candidates) {
         if (f.key === self.key) { action = selfAction(a); break; }
-        const from = reach.find(({ pos }) => affordableFrom(a, pos) && inReach(pos, f.pos, a.range));
+        const from = reach.find(({ pos }) => affordableFrom(a, pos) && inReach(pos, f, a.range));
         if (from) { action = act(moveTo(from.pos), a, f.key, f.pos); break; }
       }
     }
@@ -306,10 +323,9 @@ export function computeEnemyTurn(
     for (const { pos } of reach) {
       if (!affordableFrom(a, pos)) continue;
       const aims = isSelfBurst(a) ? [pos]
-        : targets.filter(t => inReach(pos, t.pos, a.range)).map(t => t.pos);
+        : targets.filter(t => inReach(pos, t, a.range)).map(t => t.pos);
       for (const aim of aims) {
-        const area = affectedKeys(pos, aim, a.area, floors);
-        const hits = targets.filter(m => area.has(posKey(m.pos)));
+        const hits = unitsInArea(areaFrom(a, pos, aim), targets);
         if (hits.length >= minAoeHits && hits.length > (bestAoe?.hits.length ?? 0)) bestAoe = { pos, a, aim, hits };
       }
     }
@@ -321,21 +337,15 @@ export function computeEnemyTurn(
   for (const target of targets) {
     for (const a of attacks.filter(a => !isArea(a))) {
       for (const { pos } of reach) {
-        if (!affordableFrom(a, pos) || !inReach(pos, target.pos, a.range)) continue;
+        if (!affordableFrom(a, pos) || !inReach(pos, target, a.range)) continue;
         return act(moveTo(pos), a, target.key, target.pos);
       }
     }
   }
 
-  // 2. No attack lands this turn: a self ability or ally buff, if it has one it can use; else summon more, up to
-  //    the max
+  // 2. No attack lands this turn: a self ability or ally buff, if it has one it can use
   const support = usable.find(a => a.target === 'self' || a.target === 'ally');
   if (support) return support.target === 'self' ? selfAction(support) : allyBuffAction(support)!;
-  for (const a of summons) {
-    if (out(a) >= (summonOf(a)?.max ?? 1)) continue;
-    const s = summonAction(a);
-    if (s) return s;
-  }
 
   // 3. Otherwise close in
   return closeIn();

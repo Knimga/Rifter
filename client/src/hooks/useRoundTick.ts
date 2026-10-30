@@ -4,8 +4,8 @@ import { useCallback, useEffect, type Dispatch, type MutableRefObject, type SetS
 import { COMBAT_TEXT_COLOR, OUT_OF_COMBAT_REGEN_INTERVAL_MS } from '../data/constants';
 import { applyTopOfRound, tickChangesNothing, tickRound, type CombatState, type RoundTick } from '../data/combat/combat';
 import { applyThreatChange, healThreat, tickDurations, unitKey } from '../data/combat/abilityExecution';
-import type { Pos } from '../data/world/grid';
-import { isAlly, type EnemyInstance } from '../data/units/enemies';
+import { bodyCenter, type Pos } from '../data/world/grid';
+import { bodyOf, isAlly, type EnemyInstance } from '../data/units/enemies';
 import type { MemberState } from '../data/units/party';
 import type { Stats } from '../data/units/stats';
 import type { SpawnFloat } from './useFloatingText';
@@ -65,7 +65,10 @@ export function useRoundTick({ combatActive, round, membersRef, updateMembers, p
     const creatures = enemiesRef.current;
     const { enemies: updated, events, vanished } = applyTopOfRound(creatures, currentZoneRef.current);
     for (const { pos, tick } of events) showTick(pos, tick);
-    for (const e of vanished) spawnFloat(e.pos.x, e.pos.y, 'Vanished', COMBAT_TEXT_COLOR.stopped);
+    for (const e of vanished) {
+      const at = bodyCenter(bodyOf(e));
+      spawnFloat(at.x, at.y, 'Vanished', COMBAT_TEXT_COLOR.stopped);
+    }
     setEnemies(updated);
 
     // Threat only counts in a fight (out of combat there is none to keep)

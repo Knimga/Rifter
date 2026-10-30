@@ -4,18 +4,18 @@ import { loot } from '../data/gear/loot';
 import { formatGold } from '../data/detailStrings';
 import type { AreaType, TargetType } from '../data/combat/abilities';
 import type { ActiveBuff, ActiveHot, ActiveDot } from '../data/units/stats';
-import { isAlly, type EnemyInstance } from '../data/units/enemies';
+import { bodyOf, isAlly, type EnemyInstance } from '../data/units/enemies';
 import type { DungeonChest, ZoneData } from '../data/world/dungeonGen';
 import type { FogState } from '../hooks/useFogOfWar';
 import type { EnemyAoePreview } from '../hooks/useEnemyTurn';
 import { yawFromGridMove } from '../forge/core/facing';
-import { affectedKeys, isArea } from '../data/combat/areas';
-import { inRangeAndSight, isAdjacent, keyPos, posKey, samePos, type Pos } from '../data/world/grid';
+import { affectedKeys, areaCenter, isArea } from '../data/combat/areas';
+import { footprintKeys, inRangeAndSight, isAdjacent, keyPos, posKey, samePos, type Pos } from '../data/world/grid';
 import type { Item } from '../data/gear';
 import { unitKey } from '../data/combat/abilityExecution';
 import FloatingCombatText, { type FloatingText } from './FloatingCombatText';
 import { MoveCostPips } from './MoveLine';
-import { interactiveObjectGlow, interactiveObjectModel } from '../data/world/interactiveObjects';
+import { interactiveObjectGlow, interactiveObjectModel, interactiveObjectName } from '../data/world/interactiveObjects';
 import { RIFT_MODELS, SANCTUM_RIFT_COLOR, riftGlowCss } from '../data/world/rifts';
 import { DUNGEONS, type DungeonKey } from '../data/world/dungeons';
 import { Board, FloorGrid, FloorTile, HoverEdgeGlow, deepFogTiles, MapTag, MoveLineOverlay, ObjectTag, RIFT_TAG_HEIGHT, TileHighlight, UprightAt, UsableGlow, facingOpenSide, riftTag, toMapMember, useBoard, useHoveredTile, useStableHandler, type PartyTokenData, TILE_HIGHLIGHT } from './mapParts';
@@ -24,6 +24,8 @@ import type { MapLoot, MapObject, UnitAim } from './ModelLayer';
 
 /** How high (world tiles) a rift key's name tag (or a gold pile's amount) sits over the floor it lies on. */
 const KEY_TAG_HEIGHT = 0.35;
+/** How high a container's name tag sits: just over a chest's lid (a dead adventurer, lying flat, is lower still). */
+const CONTAINER_TAG_HEIGHT = 0.62;
 
 // 3D party, enemy and loot models over the tile grid. Lazy: it pulls in three.js (GameScreen preloads it on mount).
 const ModelLayer = lazy(() => import('./ModelLayer'));
@@ -127,7 +129,8 @@ export default function DungeonMap({ playerPos, activeMoverPos, party, moveTarge
   // Per-tile lookups, built once per render instead of scanning lists for every tile
   // Living enemies drawn as models (stable array while `enemies` is unchanged, so ModelLayer can memo on it)
   const modelEnemies = useMemo(() => enemies.filter(e => e.currentHp > 0), [enemies]);
-  const enemyByKey = useMemo(() => new Map(modelEnemies.map(e => [posKey(e.pos), e])), [modelEnemies]);
+  // Every tile of each (all 4 of a large one's): hovering, clicking and highlighting work on any of them
+  const enemyByKey = useMemo(() => new Map(modelEnemies.flatMap(e => footprintKeys(bodyOf(e)).map(k => [k, e] as const))), [modelEnemies]);
   const memberByKey = useMemo(() => new Map(party.map(m => [posKey(m.pos), m])), [party]);
   // Loot drawn as models: the top item of each pile, each rift key (the keystone, in its dungeon's color), and each
   // pile of gold (its coins scattered by its tile: each pile looks its own)
@@ -165,14 +168,17 @@ export default function DungeonMap({ playerPos, activeMoverPos, party, moveTarge
     return out;
   }, [doors, floors, riftPos, doorObject, chests, emptiedKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const inRangeWithLOS = (p: Pos) => inRangeAndSight(activeMoverPos, p, actionRange, floors);
+  // What aiming at a tile aims at: the large creature on it (all of it), else the tile (as aimPartyAction does)
+  const enemyBodies = useMemo(() => modelEnemies.map(bodyOf), [modelEnemies]);
+  const aimAt = (p: Pos) => areaCenter(p, enemyBodies);
+  const inRangeWithLOS = (p: Pos) => inRangeAndSight(activeMoverPos, aimAt(p), actionRange, floors);
 
   // AoE preview tiles (computed from hover position)
   const aoeTiles = useMemo(() => {
     // Enemy abilities only in combat (on the party's turn); ally ones out of combat too
     if (!activeTarget || !isAoE || !hoveredTile || !canAct || (activeTarget === 'enemy' && !inCombat) || !inRangeWithLOS(hoveredTile)) return new Set<string>();
-    return affectedKeys(activeMoverPos, hoveredTile, activeAbilityArea, floors);
-  }, [activeTarget, isAoE, hoveredTile, inCombat, isPlayerTurn, activeMoverPos, actionRange, floors, activeAbilityArea]); // eslint-disable-line react-hooks/exhaustive-deps
+    return affectedKeys(activeMoverPos, aimAt(hoveredTile), activeAbilityArea, floors);
+  }, [activeTarget, isAoE, hoveredTile, inCombat, isPlayerTurn, activeMoverPos, actionRange, floors, activeAbilityArea, enemyBodies]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleClick = (p: Pos, floor: boolean) => {
     if (!canAct) return;
@@ -235,7 +241,7 @@ export default function DungeonMap({ playerPos, activeMoverPos, party, moveTarge
     const member = memberByKey.get(key);
     const enemy = floor && !member ? enemyByKey.get(key) : undefined;
     const door = doorByKey.get(key);
-    const targetable = enemy && !isAlly(enemy) && activeTarget === 'enemy' && !isAoE && inCombat && isPlayerTurn && inRangeWithLOS(enemy.pos);
+    const targetable = enemy && !isAlly(enemy) && activeTarget === 'enemy' && !isAoE && inCombat && isPlayerTurn && inRangeWithLOS(p);
     // A summoned ally takes the party's helpful abilities
     const isAllyUnit = !!member || (!!enemy && isAlly(enemy));
     const isMoverTile = samePos(p, activeMoverPos);
@@ -292,6 +298,8 @@ export default function DungeonMap({ playerPos, activeMoverPos, party, moveTarge
   // The enemy on the hovered tile, if the party sees it now: its name shows over its head
   const hoveredEnemyId = hoveredTile && isSeenNow(posKey(hoveredTile)) ? enemyByKey.get(posKey(hoveredTile))?.id : undefined;
   const renderEnemyOverlay = (e: EnemyInstance) => enemyOverlay(e, e.id === hoveredEnemyId);
+  // The container on the hovered tile, if the party knows the tile: its name shows over it
+  const hoveredContainer = hoveredTile && isKnown(posKey(hoveredTile)) ? chestByKey.get(posKey(hoveredTile)) : undefined;
 
   const showMoveLine = !activeTarget && canAct && !!hoveredTile && moveTargets.has(posKey(hoveredTile));
   const hoveredMoveAp = showMoveLine && moveApCost ? moveApCost(moveTargets.get(posKey(hoveredTile!))!) : 0;
@@ -342,13 +350,19 @@ export default function DungeonMap({ playerPos, activeMoverPos, party, moveTarge
           text={formatGold(droppedGold[posKey(hoveredTile)])} icon={<FaCoins aria-label="Gold" className="w-3 h-3 shrink-0" style={{ color: 'var(--rift-gold)' }} />} />
       )}
 
+      {/* A container's name (a chest, a dead adventurer) while it is hovered */}
+      {hoveredContainer && (
+        <ObjectTag board={board} x={hoveredContainer.pos.x} y={hoveredContainer.pos.y} height={CONTAINER_TAG_HEIGHT} text={interactiveObjectName(hoveredContainer.object)} />
+      )}
+
       {/* Where the exit rift leads, at once while it is hovered, wherever the party stands */}
       {riftPos && hoveredTile && samePos(hoveredTile, riftPos) && isKnown(posKey(riftPos)) && (
         <ObjectTag board={board} x={riftPos.x} y={riftPos.y} height={RIFT_TAG_HEIGHT} text={riftTag('The Sanctum')} />
       )}
 
       {/* Floating combat text */}
-      {floatingTexts.filter(ft => isSeenNow(posKey({ x: ft.gridX, y: ft.gridY }))).map(ft => (
+      {/* A large creature's float rises from its center (between tiles): seen by the tile at its top left */}
+      {floatingTexts.filter(ft => isSeenNow(posKey({ x: Math.floor(ft.gridX), y: Math.floor(ft.gridY) }))).map(ft => (
         <FloatingCombatText key={ft.id} ft={ft} at={board.toScreen(ft.gridX + 0.5, ft.gridY + 0.5, 0.5)} onComplete={onFloatingTextComplete} />
       ))}
     </Board>

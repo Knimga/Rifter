@@ -27,7 +27,8 @@ Reach for these before writing vertex math by hand. All coordinates are pre-fit 
 | `crackedBlob(..., lava, share, o, vein)` | a blob with connected patches in another color: lava veins (default, glowing), moss or lichen (pass `vein: { j }` for lit) |
 | `frustum(m, p0, p1, r0, r1, sides, col)` | a tapered prism between two points: limb segments, horns, spikes, stalks |
 | `tube(m, pts, r0, r1, sides, col, o)` | frustums along a path of points, tapering r0 to r1 over it (or each segment on its own, `perSegment`): struts, rails, rings, ribs, a jointed shaft |
-| `loft(m, rings, col)` | connect a stack of rings: torsos, robes, hoods, blades |
+| `jointedLimb(m, joints, r, col, o)` | a limb through its joints: a frustum per segment, its radius at each joint (`r: number[]`) or each segment's own (`(seg) => [r0, r1]`), a color per segment if a list; `knobs: { scale, jit }` lumps the bends. Legs, arms, feelers |
+| `loft(m, rings, col)` | connect a stack of rings: torsos, robes, hoods, blades. `bandCenters: true` for a column that flares or leans (see Pitfalls) |
 | `ringPts`, `wobbleRing` | rings to loft: a clean circle around any axis, or an organic, wavy outline in the x-z plane |
 | `box(m, c, s, col, jit)` | jittered boxes: feet, brows, slabs, vertebrae |
 | `bipyr(m, c, r, h, sides, col)` | double-pointed crystal: gems, motes, spores, sparks |
@@ -52,7 +53,7 @@ Reach for these before writing vertex math by hand. All coordinates are pre-fit 
 **Family helpers** (`designs/_*.ts`): shared shape code for a family of designs. `_character` (bodies, holds,
 clothing and hair, e.g. `chesterfieldCoat` (an open coat, to mid-thigh or lower: `hem`, with accents in `trim`) and `capWithBangs` (fuller and longer with `volume` and `nape`); a body built with
 `restArms` holds nothing, both arms hanging at its sides, for NPCs), `_sword`, `_axe` and the other weapons (`_bow`'s `bowShape`: the D-bow alone, for a creature to hold),
-`_armor` and the materials (`_cloth`, `_leather`, `_hide`, `_plate`: each armor series' pieces), `_shield`, `_ring` (rings and amulets: `jewelryEntry`, jewelry's `BRONZE` and `SILVER`, and `bandDesign(id, metal)`: the plain band, flat inside and domed outside, its `top` anchor at the crown), `_amulet` (`amuletDesign(id, { stone, metal, glint? })`: an oval cabochon in a setting, its chain lying loose behind it; `glint` is the light its crown catches, a brighter shade of the stone's own hue (a dark stone given a warm glint turns muddy)), `_rifter` (its states), `_interactive`, `_decor` and `_loot` (an object or loot design's identity: `interactiveEntry`, `decorEntry`, `lootEntry`; `_decor` also has the
+`_armor` and the materials (`_cloth`, `_leather`, `_hide`, `_plate`: each armor series' pieces), `_shield`, `_ring` (rings and amulets: `jewelryEntry`, jewelry's `BRONZE` and `SILVER`, and `bandDesign(id, metal)`: the plain band, flat inside and domed outside, its `top` anchor at the crown), `_amulet` (`amuletDesign(id, { stone, metal, glint? })`: an oval cabochon in a setting, its chain lying loose behind it; `glint` is the light its crown catches, a brighter shade of the stone's own hue (a dark stone given a warm glint turns muddy)), `_rifter` (its states), `_chest` (`treasureChestDesign(id, { wood, woodDark, lock })`: every treasure chest's shape and `open` animation, each chest its own colors), `_interactive`, `_decor` and `_loot` (an object or loot design's identity: `interactiveEntry`, `decorEntry`, `lootEntry`; `_decor` also has the
 merchant things' `DARK_WOOD` / `DARK_WOOD_SHADE` and `DECOR_IRON`, and `barrel`: a hooped barrel, optionally lidded), `_glow` (`floorGlow`), `_fungal` (`cap`,
 `mush`, `shelf`, `antler`), `_goblin` (every goblin's body: `goblinBody` with its helmets, or its pieces
 `goblinLook`, `goblinLegs`, `goblinTorso`, `goblinHead` for a goblin dressed differently; `goblinArm`; a body's
@@ -70,7 +71,7 @@ face with the color the model is drawn in, added to its own color (black for pur
 tint and its deep shade. Shade a tinted glow by its Tone (brighter on top, deeper below), not by its color.
 
 ## Construction patterns
-- **Limbs:** chains of `frustum`s through named joints (shoulder, elbow, wrist), a `blob` at each joint for bulk.
+- **Limbs:** `jointedLimb` through named joints (shoulder, elbow, wrist), `knobs` (or your own `blob`s) at the joints for bulk.
   Name the joints as `Vec3` constants first and pose by moving them: the code reads like a pose.
 - **Bodies and robes:** `loft` a stack of rings from bottom to top (`wobbleRing` for organic outlines, or rings
   you jitter yourself). Shift each ring's center for sway or a hunch (a function of height, `sway(y)`); for a
@@ -89,6 +90,10 @@ tint and its deep shade. Shade a tinted glow by its Tone (brighter on top, deepe
   `m.xf(start, p => add(alignY(dir)(p), base))`.
 - **Patches by position:** to color regions (lichen among moss, rust among iron), decide by a slow wave through
   space (`sin(x * 7 + a) + sin(y * 6 + b) + sin(z * 8 + c) > k`), so neighbouring faces agree and patches form.
+- **Worn or weathered gear:** gear shown on an object is the item's own design (`embed`, at its held size:
+  `HELD_LENGTH` / `HELD_SHIELD_HEIGHT` x `CHARACTER_HEIGHT`), never redrawn. To age it, recolor the faces the embed
+  added (from `m.faces.length` before it): the Dead Adventurer's `rust` turns near-grey metal toward rust in patches
+  and darkens leather and wood, leaving the shapes alone.
 - **Variety:** draw everything from the seed (`c.rf/ri/pick/chance`) within ranges that keep the identity: hue
   inside a narrow band, sizes within about ±15%, a few discrete choices (`pick`) for the big variants. Things a
   user fixes become constants.
@@ -126,6 +131,10 @@ tint and its deep shade. Shade a tinted glow by its Tone (brighter on top, deepe
   smaller than about 3% of the model, disappears. Thin strands need width; tiny details need contrast or glow.
 - **Toward or away from the camera:** long parts leaning that way collapse to stubs (see the style guide's
   Camera section). Lean them sideways.
+- **Holes in a flared or leaning loft:** `loft` turns every face away from one center, the average of all its
+  rings. On a column that flares (a robe's hem) or leans (a hunch), that center can fall outside a band, so some
+  of its faces face inward and are culled: holes that come and go with the seed. Pass `bandCenters: true` (each band
+  faces away from its own center; `loftRobe` does).
 - **Shapes that read wrong:** a tall cone reads as a dunce cap, a small dark hole as a single eye socket, a round
   boulder on a back as a separate rock. Check how the silhouette reads, not just what was built.
 - **Density:** clusters of small things (motes, warts) pack to the middle if their distance is drawn uniformly

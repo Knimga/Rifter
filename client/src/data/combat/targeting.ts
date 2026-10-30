@@ -1,6 +1,6 @@
 // Aiming a party member's action: who it lands on when used on a tile, or that it can't be used there.
-import type { Ability } from './abilities';
-import { affectedKeys, isArea, unitsInArea } from './areas';
+import type { Ability, AreaType } from './abilities';
+import { affectedKeys, areaCenter, isArea, unitsInArea } from './areas';
 import type { CombatUnit } from './abilityExecution';
 import { inRangeAndSight, posKey, samePos, type Pos } from '../world/grid';
 
@@ -27,7 +27,7 @@ export function aimPartyAction(action: Ability, o: {
   inCombat: boolean;
   /** The party's side: its living members and summoned allies. */
   partySide: () => CombatUnit[];
-  /** The party member or summoned ally on a tile, if any. */
+  /** The party member or summoned ally on a tile (any tile of a large one), if any. */
   allyAt: (p: Pos) => CombatUnit | null;
   /** The living hostile creatures of the zone. */
   hostiles: CombatUnit[];
@@ -38,15 +38,19 @@ export function aimPartyAction(action: Ability, o: {
   if (action.target === 'self') return samePos(o.at, o.casterPos) ? none : null;
   if (action.target === 'tile') return o.tileTargets?.has(posKey(o.at)) ? none : null;
   if (action.target === 'enemy' && !o.inCombat) return null;
-  if (!inRangeAndSight(o.casterPos, o.at, action.range, o.floors)) return null;
+  // Aimed at any tile of a large creature, it is aimed at all of it: in range and sight of any of its tiles, and an
+  // area centered on its whole square (areaCenter)
+  const center = areaCenter(o.at, [...o.partySide(), ...o.hostiles]);
+  if (!inRangeAndSight(o.casterPos, center, action.range, o.floors)) return null;
+  const areaOf = (area: AreaType | undefined) => affectedKeys(o.casterPos, center, area, o.floors);
   if (action.target === 'ally') {
     const ally = isArea(action) ? null : o.allyAt(o.at);
-    const targets = isArea(action) ? unitsInArea(affectedKeys(o.casterPos, o.at, action.area, o.floors), o.partySide()) : ally ? [ally] : [];
+    const targets = isArea(action) ? unitsInArea(areaOf(action.area), o.partySide()) : ally ? [ally] : [];
     // An area one's units are its targets and its 'allies' both (its 'allies' effects land on them too)
     return targets.length ? { targets, allies: isArea(action) ? targets : [] } : null;
   }
   const area = action.area ?? 'single';
-  const affected = affectedKeys(o.casterPos, o.at, area, o.floors);
+  const affected = areaOf(area);
   const targets = unitsInArea(affected, o.hostiles);
   if (area === 'single' && targets.length === 0) return null;
   return { targets, allies: unitsInArea(affected, o.partySide()) };

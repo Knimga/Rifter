@@ -27,6 +27,7 @@ import { posedHalos, posedPositions } from '../src/forge/core/animate';
 import { isTinted, tintModel } from '../src/forge/core/tint';
 import type { RGB } from '../src/forge/core/vec';
 import { DUNGEONS } from '../src/data/world/dungeons';
+import { designTiles } from '../src/forge/dataRefs';
 
 const args = process.argv.slice(2);
 const flag = (n: string) => args.includes(`--${n}`);
@@ -74,7 +75,9 @@ function renderCell(model: Model, design: Design, yaw: number): Uint8Array {
   };
 
   const standing = design.fit.kind === 'standing';
-  const tilesAcross = standing ? 2.5 : 1.7; // how many tiles fit across one cell
+  // The square it stands on in game: 1 tile, or a large creature's 2×2 (designTiles)
+  const square = designTiles(design);
+  const tilesAcross = standing ? 2.5 * square : 1.7; // how many tiles fit across one cell
   const k = S / tilesAcross;
   const cxp = S / 2;
   const cyp = standing ? S * 0.68 : S * 0.5;
@@ -106,15 +109,21 @@ function renderCell(model: Model, design: Design, yaw: number): Uint8Array {
       }
   };
 
-  // 1x1 ground tile as a scale reference (and a hint of where the shadow/footprint sits)
-  const gq = [[-0.5, -0.5], [0.5, -0.5], [0.5, 0.5], [-0.5, 0.5]].map(([x, z]) => toScreen(view([x, groundY, z])));
-  fillTri(gq[0], gq[1], gq[2], GROUND, 1, false);
-  fillTri(gq[0], gq[2], gq[3], GROUND, 1, false);
-  for (let i = 0; i < 4; i++) {
-    const p = gq[i], q = gq[(i + 1) % 4];
-    for (let t = 0; t <= 60; t++) {
-      const x = Math.round(p[0] + ((q[0] - p[0]) * t) / 60), y = Math.round(p[1] + ((q[1] - p[1]) * t) / 60);
-      if (x >= 0 && y >= 0 && x < S && y < S) color.set(GROUND_EDGE, (y * S + x) * 3);
+  // The ground tiles it stands on (1x1, or a large creature's 2x2) as a scale reference (and a hint of where the
+  // shadow/footprint sits), centered on its feet
+  for (let ti = 0; ti < square; ti++) {
+    for (let tj = 0; tj < square; tj++) {
+      const ox = ti - square / 2, oz = tj - square / 2;
+      const gq = [[0, 0], [1, 0], [1, 1], [0, 1]].map(([x, z]) => toScreen(view([ox + x, groundY, oz + z])));
+      fillTri(gq[0], gq[1], gq[2], GROUND, 1, false);
+      fillTri(gq[0], gq[2], gq[3], GROUND, 1, false);
+      for (let i = 0; i < 4; i++) {
+        const p = gq[i], q = gq[(i + 1) % 4];
+        for (let t = 0; t <= 60; t++) {
+          const x = Math.round(p[0] + ((q[0] - p[0]) * t) / 60), y = Math.round(p[1] + ((q[1] - p[1]) * t) / 60);
+          if (x >= 0 && y >= 0 && x < S && y < S) color.set(GROUND_EDGE, (y * S + x) * 3);
+        }
+      }
     }
   }
 

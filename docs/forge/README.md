@@ -32,6 +32,7 @@ The forge folder holds the forge UI and the link between its models and game dat
 - 1 unit = 1 tile. Grid cell (gx, gy) centers at world (gx + .5, 0, gy + .5). Grid +y is world +z (down the screen, toward the camera).
 - **Placement on the map** (the game renderer, the builder's game view and `forge:sheet` all follow it):
   - Creatures: the design's `feet` anchor (the middle of its stance) goes exactly to the tile center; the body rises above it. Designs should always mark `m.anchor('feet', ...)`; without it, the bounding-box center is used and anything held out (a scythe, reaching arms) pulls the feet off-center.
+  - Large creatures (`large: true` on their entry) stand on 2×2 tiles, the feet where the four meet. The builder (game view floor and tile reference) and `forge:sheet` show them on that square (`designTiles` in `dataRefs.ts`, from the entry).
   - Items (loot) lie **flat on the tile, face up** (`ITEM_GROUND_PITCH` / `layItem` in `stage-config.ts`), resting on the floor. A design can lie less tipped with `fit.groundPitchDeg`, or on its side with `fit.groundRollDeg` (turned about its front axis first; the Iron Helm rests on its side, as if dropped). Loot is turned against the view's yaw (`lootYaw`), so on the floor it keeps its icon's screen orientation (tip up and to the left), only foreshortened by the view's elevation.
   - Inventory icons use a straight-on camera (`ICON_CAMERA`: no elevation, no yaw) for the same reason.
 - Models face +z at yaw 0. A model's left side is +x (`_l` = +x, `_r` = -x).
@@ -60,13 +61,13 @@ model: 'creature.zombie',
 - A new data entry needs its design: add the entry with `model` naming the new design (a draft until approved; the game draws nothing for a link whose design isn't approved yet). `forge:lint` checks every link points at a design (approved or draft) for that same entry.
 
 ## Workflow
-1. A design or a change is requested ("make the skeleton bulkier", "add a bat"). Claude Code writes `client/src/forge/drafts/<stem>.ts` (an edit of an approved design is a new copy there; the approved file is untouched), then runs:
+1. A design or a change is requested ("make the skeleton bulkier", "add a bat"). **A creature (enemy, boss, summon) is designed only once its data entry exists**: the user writes the entry first, and its `large` says whether it stands on 2×2 tiles (which changes the design's size and detail: the style guide's "Large creatures"). With no entry yet, or no word on its size, ask before starting. Claude Code writes `client/src/forge/drafts/<stem>.ts` (an edit of an approved design is a new copy there; the approved file is untouched), then runs:
    - `npm run forge:lint -- --drafts` (determinism, triangle budget, fit, anchors, data links; 200 seeds)
    - `npm run forge:sheet -- --only-drafts --seeds 12 --yaws 0,180 --out forge-sheet.png`, and looks at the PNG
    (run both from `client/`).
 2. You open **`/dev/forge`** on the dev server (`npm run dev`, then `http://localhost:5173/dev/forge`).
    - Left: designs by category with approved / draft / new badges, and whether the data entry links the design.
-   - Center: items show their one look; creatures show a page of seeds (each a possible instance); classes show one row per hold. Tinted models (Rifts & Keys, the active Rifter) get a dungeon menu and a color picker for the color they are shown in. Game camera (or icon / top / side), a turntable and an 8-direction walk test, wireframe, and a 1×1 tile reference. Click a cell to focus it.
+   - Center: items show their one look; creatures show a page of seeds (each a possible instance); classes show one row per hold. Tinted models (Rifts & Keys, the active Rifter) get a dungeon menu and a color picker for the color they are shown in. Game camera (or icon / top / side), a turntable and an 8-direction walk test, wireframe, and a tile reference (1×1, or 2×2 for a large creature). Click a cell to focus it.
    - Right: **Approve / Discard** when a draft exists (Current vs Draft side by side), and the focused model's name, seed and triangle count.
    - **Snapshot** writes the current view to `client/forge-snapshots/` so Claude Code can look at it.
    - The URL keeps the state (`?design=creature.skeleton&seed=7&count=12&cam=game`), so a view can be shared in one line.

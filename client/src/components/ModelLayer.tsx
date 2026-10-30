@@ -1,7 +1,7 @@
 // Draws party members, enemies and loot as 3D models over a map's tile grid (DungeonMap, SanctumMap).
 // Lazy-loaded (it pulls in three.js), so the menu and builder screens never download it.
 import { useEffect, useMemo, useRef, type ReactNode } from 'react';
-import type { EnemyInstance } from '../data/units/enemies';
+import { bodySize, type EnemyInstance } from '../data/units/enemies';
 import { CLASSES, type ClassKey } from '../data/units/classes';
 import type { Design, Model, ModelLink } from '../forge/core/types';
 import { buildInstance, instanceSeed, linkedDesign } from '../forge/core/link';
@@ -128,7 +128,7 @@ export default function ModelLayer({ board, party = [], enemies = [], loot = [],
     const out: MapUnit[] = [];
     for (const e of enemies) {
       const design = linkedDesign(designs, e.classData.model);
-      if (design) out.push({ id: e.id, model: cached(e.id, '', [design], () => buildInstance(design, e.id)), pos: e.pos });
+      if (design) out.push({ id: e.id, model: cached(e.id, '', [design], () => buildInstance(design, e.id)), pos: e.pos, size: bodySize(e.classData) });
     }
     return out;
   }, [enemyKey]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -171,15 +171,17 @@ export default function ModelLayer({ board, party = [], enemies = [], loot = [],
   // and the active member's floor glow. The renderer reports every change (onPlace); a newly mounted
   // element is placed where the model is drawn now.
   const overlayEls = useRef(new Map<string, { head?: HTMLDivElement | null; glow?: HTMLDivElement | null }>());
-  const headHeight = useRef(new Map<string, number>()); // each unit's overhead anchor height (world tiles)
-  for (const u of [...partyUnits, ...enemyUnits]) headHeight.current.set(u.id, u.model.mesh.anchors.overhead[1]);
+  // Each unit's overhead anchor height (world tiles), and its size (a large creature's 2 tiles)
+  const headHeight = useRef(new Map<string, { height: number; size: number }>());
+  for (const u of [...partyUnits, ...enemyUnits]) headHeight.current.set(u.id, { height: u.model.mesh.anchors.overhead[1], size: u.size ?? 1 });
   const boardRef = useRef(board);
   boardRef.current = board;
   const placeOverlays = (id: string, at: Pos) => {
     const els = overlayEls.current.get(id);
     if (els?.head) {
-      // Centered over the tile, its bottom at the projected overhead anchor
-      const p = boardRef.current.toScreen(at.x + 0.5, at.y + 0.5, headHeight.current.get(id) ?? 0);
+      // Centered over the unit (a large one's whole square), its bottom at the projected overhead anchor
+      const { height = 0, size = 1 } = headHeight.current.get(id) ?? {};
+      const p = boardRef.current.toScreen(at.x + size / 2, at.y + size / 2, height);
       els.head.style.left = `${p.left - TILE_SIZE / 2}px`;
       els.head.style.top = `${p.top}px`;
     }

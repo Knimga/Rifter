@@ -1,10 +1,10 @@
-import { warnIgnoredEffects, type Ability } from '../combat/abilities';
+import { warnIgnoredEffects, warnIgnoredTriggers, type Ability, type PassiveTrigger } from '../combat/abilities';
 import type { Passive, ScalingPassive } from './classes';
 import type { AttributeKey, SkillKey, ActiveBuff, ActiveHot, ActiveDot, DamageElement } from './stats';
 import { ATTRIBUTE_KEYS, ATTRIBUTE_POINTS_PER_LEVEL, calculateStats, recomputeStats } from './stats';
 import type { Stats } from './stats';
 import type { ModelLink } from '../../forge/core/types';
-import type { Pos } from '../world/grid';
+import { footprintKeys, type Body, type Pos } from '../world/grid';
 import { pickWeighted } from '../random';
 
 // ─── Creature Class Definition ────────────────────────────────────────────────
@@ -42,9 +42,15 @@ export interface CreatureClassData {
   // Optional passive system (same as players — enables elemental damage bonuses etc.)
   passives?: Record<string, Passive>;
   scalingPassives?: ScalingPassive[];
+  // Triggers it always has (always on, never run out: PassiveTrigger), e.g. striking back when parried
+  passiveTriggers?: PassiveTrigger[];
 
   // Forge design this creature renders as; each instance gets its own look (seeded from its id)
   model: ModelLink;
+
+  // A large creature fills 2×2 tiles (its `pos` the top-left one): it squeezes through narrow ways but stops only
+  // where it fits, and is reached, seen and hit as a whole (world/grid.ts bodies). Its design is built for 2 tiles.
+  large?: boolean;
 
   // Hostile creatures only (EnemyClassData); a summon drops nothing and is worth no XP
   dropChance?: number;   // items dropped on death: its whole part guaranteed, its fraction the chance of one more (1.2: one, and 20% for a second)
@@ -181,6 +187,16 @@ export function generateEnemyInstance(
   };
 }
 
+/** The side of a creature's square, in tiles: 2 for a large one, else 1. */
+export const bodySize = (classData: Pick<CreatureClassData, 'large'>): number => (classData.large ? 2 : 1);
+
+/** A creature's body on the map (world/grid.ts): its tile and size. */
+export const bodyOf = (e: Pick<EnemyInstance, 'pos' | 'classData'>): Body => ({ pos: e.pos, size: bodySize(e.classData) });
+
+/** Keys of every tile the creatures cover (all 4 of a large one's): for "is someone there" lookups. */
+export const creatureTiles = (creatures: Pick<EnemyInstance, 'pos' | 'classData'>[]): Set<string> =>
+  new Set(creatures.flatMap(e => footprintKeys(bodyOf(e))));
+
 /** A creature the party fights (not one it summoned). */
 export const isHostile = (e: EnemyInstance) => !e.summon?.allied;
 
@@ -304,8 +320,8 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
         displayElement: 'ice',
         attackCategory: 'magic',
         effects: [
-          { type: 'damage', appliesTo: 'target', damageElement: 'shadow', minDamage: 1, maxDamage: 2 },
-          { type: 'damage', appliesTo: 'target', damageElement: 'ice', minDamage: 1, maxDamage: 2 }
+          { type: 'damage', appliesTo: 'target', damageElement: 'shadow', minDamage: 2, maxDamage: 2 },
+          { type: 'damage', appliesTo: 'target', damageElement: 'ice', minDamage: 2, maxDamage: 2 }
         ]
       },
       {
@@ -347,7 +363,7 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
         target: 'enemy',
         attackCategory: 'melee',
         effects: [
-          { type: 'damage', appliesTo: 'target', damageElement: 'fire', minDamage: 3, maxDamage: 6 }
+          { type: 'damage', appliesTo: 'target', damageElement: 'fire', minDamage: 4, maxDamage: 6 }
         ],
       },
       {
@@ -491,7 +507,7 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
         range: 1,
         target: 'tile',        
         effects: [
-          { type: 'summon', appliesTo: 'caster', creature: 'fungal-spore', rounds: 3, max: 3 }
+          { type: 'summon', appliesTo: 'caster', creature: 'fungal-spore', rounds: 3, max: 2 }
         ]
       },
       {
@@ -501,7 +517,7 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
         range: 5,
         target: 'ally',
         effects: [
-          { type: 'heal', appliesTo: 'target', damageElement: 'nature', minHeal: 5, maxHeal: 9 }
+          { type: 'heal', appliesTo: 'target', damageElement: 'nature', minHeal: 5, maxHeal: 8 }
         ]
       },
       {
@@ -649,7 +665,7 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
         attackCategory: 'magic',
         displayElement: 'poison',
         effects: [
-          { type: 'damage', appliesTo: 'target', damageElement: 'poison', minDamage: 5, maxDamage: 9 },
+          { type: 'damage', appliesTo: 'target', damageElement: 'poison', minDamage: 6, maxDamage: 8 },
           { type: 'dot', appliesTo: 'target', damageElement: 'poison', damagePerRound: 5, rounds: 3 }
         ]
       }
@@ -738,7 +754,7 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
         attackCategory: 'ranged',
         displayElement: 'physical',
         effects: [
-          { type: 'damage', appliesTo: 'target', damageElement: 'physical', minDamage: 2, maxDamage: 4 }
+          { type: 'damage', appliesTo: 'target', damageElement: 'physical', minDamage: 3, maxDamage: 4 }
         ],
       },
       {
@@ -751,7 +767,7 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
         attackCategory: 'ranged',
         displayElement: 'physical',
         effects: [
-          { type: 'damage', appliesTo: 'target', damageElement: 'physical', minDamage: 2, maxDamage: 4 },
+          { type: 'damage', appliesTo: 'target', damageElement: 'physical', minDamage: 2, maxDamage: 3 },
           { type: 'dot', appliesTo: 'target', damageElement: 'physical', damagePerRound: 4, rounds: 3, maxStacks: 3 }
         ]
       }
@@ -797,7 +813,7 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
         target: 'ally',
         displayElement: 'nature',
         effects: [
-          { type: 'heal', appliesTo: 'target', damageElement: 'nature', minHeal: 4, maxHeal: 8 },
+          { type: 'heal', appliesTo: 'target', damageElement: 'nature', minHeal: 5, maxHeal: 7 },
         ]
       },
       {
@@ -875,9 +891,212 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
     dropsGold: 0.1,
     xpMultiplier: 2,
     model: 'creature.troll'
+  },
+  {
+    id: 'echo-bat-swarm',
+    name: 'Echo Bat Swarm',
+    attributes: { finesse: 4, speed: 4 },
+    highAttributes: ['finesse', 'speed'],
+    lowAttributes: ['toughness', 'strength'],
+    baseHp: 15,
+    baseArmor: 5,
+    armorPerLevel: 1,
+    resistances: { physical: 20 },
+    passives: {
+      dodge: { name: 'Swarm', flat: 20 }
+    },
+    abilities: [
+      {
+        name: 'Drink Blood',
+        mpCost: 0,
+        range: 1,
+        apCost: 2,
+        target: 'enemy',
+        attackCategory: 'melee',
+        displayElement: 'physical',
+        effects: [
+          { type: 'damage', appliesTo: 'target', damageElement: 'physical', minDamage: 4, maxDamage: 5 },
+          { type: 'heal', appliesTo: 'caster', damageElement: 'physical', minHeal: 9, maxHeal: 9 }
+        ]
+      },
+      {
+        name: 'Screech',
+        mpCost: 5,
+        range: 0, 
+        apCost: 2,
+        target: 'enemy',
+        area: 'blast2',
+        attackCategory: 'melee',
+        displayElement: 'physical',
+        effects: [
+          { type: 'debuff', appliesTo: 'target', damageElement: 'physical', stats: { magicHit: -10, mpRegen: -3 }, rounds: 3, maxStacks: 1 }
+        ]
+      }
+    ],
+    xpMultiplier: 1,
+    dropChance: 0.1,
+    dropsGold: 0.1,
+    model: 'creature.echo-bat-swarm'
+  },
+  {
+    id: 'black-centipede',
+    name: 'Black Centipede',
+    large: true,
+    attributes: { toughness: 6, strength: 4, mind: 4 },
+    highAttributes: ['toughness', 'strength'],
+    lowAttributes: ['spirit', 'speed'],
+    baseHp: 60,
+    baseArmor: 40,
+    armorPerLevel: 5,
+    resistances: { poison: 30 },
+    passives: {
+      meleeHit: { name: 'Hunter', flat: 10 },
+      dodge: { name: 'Large', flat: -5 },
+      magicResistance: { name: 'Voidblood', flat: 15 }
+    },
+    abilities: [
+      {
+        name: 'Crushing Jaws',
+        mpCost: 0,
+        apCost: 2,
+        range: 1,
+        target: 'enemy',
+        attackCategory: 'melee',
+        displayElement: 'physical',
+        effects: [
+          { type: 'damage', appliesTo: 'target', damageElement: 'physical', minDamage: 3, maxDamage: 13 }
+        ]
+      },
+
+      {
+        name: 'Caustic Venom',
+        mpCost: 8,
+        apCost: 2,
+        range: 1,
+        target: 'enemy',
+        attackCategory: 'melee',
+        displayElement: 'poison',
+        effects: [
+          { type: 'dot', appliesTo: 'target', damageElement: 'poison', damagePerRound: 10, rounds: 3 }
+        ]
+      }
+    ],
+    xpMultiplier: 3,
+    dropChance: 0.7,
+    dropsGold: 0.5,
+    goldBonus: 25,
+    model: 'creature.black-centipede'
+  },
+  {
+    id: 'pale-creeper',
+    name: 'Pale Creeper',
+    attributes: { finesse: 2, mind: 4, speed: 2 },
+    highAttributes: ['mind', 'speed'],
+    lowAttributes: ['spirit', 'strength'],
+    baseHp: 30,
+    baseArmor: 25,
+    armorPerLevel: 5,
+    resistances: { poison: 30 },
+    passives: {
+      movement: { name: 'Skitterer', flat: 1 }
+    },
+    passiveTriggers: [
+      { name: 'Venomous', damageElement: 'poison', trigger: {
+        when: 'attacking', on: 'hit', categories: ['melee'], chance: 50,
+        effects: [
+          {type: 'dot', appliesTo: 'target', damageElement: 'poison', damagePerRound: 5, rounds: 3, maxStacks: 3 }]
+      }}
+    ],
+    abilities: [
+      {
+        name: 'Bite',
+        apCost: 1,
+        mpCost: 0,
+        range: 1,
+        attackCategory: 'melee',
+        displayElement: 'physical',
+        target: 'enemy',
+        effects: [
+          { type: 'damage', appliesTo: 'target', damageElement: 'physical', minDamage: 4, maxDamage: 5 }
+        ]
+      },
+      {
+        name: 'Spin Web',
+        apCost: 2,
+        mpCost: 6,
+        range: 4,
+        attackCategory: 'ranged',
+        displayElement: 'physical',
+        target: 'enemy',
+        effects: [
+          { type: 'debuff', appliesTo: 'target', damageElement: 'physical', stats: { movement: -1, dodge: -5 }, rounds: 3, maxStacks: 1}
+        ]
+      }
+    ],
+    xpMultiplier: 1,
+    dropChance: 0.4,
+    dropsGold: 0.3,
+    model: 'creature.pale-creeper'
+  },
+  {
+    id: 'eyelax',
+    name: 'Eyelax',
+    attributes: { finesse: 2, mind: 4, speed: 2 },
+    highAttributes: ['mind', 'speed'],
+    lowAttributes: ['spirit', 'toughness'],
+    baseHp: 30,
+    baseArmor: 20,
+    armorPerLevel: 5,
+    resistances: { shadow: 20 },
+    passives: {
+      dodge: { name: 'Wily', flat: 5 },
+      magicResistance: { name: 'Voidblood', flat: 20 }
+    },
+    passiveTriggers: [
+      { name: 'Spelleater', damageElement: 'shadow', trigger: {
+        when: 'attacked', on: 'hit', categories: ['magic'], chance: 100,
+        effects: [
+          {type: 'buff', appliesTo: 'caster', damageElement: 'shadow', stats: { shadowDamage: 3, armor: 5 }, rounds: 3 }]
+      }}
+    ],
+    abilities: [
+      {
+        name: 'Mindrot',
+        mpCost: 8,
+        apCost: 2,
+        range: 5,
+        target: 'enemy',
+        attackCategory: 'magic',
+        displayElement: 'shadow',
+        effects: [
+          { type: 'damage', damagesMP: true, appliesTo: 'target', damageElement: 'shadow', minDamage: 4, maxDamage: 4 },
+          { type: 'damage', appliesTo: 'target', damageElement: 'shadow', minDamage: 4, maxDamage: 4 },
+        ]
+      },
+      {
+        name: 'Black Claw',
+        mpCost: 0,
+        apCost: 1,
+        range: 1,
+        target: 'enemy',
+        attackCategory: 'melee',
+        displayElement: 'shadow',
+        effects: [
+          { type: 'damage', appliesTo: 'target', damageElement: 'shadow', minDamage: 3, maxDamage: 4 },
+        ]
+      },
+    ],
+    xpMultiplier: 2,
+    dropChance: 0.4,
+    dropsGold: 0.4,
+    goldBonus: 50,
+    model: 'creature.eyelax'
   }
 ];
 
-// Effects an ability would silently ignore: warned at load
-for (const c of ENEMY_CLASSES) warnIgnoredEffects(`enemies › ${c.id}`, c.abilities);
+// Effects an ability (or a passive trigger) would silently ignore: warned at load
+for (const c of ENEMY_CLASSES) {
+  warnIgnoredEffects(`enemies › ${c.id}`, c.abilities);
+  warnIgnoredTriggers(`enemies › ${c.id}`, c.passiveTriggers);
+}
 

@@ -14,7 +14,7 @@ export type RobeRing = [y: number, rx: number, rz: number, dz: number, jag: numb
 
 /** A robe lofted from `profile` (its rings, from the hem up), its width and depth scaled by `W`, its edge wobbling. */
 export function loftRobe(c: BuildCtx, profile: readonly RobeRing[], W: number, color: RGB | ColorFn): void {
-  loft(c.mesh, profile.map(([y, rx, rz, dz, jag]) => wobbleRing([0, y, dz], rx * W, rz * W, 12, jag, c.R)), color, { j: 0.16 });
+  loft(c.mesh, profile.map(([y, rx, rz, dz, jag]) => wobbleRing([0, y, dz], rx * W, rz * W, 12, jag, c.R)), color, { j: 0.16, bandCenters: true });
 }
 
 /** A robe's outline at height y, between its rings: half-width, half-depth (scaled by `W`), and its middle's forward offset. */

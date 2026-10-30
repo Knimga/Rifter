@@ -17,6 +17,8 @@ export interface Cell {
   rect: { x: number; y: number; w: number; h: number };
   /** How far along each of its one-time animations is (PartAnimation; none = the rest pose). */
   progress?: AnimationProgress;
+  /** Tiles a side it stands on in game (a large creature's 2×2); the tile reference shows that square. Default 1. */
+  tiles?: number;
 }
 
 export interface ViewOptions {
@@ -37,7 +39,8 @@ export class ForgeView {
   readonly canvas: HTMLCanvasElement;
   private r: THREE.WebGLRenderer;
   private scene = new THREE.Scene();
-  private ground = new THREE.Group();
+  /** The tile reference under the model, by square size (tiles a side), built on first use. */
+  private grounds = new Map<number, THREE.Group>();
   /** three.js objects cached by Model instance: a rebuilt model (new design code, params or seed) is a
    *  new instance, so it always gets a fresh mesh instead of a stale cached one. */
   private objects = new Map<Model, THREE.Group>();
@@ -53,16 +56,26 @@ export class ForgeView {
     this.r.setPixelRatio(window.devicePixelRatio);
     this.canvas = this.r.domElement;
     this.key = addForgeLights(this.scene);
-    // 1x1 tile reference under the model
-    const tile = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ color: 0x3a3846 }));
-    tile.rotation.x = -Math.PI / 2;
-    const edge = new THREE.LineSegments(
-      new THREE.EdgesGeometry(new THREE.PlaneGeometry(1, 1)),
-      new THREE.LineBasicMaterial({ color: 0x6e6c80 }),
-    );
-    edge.rotation.x = -Math.PI / 2;
-    this.ground.add(tile, edge);
-    this.scene.add(this.ground);
+  }
+
+  /** The tile reference for a model standing on `n`×`n` tiles: the tiles under it, centered on its feet. */
+  private groundFor(n: number): THREE.Group {
+    let g = this.grounds.get(n);
+    if (g) return g;
+    g = new THREE.Group();
+    const fill = new THREE.MeshBasicMaterial({ color: 0x3a3846 }), line = new THREE.LineBasicMaterial({ color: 0x6e6c80 });
+    for (let i = 0; i < n; i++) {
+      for (let j = 0; j < n; j++) {
+        const at = (k: number) => k - (n - 1) / 2;
+        const tile = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), fill);
+        const edge = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.PlaneGeometry(1, 1)), line);
+        for (const o of [tile, edge]) { o.rotation.x = -Math.PI / 2; o.position.set(at(i), 0, at(j)); }
+        g.add(tile, edge);
+      }
+    }
+    this.grounds.set(n, g);
+    this.scene.add(g);
+    return g;
   }
 
   /**
@@ -102,8 +115,10 @@ export class ForgeView {
       if (game && isItem) layItemOnGround(obj, cell.model, lootYaw() + cell.yaw);
       else if (opts.camera === 'icon') ({ min, max } = poseIcon(obj, cell.model, cell.yaw));
       else { obj.rotation.set(0, cell.yaw, 0, 'YXZ'); obj.position.y = 0; }
-      this.ground.visible = opts.ground && !game; // game view: the page's DOM tiles are the ground
-      this.ground.position.y = isItem ? min[1] - 0.02 : 0;
+      for (const g of this.grounds.values()) g.visible = false;
+      const ground = this.groundFor(cell.tiles ?? 1);
+      ground.visible = opts.ground && !game; // game view: the page's DOM tiles are the ground
+      ground.position.y = isItem ? min[1] - 0.02 : 0;
 
       const { x, y, w, h } = cell.rect;
       const gy = size.h - y - h; // GL origin is bottom-left
@@ -161,6 +176,7 @@ export class ForgeView {
   dispose(): void {
     for (const obj of this.objects.values()) disposeObject(obj);
     this.objects.clear();
+    for (const g of this.grounds.values()) disposeObject(g);
     this.r.dispose();
   }
 }

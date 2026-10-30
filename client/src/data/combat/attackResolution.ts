@@ -1,6 +1,6 @@
 import { PHYSICAL_ELEMENTS, type AttackCategory, type DamageElement } from '../gear';
 import { ELEMENT_RESISTANCE_FLOOR, type Stats } from '../units/stats';
-import { randInt } from '../random';
+import { randInt, rollScaled } from '../random';
 
 // ─── Tuning Constants ────────────────────────────────────────────────────────
 
@@ -128,8 +128,8 @@ export function rollDamage(
   target: Stats,
   hit: HitRoll,
 ): DamageRoll {
-  const roll = randInt(minDamage, maxDamage);
-  let raw = roll + offense.damage;
+  const roll = rollScaled(minDamage, maxDamage, offense.damage);
+  let raw = roll;
   if (hit.crit) raw *= CRIT_MULTIPLIER;
   if (hit.glancing) raw = Math.floor(raw * GLANCING_MULTIPLIER);
   const final = applyDR(raw, element, target, offense.penetration, offense.elementPenetration);

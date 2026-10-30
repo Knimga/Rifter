@@ -17,11 +17,16 @@ const goblinWarrior = ENEMY_CLASSES.find(c => c.id === 'goblin-warrior')!;
 const goblinArcher = ENEMY_CLASSES.find(c => c.id === 'goblin-archer')!;
 const goblinShaman = ENEMY_CLASSES.find(c => c.id === 'goblin-shaman')!;
 const troll = ENEMY_CLASSES.find(c => c.id === 'troll')!;
+const echoBats = ENEMY_CLASSES.find(c => c.id === 'echo-bat-swarm')!;
+const blackCentipede = ENEMY_CLASSES.find(c => c.id === 'black-centipede')!;
+const paleCreeper = ENEMY_CLASSES.find(c => c.id === 'pale-creeper')!;
+const eyelax = ENEMY_CLASSES.find(c => c.id === 'eyelax')!;
 
 const Necromancer = BOSS_CLASSES.find(c => c.id === 'necromancer')!;
 const BurningSpirit = BOSS_CLASSES.find(c => c.id === 'burning-spirit')!;
 const Sporemother = BOSS_CLASSES.find(c => c.id === 'sporemother')!;
 const TrollTamer = BOSS_CLASSES.find(c => c.id === 'troll-tamer')!;
+const PaleBroodmother = BOSS_CLASSES.find(c => c.id === 'pale-broodmother')!;
 
 export const DUNGEONS: Record<string, DungeonConfig> = {
   crypt: {
@@ -33,7 +38,6 @@ export const DUNGEONS: Record<string, DungeonConfig> = {
     doorObject: 'heavy-door',
     riftColor: [178, 236, 192], // pale, ghostly necrotic green, washed toward white-grey
     keyName: 'Necrotic Key',
-    chestObject: 'basic-treasure-chest',
     zones: [
       {
         minRoomSize: 4,
@@ -51,6 +55,7 @@ export const DUNGEONS: Record<string, DungeonConfig> = {
         maxRoomSize: 8,
         splitDepth: 2,
         corridorWidth: 2,
+        containers: ['worn-treasure-chest'],
         enemyGroups: [
           [specter, skelly, skelly, skelly],
           [zombie, zombie, zombie, zombie],
@@ -62,6 +67,7 @@ export const DUNGEONS: Record<string, DungeonConfig> = {
       roomSize: 12,
       corridorWidth: 2,
       bossGroup: [Necromancer, skelly, skelly],
+      containers: ['solid-treasure-chest'],
     }
   },
   firelands: {
@@ -73,7 +79,6 @@ export const DUNGEONS: Record<string, DungeonConfig> = {
     doorObject: 'heavy-door',
     riftColor: [255, 168, 72],  // fiery orange, deepening to ember red
     keyName: 'Fiery Key',
-    chestObject: 'basic-treasure-chest',
     zones: [
       {
         minRoomSize: 5,
@@ -95,6 +100,7 @@ export const DUNGEONS: Record<string, DungeonConfig> = {
         corridorWidth: 3,
         layout: 'caverns',
         islands: { roomChance: 0.33, size: [3, 6], density: 0.1 },
+        containers: ['dead-adventurer'],
         enemyGroups: [
           [flameGolem, lavaSlime, lavaSlime],
           [hellhound, hellhound, lavaSlime],
@@ -107,6 +113,7 @@ export const DUNGEONS: Record<string, DungeonConfig> = {
       corridorWidth: 2,
       layout: 'caverns',
       bossGroup: [BurningSpirit],
+      containers: ['solid-treasure-chest'],
     }
   },
   fungal: {
@@ -118,7 +125,6 @@ export const DUNGEONS: Record<string, DungeonConfig> = {
     doorObject: 'heavy-door',
     riftColor: [218, 230, 124], // sickly spore yellow-green, deepening to moss
     keyName: 'Fetid Key',
-    chestObject: 'basic-treasure-chest',
     zones: [
       {
         minRoomSize: 6,
@@ -140,6 +146,7 @@ export const DUNGEONS: Record<string, DungeonConfig> = {
         corridorWidth: 3,
         layout: 'caverns',
         islands: { roomChance: 0.6, size: [3, 5], density: 0.2 },
+        containers: ['dead-adventurer'],
         enemyGroups: [
           [mirehulk, mirehulk, rotflySwarm, rotflySwarm, rotflySwarm],
           [gloomtoad, gloomtoad, gloomtoad],
@@ -151,7 +158,8 @@ export const DUNGEONS: Record<string, DungeonConfig> = {
       roomSize: 12,
       corridorWidth: 2,
       layout: 'caverns',
-      bossGroup: [Sporemother, sporetender, sporetender]
+      bossGroup: [Sporemother, sporetender, sporetender],
+      containers: ['solid-treasure-chest'],
     }
   },
   goblin: {
@@ -162,8 +170,7 @@ export const DUNGEONS: Record<string, DungeonConfig> = {
     wallColor: '#0b160c',
     doorObject: 'heavy-door',
     riftColor: [32, 107, 35], // rich green (#206b23)
-    keyName: 'Goblin Key',
-    chestObject: 'basic-treasure-chest',
+    keyName: 'Gnawed Key',
     zones: [
       {
         // Many small square-cut rooms (about 12 a zone) joined by 1-tile hallways
@@ -184,6 +191,7 @@ export const DUNGEONS: Record<string, DungeonConfig> = {
         maxRoomSize: 7,
         splitDepth: 4,
         corridorWidth: 1,
+        containers: ['worn-treasure-chest'],
         enemyGroups: [
           [troll,goblinWarrior,goblinArcher],
           [goblinWarrior,goblinWarrior,goblinShaman,goblinArcher],
@@ -195,7 +203,52 @@ export const DUNGEONS: Record<string, DungeonConfig> = {
     bossZone: {
       roomSize: 12,
       corridorWidth: 1,
-      bossGroup: [TrollTamer,troll,troll]
+      bossGroup: [TrollTamer,troll,troll],
+      containers: ['solid-treasure-chest'],
+    }
+  },
+  blind: {
+    name: 'The Blind Caverns',
+    width: 48,
+    height: 18,
+    floorColor: '#16171a',
+    wallColor: '#060607',
+    doorObject: 'heavy-door',
+    riftColor: [30, 30, 70],
+    keyName: 'Lightless Key',
+    zones: [
+      {
+        minRoomSize: 4,
+        maxRoomSize: 10,
+        splitDepth: 3,
+        corridorWidth: 1,
+        layout: 'tunnels',
+        enemyGroups: [
+          [echoBats,echoBats,echoBats,echoBats,echoBats],
+          [paleCreeper,paleCreeper,paleCreeper,paleCreeper],
+          [eyelax,eyelax,eyelax]
+        ],
+      },
+      {
+        minRoomSize: 4,
+        maxRoomSize: 11,
+        splitDepth: 3,
+        corridorWidth: 1,
+        layout: 'tunnels',
+        containers: ['dead-adventurer'],
+        enemyGroups: [
+          [eyelax,eyelax,echoBats,echoBats,echoBats],
+          [blackCentipede],
+          [paleCreeper,paleCreeper,paleCreeper,paleCreeper]
+        ],
+      }
+    ],
+    bossZone: {
+      roomSize: 12,
+      corridorWidth: 1,
+      layout: 'caverns',
+      bossGroup: [PaleBroodmother],
+      containers: ['solid-treasure-chest'],
     }
   }
 } satisfies Record<string, DungeonConfig>;

@@ -37,6 +37,12 @@ export const INTERACTIVE_OBJECTS: InteractiveObjectData[] = [
   // (its waking animation). Same shape: designs/_rifter.ts.
   { id: 'rifter', name: 'Rifter', model: 'interactive.rifter' },
   { id: 'rifter-active', name: 'Rifter (Active)', model: 'interactive.rifter-active' },
-  // A plain wooden chest bound in iron, locked; stands on a floor tile, its lock facing the open side
-  { id: 'basic-treasure-chest', name: 'Basic Treasure Chest', model: 'interactive.basic-treasure-chest' },
+  // Treasure chests: containers (data/gear/containers.ts), locked, standing on a floor tile against a wall, the lock
+  // facing the open side. One shape (designs/_chest.ts), each its own colors. Worn: plain brown wood bound in iron.
+  // Solid: grey planks and a silver lock; every boss room has one.
+  { id: 'worn-treasure-chest', name: 'Worn Treasure Chest', model: 'interactive.worn-treasure-chest' },
+  { id: 'solid-treasure-chest', name: 'Solid Treasure Chest', model: 'interactive.solid-treasure-chest' },
+  // A fallen adventurer's skeleton, slumped on the floor in its rusty helmet, sword and shield beside it: a
+  // container (data/gear/containers.ts) the party searches for loot. Stands on a floor tile, like a chest.
+  { id: 'dead-adventurer', name: 'Dead Adventurer', model: 'interactive.dead-adventurer' },
 ];

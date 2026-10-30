@@ -13,6 +13,24 @@ A trigger lives on a `buff` or `debuff` effect of an ability, in its `trigger` f
 
 The unit carrying the trigger is its **bearer**.
 
+### Passive triggers: always on
+
+A class or a creature (enemy, boss or summon) can also have triggers it always has, with no ability to cast them: `passiveTriggers` on its entry (`ClassData` in [`units/classes.ts`](units/classes.ts), `CreatureClassData` in [`units/enemies.ts`](units/enemies.ts)). Each is a `PassiveTrigger`: a `name`, an optional `damageElement`, and the `trigger` itself.
+
+```ts
+passiveTriggers: [
+  { name: 'Chitin Spines', damageElement: 'physical', trigger: {
+    when: 'attacked', categories: ['melee'],
+    effects: [{ type: 'damage', appliesTo: 'target', damageElement: 'physical', minDamage: 3, maxDamage: 3 }],
+  } },
+],
+```
+
+- **Always on:** it never runs out, can't be removed, and never shows as a status marker. Its name floats over the bearer when it fires, like a buff's.
+- **Its own:** the bearer put it on itself. Its effects on `'source'` land on the bearer, and its own bonuses count, as on a self-cast trigger buff.
+- **Same rules otherwise:** chance, events, recipients, no chains and threat all work as for a trigger buff, and the same load warnings apply.
+- **Shown:** a class's passive triggers are listed with its passives on the character select screen, in words.
+
 **Triggers never stack.** A buff or debuff with a trigger counts as `maxStacks: 1`, stats included: casting it again on the same unit, by anyone, replaces the one already there. The new one starts its full `rounds` again, and its `source` is the newest caster. Setting `maxStacks` above 1 on it is warned about at load. (Without a trigger, a buff or debuff stacks without limit unless it sets `maxStacks`. At the cap, the oldest stack is replaced.)
 
 ## `Trigger` fields

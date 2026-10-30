@@ -11,11 +11,11 @@ import { partyCanUseItem } from '../data/gear/inventory';
 import { AUTO_END_TURN_DELAY_MS, COMBAT_TEXT_COLOR, STUNNED_PAUSE_MS } from '../data/constants';
 import { hasPointsToSpend, isOnMap, type PartyMemberConfig } from '../data/units/party';
 import { xpToNext, type PartyProgress } from '../data/units/xp';
-import { isAlly, isHostile, type EnemyInstance } from '../data/units/enemies';
+import { bodyOf, creatureTiles, isAlly, isHostile, type EnemyInstance } from '../data/units/enemies';
 import { isBoss } from '../data/units/bosses';
 import { areaTone } from '../data/combat/areas';
 import { aimPartyAction } from '../data/combat/targeting';
-import { findOpenTilesNear, isAdjacent, posKey, samePos, type Pos } from '../data/world/grid';
+import { covers, findOpenTilesNear, footprint, footprintKeys, isAdjacent, posKey, samePos, type Pos } from '../data/world/grid';
 import { partyWalk, findFollowerSpawns, spreadOut, trailFollowers } from '../data/world/movement';
 import { SANCTUM, SANCTUM_FLOORS, SANCTUM_RECEPTACLE, isSanctumWalkable, type NpcPlacement } from '../data/world/sanctum';
 import { npc } from '../data/world/npcs';
@@ -56,6 +56,7 @@ import ContainerWindow from '../components/ContainerWindow';
 import SanctumMap from '../components/SanctumMap';
 import DungeonMap from '../components/DungeonMap';
 import PanView, { type Insets } from '../components/PanView';
+import { boardLayout } from '../viewEngine/board';
 import type { PartyTokenData } from '../components/mapParts';
 import Backdrop from '../components/ui/Backdrop';
 import RiftButton from '../components/ui/RiftButton';
@@ -158,9 +159,10 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
   // Fog of war (dungeons only): what the living members see now, and what the party has seen before. Only
   // known tiles can be walked to, and only enemies in sight are on the map (drawn, targetable).
   // Summoned allies see for the party too (and are always shown)
-  const viewers = [...memberTokens.filter(t => t.hp > 0).map(t => t.pos), ...zoneSummons.map(e => e.pos)];
+  const viewers = [...memberTokens.filter(t => t.hp > 0).map(t => t.pos), ...zoneSummons.flatMap(e => footprint(bodyOf(e)))];
   const { fog, resetFog } = useFogOfWar({ location, dungeon, currentZone, viewers });
-  const seenEnemies = fog ? zoneEnemies.filter(e => isAlly(e) || fog.visible.has(posKey(e.pos))) : zoneEnemies;
+  // A creature is in sight when any tile of it is (a large one's corner round a wall shows it)
+  const seenEnemies = fog ? zoneEnemies.filter(e => isAlly(e) || footprintKeys(bodyOf(e)).some(k => fog.visible.has(k))) : zoneEnemies;
 
   // The active mover: in combat the acting member, on its AP (moveBudget: tiles already paid for, plus `movement`
   // per AP left); out of combat the leader. Where it can move, and aim a 'tile' ability: useReach
@@ -207,7 +209,7 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
     const m = partyRef.current[i];
     const weapon = m ? heldWeapon(m.gear) : null;
     return memberUnit(i, m?.characterName, partyStatsRef.current[i], pos,
-      { hp: partyHpRef.current[i] ?? 0, buffs: membersRef.current[i]?.buffs ?? [], weapon });
+      { hp: partyHpRef.current[i] ?? 0, buffs: membersRef.current[i]?.buffs ?? [], weapon, passiveTriggers: m && CLASSES[m.selectedClass].passiveTriggers });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   /** What executeAction needs of the fight: the map's floor, and a living unit by unitKey. */
   const actionWorld = useCallback((): ActionWorld => ({
@@ -557,7 +559,7 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
     } else {
       // Followers trail the leader along the way it walked, in an unbroken line behind it (trailFollowers),
       // over walkable floor, never onto an enemy or a map object
-      const enemyTiles = new Set(zoneEnemies.filter(e => e.currentHp > 0).map(e => posKey(e.pos)));
+      const enemyTiles = creatureTiles(zoneEnemies.filter(e => e.currentHp > 0));
       const walkable = zone && dungeon ? zoneWalkable(dungeon, zone) : isSanctumWalkable;
       const isEnemy = (p: Pos) => enemyTiles.has(posKey(p));
       const walk = partyWalk(playerPos, newPos, steps, walkable, isEnemy);
@@ -604,7 +606,7 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
       partySide: () => [...party.flatMap((_, i) => (partyHp[i] ?? 0) > 0 ? [partyUnit(i)] : []), ...zoneSummons.map(creatureUnit)],
       allyAt: (p) => {
         const i = partyPositions.findIndex(q => samePos(q, p));
-        const summon = zoneSummons.find(e => samePos(e.pos, p));
+        const summon = zoneSummons.find(e => covers(bodyOf(e), p));
         return i >= 0 ? partyUnit(i) : summon ? creatureUnit(summon) : null;
       },
       hostiles: zoneEnemies.filter(e => e.currentHp > 0 && isHostile(e)).map(creatureUnit),
@@ -675,6 +677,9 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
   // change of map (useFadeOut, above)
   const mapKey = `${location}:${zone?.id ?? ''}`;
   const { loading: mapLoading, onReady: onMapReady } = useSceneReady(mapKey);
+  // Entering a dungeon zone (by a rift or a door), the view centers on the party (the leader, at about its middle)
+  const zoneBoard = useMemo(() => (zone ? boardLayout(zone.width, zone.height) : null), [zone?.width, zone?.height]); // eslint-disable-line react-hooks/exhaustive-deps -- zone tracked by its size
+  const viewFocus = location === 'dungeon' && zoneBoard ? zoneBoard.toScreen(playerPos.x + 0.5, playerPos.y + 0.5, 0.5) : undefined;
 
   // ─── Render ──────────────────────────────────────────────────────────────
 
@@ -694,7 +699,7 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
 
       {/* The map, full screen: drag with the right mouse button to pan (kept within the area the HUD leaves free) */}
       <div className="absolute inset-0">
-        <PanView resetKey={mapKey} insets={HUD_INSETS}>
+        <PanView resetKey={mapKey} insets={HUD_INSETS} focus={viewFocus}>
           {location === 'sanctum' && (
             <SanctumMap
               playerPos={playerPos}

@@ -1,12 +1,12 @@
-import type { Ability, Effect, Trigger, TriggerOutcome } from './abilities';
+import type { Ability, Effect, PassiveTrigger, Trigger, TriggerOutcome } from './abilities';
 import { MIN_THREAT_MULTIPLIER, stackCap, stackKey, tickStack, type ActiveBuff, type ActiveDot, type ActiveHot, type BuffableStat, type Stats } from '../units/stats';
 import type { AttackCategory, DamageElement, WeaponItem } from '../gear';
 import { WEAPON_TYPE_DATA } from '../gear/weapons';
 import { COMBAT_TEXT_COLOR, DAMAGE_ELEMENT_COLOR } from '../constants';
 import { applyDR, CRIT_MULTIPLIER, getOffense, rollCrit, rollDamage, rollHit, type HitOutcome, type Offense } from './attackResolution';
-import { randInt } from '../random';
-import { chebyshev, hasLineOfSight, type Pos } from '../world/grid';
-import { basicAttack, isAlly, type EnemyInstance } from '../units/enemies';
+import { randInt, rollScaled } from '../random';
+import { bodyCenter, bodyDistance, bodySight, type Pos } from '../world/grid';
+import { basicAttack, bodySize, isAlly, type EnemyInstance } from '../units/enemies';
 import type { SummonRequest } from '../units/summons';
 
 // ─── Shared resolution for every ability used by a party member OR an enemy ──────
@@ -23,6 +23,8 @@ export interface CombatUnit {
   name: string;
   stats: Stats;
   pos: Pos;
+  /** Its body's side in tiles (a large creature's 2; default 1): `pos` is then its top-left tile (world/grid.ts). */
+  size?: number;
   /** A creature summoned by the party (ref side 'enemy', fighting on the party's side): it builds threat. */
   allied?: boolean;
   /** Its HP now (none: taken as alive): a unit this action has brought down sets off no triggers. */
@@ -41,15 +43,16 @@ export const threatKey = (u: Pick<CombatUnit, 'ref' | 'allied'>): string | undef
   u.ref.side === 'party' || u.allied ? unitKey(u.ref) : undefined;
 
 /**
- * Party member `idx` as a combat unit (`name` blank falls back to 'Party[idx]'). `live`: its HP, buffs and held
- * weapon now, for triggers (none: it sets off none of its own).
+ * Party member `idx` as a combat unit (`name` blank falls back to 'Party[idx]'). `live`: its HP, buffs, held
+ * weapon and its class's passive triggers now, for triggers (none: it sets off none of its own).
  */
 export const memberUnit = (idx: number, name: string | undefined, stats: Stats, pos: Pos,
-  live?: { hp: number; buffs: ActiveBuff[]; weapon: WeaponItem | null }): CombatUnit => {
+  live?: { hp: number; buffs: ActiveBuff[]; weapon: WeaponItem | null; passiveTriggers?: readonly PassiveTrigger[] }): CombatUnit => {
   const weaponAttack = live?.weapon ? toAction('weapon-attack', live.weapon) : null;
+  const ref: UnitRef = { side: 'party', idx };
   return {
-    ref: { side: 'party', idx }, name: name || `Party[${idx}]`, stats, pos,
-    ...(live ? { hp: live.hp, buffs: live.buffs } : {}),
+    ref, name: name || `Party[${idx}]`, stats, pos,
+    ...(live ? { hp: live.hp, buffs: [...live.buffs, ...passiveTriggerBuffs(live.passiveTriggers, unitKey(ref))] } : {}),
     ...(weaponAttack ? { weaponAttack } : {}),
   };
 };
@@ -62,8 +65,10 @@ export const creatureUnit = (e: EnemyInstance): CombatUnit => {
     name: `${e.classData.name} (lv${e.level})`,
     stats: e.stats,
     pos: e.pos,
+    ...(e.classData.large ? { size: bodySize(e.classData) } : {}),
     hp: e.currentHp,
-    buffs: e.buffs,
+    // Its buffs, and its kind's passive triggers (always on)
+    buffs: [...e.buffs, ...passiveTriggerBuffs(e.classData.passiveTriggers, e.id)],
     ...(weaponAttack ? { weaponAttack } : {}),
     ...(isAlly(e) ? { allied: true } : {}),
   };
@@ -147,6 +152,18 @@ export function effectToBuffs(eff: BuffEffect, idPrefix: string, source: string,
     }] : []),
   ] as ActiveBuff[]).map(b => ({ ...b, stack }));
 }
+
+/**
+ * A unit's passive triggers (PassiveTrigger: its class's or creature's, always on) as trigger entries like a
+ * trigger buff's, for its combat unit only (never stored on it, so they never run out or show as markers). Each is
+ * its own bearer's (`ownerKey`): its effects on 'source' land on itself, and its own bonuses count.
+ */
+export const passiveTriggerBuffs = (passives: readonly PassiveTrigger[] | undefined, ownerKey: string): ActiveBuff[] =>
+  (passives ?? []).map(p => ({
+    id: `passive-${p.name}-trigger`, source: p.name, damageElement: p.damageElement,
+    stat: 'movement', amount: 0, roundsRemaining: Infinity,
+    trigger: { def: p.trigger, sourceKey: ownerKey, debuff: false },
+  }));
 
 /** A root (Effect 'root') as an ActiveBuff: no stat change, it just holds the unit in place (isRooted). */
 export const rootToBuff = (eff: Extract<Effect, { type: 'root' }>, idPrefix: string, source: string): ActiveBuff => ({
@@ -313,7 +330,7 @@ export function executeAction(caster: CombatUnit, action: Ability, targets: Comb
     return t.change;
   };
   threatOf(caster);
-  const float = (u: CombatUnit, text: string, color: string) => floats.push({ pos: u.pos, text, color });
+  const float = (u: CombatUnit, text: string, color: string) => floats.push({ pos: bodyCenter(u), text, color });
   // Every roll, to the browser console, in dev builds only (for balancing; players never see it)
   const log = (by: CombatUnit, target: CombatUnit, msg: string) => { if (COMBAT_LOG) console.log(`[Combat] ${by.name} → ${target.name}: ${msg}`); };
   /** Still standing, after what this action has done to it so far. */
@@ -342,7 +359,7 @@ export function executeAction(caster: CombatUnit, action: Ability, targets: Comb
     const off = o.flat && o.scaleAs && 'damageElement' in eff && eff.damageElement ? getOffense(actor.stats, o.scaleAs, eff.damageElement) : undefined;
     switch (eff.type) {
       case 'damage': {
-        const rolled = randInt(eff.minDamage, eff.maxDamage) + (off?.damage ?? 0);
+        const rolled = rollScaled(eff.minDamage, eff.maxDamage, off?.damage ?? 0);
         const amount = o.flat ? applyDR(rolled, eff.damageElement, recipient.stats, off?.penetration, off?.elementPenetration) : rolled;
         if (eff.damagesMP) {
           c.mpSpent += amount;
@@ -359,7 +376,7 @@ export function executeAction(caster: CombatUnit, action: Ability, targets: Comb
         // Heals crit like magic damage of their element: magic crit% + that element's crit% (HoTs and flat
         // heals never crit). The recipient's healingReceived is added once, after the crit and multiplier.
         const crit = !o.flat && rollCrit(getOffense(actor.stats, 'magic', eff.damageElement));
-        const base = randInt(eff.minHeal, eff.maxHeal) + (bonuses ? actor.stats.healing : 0);
+        const base = rollScaled(eff.minHeal, eff.maxHeal, bonuses ? actor.stats.healing : 0);
         const amount = Math.max(0, base) * (crit ? CRIT_MULTIPLIER : 1) * (o.healMultiplier ?? 1) + recipient.stats.healingReceived;
         if (eff.restoresMP) c.mpRestored += amount;
         else c.heal += amount;
@@ -454,8 +471,8 @@ export function executeAction(caster: CombatUnit, action: Ability, targets: Comb
   /** A trigger's weaponAttack: the bearer's basic attack on `target`, if it is in range and sight. */
   const triggeredAttack = (bearer: CombatUnit, target: CombatUnit) => {
     const attack = bearer.weaponAttack;
-    if (!attack || !alive(target) || chebyshev(bearer.pos, target.pos) > attack.range) return;
-    if (world.floors && !hasLineOfSight(bearer.pos, target.pos, world.floors)) return;
+    if (!attack || !alive(target) || bodyDistance(bearer, target) > attack.range) return;
+    if (world.floors && !bodySight(bearer, target, world.floors)) return;
     resolveAttack(bearer, attack, target, true);
   };
 
@@ -501,7 +518,7 @@ export function executeAction(caster: CombatUnit, action: Ability, targets: Comb
       const dmg = rollDamage(off, eff.damageElement, eff.minDamage, eff.maxDamage, target.stats, hit);
       if (eff.damagesMP) dealtMp += dmg.final;
       else dealt += dmg.final;
-      log(attacker, target, `${hit.crit ? 'CRIT' : 'HIT'}${hit.glancing ? ' (glancing)' : ''} ${dmg.final}${eff.damagesMP ? ' MP' : ''} (${eff.damageElement}) | roll=${dmg.roll} +dmg=${off.damage} raw=${dmg.raw} -DR=${dmg.raw - dmg.final}`);
+      log(attacker, target, `${hit.crit ? 'CRIT' : 'HIT'}${hit.glancing ? ' (glancing)' : ''} ${dmg.final}${eff.damagesMP ? ' MP' : ''} (${eff.damageElement}) | roll=${dmg.roll} (+dmg=${off.damage}) raw=${dmg.raw} -DR=${dmg.raw - dmg.final}`);
       float(target, `-${dmg.final}${eff.damagesMP ? ' MP' : ''}${suffix}`, eff.damagesMP ? COMBAT_TEXT_COLOR.mpDamage : DAMAGE_ELEMENT_COLOR[eff.damageElement]);
     }
     const damaged = dealt > 0 || dealtMp > 0;

@@ -1,6 +1,6 @@
 // The dungeons' bosses: enemy classes (like data/units/enemies.ts's) each dungeon's boss room is built around
 // (DungeonConfig.bossZone.bossGroup). A boss drops a rift key when it dies (isBoss).
-import { warnIgnoredEffects } from '../combat/abilities';
+import { warnIgnoredEffects, warnIgnoredTriggers } from '../combat/abilities';
 import type { EnemyClassData, EnemyInstance } from './enemies';
 
 //attributes prop for all bosses should total +20
@@ -9,7 +9,7 @@ export const BOSS_CLASSES: EnemyClassData[] = [
   {
     id: 'necromancer',
     name: 'Necromancer',
-    attributes: { toughness: 6, mind: 8, spirit: 6 },
+    attributes: { toughness: 4, mind: 8, spirit: 8 },
     highAttributes: ['mind', 'toughness'],
     lowAttributes: ['finesse', 'speed'],
     baseHp: 25,
@@ -25,7 +25,7 @@ export const BOSS_CLASSES: EnemyClassData[] = [
         target: 'enemy',
         attackCategory: 'melee',
         effects: [
-          { type: 'damage', appliesTo: 'target', damageElement: 'physical', minDamage: 8, maxDamage: 8 }
+          { type: 'damage', appliesTo: 'target', damageElement: 'physical', minDamage: 6, maxDamage: 8 }
         ]
       },
       {
@@ -36,7 +36,7 @@ export const BOSS_CLASSES: EnemyClassData[] = [
         target: 'enemy',
         attackCategory: 'magic',
         effects: [
-          { type: 'dot', appliesTo: 'target', damageElement: 'shadow', damagePerRound: 8, rounds: 2 }
+          { type: 'dot', appliesTo: 'target', damageElement: 'shadow', damagePerRound: 6, rounds: 2 }
         ]
       },
       {
@@ -46,7 +46,7 @@ export const BOSS_CLASSES: EnemyClassData[] = [
         range: 1,
         target: 'tile',
         effects: [
-          { type: 'summon', appliesTo: 'caster', creature: 'skeleton', rounds: 3 }
+          { type: 'summon', appliesTo: 'caster', creature: 'skeleton', rounds: 3, max: 2 }
         ]
       }
     ],
@@ -132,11 +132,11 @@ export const BOSS_CLASSES: EnemyClassData[] = [
       {
         name: 'Summon Spore',
         mpCost: 10,
-        apCost: 1,
+        apCost: 2,
         range: 1,
         target: 'tile',        
         effects: [
-          { type: 'summon', appliesTo: 'caster', creature: 'fungal-spore', rounds: 3, max: 3 }
+          { type: 'summon', appliesTo: 'caster', creature: 'fungal-spore', rounds: 3, max: 2 }
         ]
       },
       {
@@ -220,7 +220,7 @@ export const BOSS_CLASSES: EnemyClassData[] = [
         useWeapon: true,
         attackCategory: 'ranged',
         effects: [
-          { type: 'damage', appliesTo: 'target', damageElement: 'physical', minDamage: 4, maxDamage: 8 },
+          { type: 'damage', appliesTo: 'target', damageElement: 'physical', minDamage: 5, maxDamage: 7 },
         ]
       },
       {
@@ -242,11 +242,81 @@ export const BOSS_CLASSES: EnemyClassData[] = [
     goldBonus: 100,
     xpMultiplier: 6,
     model: 'creature.troll-tamer'
+  },
+  {
+    id: 'pale-broodmother',
+    name: 'Pale Broodmother',
+    attributes: { toughness: 4, finesse: 4, speed: 6, mind: 6 },
+    highAttributes: ['speed', 'mind'],
+    lowAttributes: ['strength', 'spirit'],
+    baseHp: 40,
+    baseArmor: 30,
+    armorPerLevel: 5,
+    resistances: { poison: 30 },
+    passives: {
+      movement: { name: 'Skitterer', flat: 1 }
+    },
+    passiveTriggers: [
+      { name: 'Potent Venom', damageElement: 'poison', trigger: {
+        when: 'attacking', on: 'hit', categories: ['melee'], chance: 50,
+        effects: [
+          {type: 'dot', appliesTo: 'target', damageElement: 'poison', damagePerRound: 6, rounds: 3, maxStacks: 3 }]
+      }}
+    ],
+    abilities: [
+      {
+        name: 'Spawn Pale Creeper',
+        mpCost: 5,
+        apCost: 1,
+        range: 1,
+        target: 'tile',
+        effects: [
+          { type: 'summon', appliesTo: 'caster', creature: 'pale-creeper', rounds: 3, max: 3 }
+        ]
+      },
+      {
+        name: 'Pale Fangs',
+        mpCost: 0,
+        apCost: 2,
+        range: 1,
+        target: 'enemy',
+        displayElement: 'physical',
+        attackCategory: 'melee',
+        effects: [
+          { type: 'damage', appliesTo: 'target', damageElement: 'physical', minDamage: 4, maxDamage: 5 },
+          { type: 'damage', appliesTo: 'target', damageElement: 'poison', minDamage: 1, maxDamage: 2 },
+        ]
+      },
+      {
+        name: 'Brood Screech',
+        mpCost: 8,
+        apCost: 1,
+        range: 4,
+        target: 'ally',
+        area: 'blast2',
+        displayElement: 'physical',
+        effects: [
+          { type: 'buff', appliesTo: 'target', rounds: 5, trigger: {
+            when: 'attacked', on: 'hit', effects: [
+              { type: 'buff', appliesTo: 'source', stats: { meleeDamage: 3 }, rounds: 5 }
+            ]
+          }}
+        ]
+      }
+    ],
+    xpMultiplier: 6,
+    dropChance: 3,
+    dropsGold: 1,
+    goldBonus: 100,
+    model: ''
   }
 ];
 
 /** True for a dungeon's boss (BOSS_CLASSES): it drops a rift key. */
 export const isBoss = (e: EnemyInstance) => BOSS_CLASSES.some((c) => c.id === e.classData.id);
 
-// Effects an ability would silently ignore: warned at load
-for (const c of BOSS_CLASSES) warnIgnoredEffects(`bosses › ${c.id}`, c.abilities);
+// Effects an ability (or a passive trigger) would silently ignore: warned at load
+for (const c of BOSS_CLASSES) {
+  warnIgnoredEffects(`bosses › ${c.id}`, c.abilities);
+  warnIgnoredTriggers(`bosses › ${c.id}`, c.passiveTriggers);
+}

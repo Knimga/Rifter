@@ -9,7 +9,7 @@ import GoldCell from './GoldCell';
 import { PanelTitle } from './ui/Panel';
 
 export default function ContainerWindow({ name, items, gold, usable, onLoot, onLootGold, onClose }: {
-  /** The container's name, e.g. 'Basic Treasure Chest'. */
+  /** The container's name, e.g. 'Worn Treasure Chest'. */
   name: string;
   items: Item[];
   /** Its gold (0: none, and no gold slot). */
