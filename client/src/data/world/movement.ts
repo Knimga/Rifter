@@ -4,7 +4,7 @@ import { findOpenTilesNear, isAdjacent, pathTo, reachableTiles, samePos, type Po
 
 /**
  * Where a party member may move this turn: tile key -> steps it costs. Unwalkable tiles (walls, and
- * tiles a game object stands on, like the rift: see isWalkable) and enemies block the way; the mover
+ * tiles a map object stands on, like the rift: see isWalkable) and enemies block the way; the mover
  * may pass other party members but can't stop on anyone.
  */
 export function partyMoveTargets(

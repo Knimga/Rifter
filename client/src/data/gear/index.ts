@@ -4,14 +4,16 @@ export * from './types';
 export type { DamageElement } from '../units/stats';
 export { DAMAGE_ELEMENTS } from '../units/stats';
 import type { DamageElement, ActiveBuff } from '../units/stats';
-import type { ArmorSlot, WeaponType, GearSlots, Item, ArmorItem, ShieldItem, OffhandItem, OffhandKind, WeaponItem, Affix, ImplicitDef, Rarity } from './types';
-import { ARMOR_SLOTS, GEAR_SLOTS, MAGIC_ELEMENTS } from './types';
+import type { ArmorSlot, WeaponType, GearSlots, Item, ArmorItem, ShieldItem, OffhandItem, OffhandKind, WeaponItem, JewelryItem, JewelryKind, Affix, ImplicitDef, Rarity } from './types';
+import { ARMOR_SLOTS, GEAR_SLOTS, JEWELRY_KINDS, MAGIC_ELEMENTS } from './types';
 
-import { ARMOR_TYPE_DATA, BASE_ARMOR_MULTIPLIER, ARMOR_SERIES, STARTER_ARMOR_SERIES, armorName } from './armor';
+import { ARMOR_TYPE_DATA, ARMOR_SLOT_VALUE, BASE_ARMOR_MULTIPLIER, ARMOR_SERIES, STARTER_ARMOR_SERIES, armorName } from './armor';
+import { itemValue } from './value';
 import { SHIELD_ARMOR_MULTIPLIER, SHIELDS, STARTER_SHIELDS, SHIELD_IMPLICIT, OFFHANDS } from './offhands';
+import { JEWELRY, droppableJewelry } from './jewelry';
 import { STARTER_WEAPON_SERIES, WEAPON_SERIES, WEAPON_TYPE_DATA, weaponInvalidAffixes, weaponName } from './weapons';
 import { AFFIX_SLOTS_PER_GROUP, rollAffixes, starvedAffixGroups } from './affixes';
-import { chance, pick } from '../random';
+import { chance, pick, rollCount } from '../random';
 
 export const EMPTY_GEAR: GearSlots = {
   helm: null,
@@ -20,6 +22,9 @@ export const EMPTY_GEAR: GearSlots = {
   boots: null,
   mainhand: null,
   offhand: null,
+  amulet: null,
+  ring1: null,
+  ring2: null,
 };
 
 // ─── Type Guards ──────────────────────────────────────────────────────────────
@@ -35,6 +40,11 @@ export function isShieldItem(item: Item): item is ShieldItem {
 /** An offhand that isn't a shield: a quiver, a focus (its offhandKind). */
 export function isOffhandItem(item: Item): item is OffhandItem {
   return item.slot === 'offhand' && 'offhandKind' in item;
+}
+
+/** A ring or an amulet. */
+export function isJewelryItem(item: Item): item is JewelryItem {
+  return (JEWELRY_KINDS as readonly string[]).includes(item.slot);
 }
 
 export function isWeaponItem(item: Item): item is WeaponItem {
@@ -96,6 +106,7 @@ for (const [kind, invalid] of [
   ...(Object.keys(WEAPON_TYPE_DATA) as WeaponType[]).map(t => [`weapon type '${t}'`, weaponInvalidAffixes(t)] as const),
   ...Object.entries(ARMOR_TYPE_DATA).map(([t, d]) => [`armor/shield type '${t}'`, d.invalidAffixes] as const),
   ...(Object.entries(OFFHANDS) as [OffhandKind, (typeof OFFHANDS)[OffhandKind]][]).flatMap(([kind, o]) => o.drops.map(t => [`${kind} '${t.id}'`, t.invalidAffixes] as const)),
+  ...JEWELRY_KINDS.flatMap(kind => JEWELRY[kind].map(t => [`${kind} '${t.id}'`, t.invalidAffixes] as const)),
 ]) {
   const starved = starvedAffixGroups(invalid);
   if (starved.length) console.warn(`${kind} excludes too many affixes: group ${starved.join(' and ')} has fewer than ${AFFIX_SLOTS_PER_GROUP} left`);
@@ -113,10 +124,12 @@ export function generateWeapon(
   const data = WEAPON_TYPE_DATA[weaponType];
   const series = pickSeriesForLevel(starter ? STARTER_WEAPON_SERIES : WEAPON_SERIES, level);
   const m = series.damageMultiplier;
+  const rolled = rollAffixes(weaponInvalidAffixes(weaponType), level, { enabled: affixes, rarityWeights, partyLevel, kind: data.twoHanded ? 'twoHand' : 'oneHand' });
   return {
     name: weaponName(series, weaponType),
     slot: 'mainhand',
-    ...rollAffixes(weaponInvalidAffixes(weaponType), level, { enabled: affixes, rarityWeights, partyLevel, kind: data.twoHanded ? 'twoHand' : 'oneHand' }),
+    ...rolled,
+    value: itemValue('weapon', series.valueMultiplier * data.value, rolled.rarity, starter),
     weaponType,
     attackCategory: data.defaultAttackCategory,
     // Its type's element, else one of the type's drop elements (any magic one, should a type list none)
@@ -141,12 +154,15 @@ export function generateArmor(
   const series = pickSeriesForLevel(armorType ? pool.filter(s => s.armorType === armorType) : pool, level);
   const type = series.armorType;
   const typeData = ARMOR_TYPE_DATA[type];
+  const rolled = rollAffixes(typeData.invalidAffixes, level, { enabled: affixes, rarityWeights, partyLevel, kind: 'armor' });
   return {
     id: newItemId(),
     name: armorName(series, slot),
     slot,
-    ...rollAffixes(typeData.invalidAffixes, level, { enabled: affixes, rarityWeights, partyLevel, kind: 'armor' }),
+    ...rolled,
+    value: itemValue('armor', series.valueMultiplier * ARMOR_SLOT_VALUE[slot], rolled.rarity, starter),
     armorType: type,
+    level,
     armorValue: Math.round(typeData.baseArmor * level * BASE_ARMOR_MULTIPLIER[slot] * series.armorMultiplier),
     model: series.models[slot],
     implicit: resolveImplicit({ stat: typeData.implicit.stat, ...typeData.implicit.slots[slot] }, level),
@@ -161,12 +177,15 @@ export function generateShield(
   const pool = starter ? STARTER_SHIELDS : SHIELDS;
   const template = pickSeriesForLevel(armorType ? pool.filter(s => s.armorType === armorType) : pool, level);
   const typeData = ARMOR_TYPE_DATA[template.armorType];
+  const rolled = rollAffixes(typeData.invalidAffixes, level, { enabled: affixes, rarityWeights, partyLevel, kind: 'oneHand' }); // an offhand
   return {
     id: newItemId(),
     name: template.name,
     slot: 'offhand',
-    ...rollAffixes(typeData.invalidAffixes, level, { enabled: affixes, rarityWeights, partyLevel, kind: 'oneHand' }), // an offhand
+    ...rolled,
+    value: itemValue('shield', template.valueMultiplier, rolled.rarity, starter),
     armorType: template.armorType,
+    level,
     armorValue: Math.round(typeData.baseArmor * level * SHIELD_ARMOR_MULTIPLIER * template.armorMultiplier),
     model: template.model,
     implicit: resolveImplicit(SHIELD_IMPLICIT, level),
@@ -180,12 +199,35 @@ export function generateOffhand(
   { affixes = true, starter = false, rarityWeights, partyLevel }: GenerateOptions = {},
 ): OffhandItem {
   const template = pickSeriesForLevel(starter ? OFFHANDS[offhandKind].starter : OFFHANDS[offhandKind].drops, level);
+  const rolled = rollAffixes(template.invalidAffixes, level, { enabled: affixes, rarityWeights, partyLevel, kind: 'oneHand' }); // an offhand
   return {
     id: newItemId(),
     name: template.name,
     slot: 'offhand',
     offhandKind,
-    ...rollAffixes(template.invalidAffixes, level, { enabled: affixes, rarityWeights, partyLevel, kind: 'oneHand' }), // an offhand
+    ...rolled,
+    value: itemValue(offhandKind, template.valueMultiplier, rolled.rarity, starter),
+    level,
+    model: template.model,
+    implicit: resolveImplicit(template.implicit, level),
+  };
+}
+
+/** A ring or an amulet of `kind`, of a type that can drop (jewelry.ts: one with a model). */
+export function generateJewelry(
+  kind: JewelryKind,
+  level: number,
+  { affixes = true, rarityWeights, partyLevel }: GenerateOptions = {},
+): JewelryItem {
+  const template = pickSeriesForLevel(droppableJewelry(kind), level);
+  const rolled = rollAffixes(template.invalidAffixes, level, { enabled: affixes, rarityWeights, partyLevel, kind: 'armor' });
+  return {
+    id: newItemId(),
+    name: template.name,
+    slot: kind,
+    ...rolled,
+    value: itemValue(kind, template.valueMultiplier, rolled.rarity, false),
+    level,
     model: template.model,
     implicit: resolveImplicit(template.implicit, level),
   };
@@ -197,13 +239,16 @@ type LootEntry =
   | { kind: 'weapon'; weaponType: WeaponType }
   | { kind: 'armor';  slot: ArmorSlot }
   | { kind: 'shield' }
-  | { kind: 'offhand'; offhandKind: OffhandKind };
+  | { kind: 'offhand'; offhandKind: OffhandKind }
+  | { kind: 'jewelry'; jewelryKind: JewelryKind };
 
 const LOOT_POOL: LootEntry[] = [
   ...(Object.keys(WEAPON_TYPE_DATA) as WeaponType[]).map(weaponType => ({ kind: 'weapon' as const, weaponType })),
   ...ARMOR_SLOTS.map(slot => ({ kind: 'armor' as const, slot })),
   { kind: 'shield' },
   ...(Object.keys(OFFHANDS) as OffhandKind[]).map(offhandKind => ({ kind: 'offhand' as const, offhandKind })),
+  // Rings and amulets, once a type of the kind has a model (jewelry.ts)
+  ...JEWELRY_KINDS.filter(k => droppableJewelry(k).length > 0).map(jewelryKind => ({ kind: 'jewelry' as const, jewelryKind })),
 ];
 
 /**
@@ -215,17 +260,15 @@ export const USABLE_LOOT_WEIGHT = 4;
 /**
  * A creature's loot drops, by `dropChance`: its whole part is that many guaranteed drops, its fraction the chance
  * of one more (0.3: a 30% chance of one; 1.2: one, and a 20% chance of a second; 2.1: two, and a 10% chance of a
- * third). Each is any weapon, armor piece or offhand (shield, quiver, focus). Items the party can use (`usable`,
+ * third). Each is any weapon, armor piece, offhand (shield, quiver, focus) or piece of jewelry (ring, amulet). Items the party can use (`usable`,
  * e.g. someone is proficient) come up USABLE_LOOT_WEIGHT times as often as ones it can't.
  */
 export function generateLootDrops(dungeonLevel: number, partyLevel: number, dropChance: number, usable?: (item: Item) => boolean): Item[] {
-  const whole = Math.floor(dropChance);
-  const count = whole + (chance(dropChance - whole) ? 1 : 0);
-  return Array.from({ length: count }, () => generateLootItem(dungeonLevel, { usable, partyLevel }));
+  return Array.from({ length: rollCount(dropChance) }, () => generateLootItem(dungeonLevel, { usable, partyLevel }));
 }
 
 /**
- * One piece of loot of item `level`: any weapon, armor piece or offhand (shield, quiver, focus). Items the party can use (`usable`)
+ * One piece of loot of item `level`: any weapon, armor piece, offhand (shield, quiver, focus) or jewelry. Items the party can use (`usable`)
  * come up USABLE_LOOT_WEIGHT times as often; `rarityWeights` replaces the level's rarity odds (a chest's).
  */
 export function generateLootItem(level: number, { usable, rarityWeights, partyLevel }: { usable?: (item: Item) => boolean; rarityWeights?: Record<Rarity, number>; partyLevel?: number } = {}): Item {
@@ -236,6 +279,7 @@ export function generateLootItem(level: number, { usable, rarityWeights, partyLe
       case 'armor':  return generateArmor(level, entry.slot, undefined, { rarityWeights, partyLevel });
       case 'shield': return generateShield(level, undefined, { rarityWeights, partyLevel });
       case 'offhand': return generateOffhand(entry.offhandKind, level, { rarityWeights, partyLevel });
+      case 'jewelry': return generateJewelry(entry.jewelryKind, level, { rarityWeights, partyLevel });
     }
   };
   for (;;) {

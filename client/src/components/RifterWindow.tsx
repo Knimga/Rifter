@@ -11,7 +11,7 @@ import { useState, type CSSProperties } from 'react';
 import { DUNGEONS, type DungeonKey } from '../data/world/dungeons';
 import { riftGlowCss } from '../data/world/rifts';
 import { KeyIcon } from './Keyring';
-import ModalWindow from './ui/ModalWindow';
+import ModalWindow, { WindowCloseButton } from './ui/ModalWindow';
 
 /** The window's design size (px). */
 const WIDTH = 440, HEIGHT = 690;
@@ -88,9 +88,7 @@ export default function RifterWindow({ keys, inserted, open: riftOpen, onOpenRif
             <h2 id="rifter-title" className="m-0 font-display font-normal text-[26px] tracking-[0.06em] leading-[1.1] text-rift-bright">The Rifter</h2>
             <p className="mt-1.5 mb-0 text-xs tracking-[0.14em] uppercase text-rift-muted">Arcane rift device</p>
           </div>
-          <button type="button" className="rf-btn flex-none w-11 h-11 p-0 text-rift-soft" aria-label="Close" onClick={onClose}>
-            <svg aria-hidden="true" width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><path d="M2 2l10 10M12 2L2 12" /></svg>
-          </button>
+          <WindowCloseButton onClose={onClose} />
         </header>
 
         {/* The device */}

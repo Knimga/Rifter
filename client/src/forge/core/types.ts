@@ -1,7 +1,7 @@
 import type { Vec3 } from './vec';
 import type { BuildCtx } from './ctx';
 
-export type Category = 'creature' | 'summon' | 'character' | 'weapon' | 'armor' | 'offhand' | 'object' | 'rift';
+export type Category = 'creature' | 'summon' | 'character' | 'weapon' | 'armor' | 'offhand' | 'jewelry' | 'interactive' | 'decor' | 'loot' | 'rift' | 'npc';
 
 /**
  * A part that keeps moving while the model is on screen (view state, like facing): it spins about `axis`
@@ -82,14 +82,18 @@ export type FitSpec =
  *  - weapons: `${seriesId}/${weaponType}` ('plain/1h Swords')
  *  - armor: `${seriesId}/${slot}` ('apprentice/helm')
  *  - offhands: the offhand's id ('buckler')
+ *  - jewelry: the ring's or amulet's id (data/gear/jewelry.ts); category `jewelry` ("Rings & Amulets"), items
  *  - classes: the class key ('knight'); the player character's body (it holds its gear, see equip.ts)
- *  - gameObjects: the object's id ('heavy-door'): interactable things on the map (data/world/gameObjects.ts)
+ *  - interactiveObjects: the object's id ('heavy-door'): interactable things on the map (data/world/interactiveObjects.ts); category `interactive` ("Interactive Objects")
+ *  - decorObjects: the object's id: static things that fill a tile, never used (data/world/decorObjects.ts); category `decor` ("Decorative Objects")
+ *  - loot: the loot's id ('gold'): things on the floor the party picks up that aren't items (data/gear/loot.ts); category `loot` ("Loot")
  *  - rifts: 'rift' or 'keystone' (data/world/rifts.ts): category `rift` ("Rifts & Keys"), tinted models (core/tint.ts)
+ *  - npcs: the NPC's id ('denisel', data/world/npcs.ts): category `npc` ("NPCs"), people standing on the map
  * Lint checks that the entry exists, that the design's label is exactly the entry's display name, and
  * that the file name is that name slugged (see src/forge/dataRefs.ts).
  */
 export interface DataRef {
-  table: 'enemies' | 'summons' | 'weapons' | 'armor' | 'offhands' | 'classes' | 'gameObjects' | 'rifts';
+  table: 'enemies' | 'summons' | 'weapons' | 'armor' | 'offhands' | 'jewelry' | 'classes' | 'interactiveObjects' | 'decorObjects' | 'loot' | 'rifts' | 'npcs';
   key: string;
 }
 

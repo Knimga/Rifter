@@ -133,7 +133,7 @@ export const CLASSES: Record<ClassKey, ClassData> = {
         target: 'enemy',
         displayElement: 'holy',
         effects: [
-          { type: 'damage', appliesTo: 'target', damageElement: 'holy', minDamage: 8, maxDamage: 12 }
+          { type: 'damage', appliesTo: 'target', damageElement: 'holy', minDamage: 10, maxDamage: 12 }
         ]
       }
     ],

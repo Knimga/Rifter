@@ -95,7 +95,7 @@ export function UprightAt({ board, x, y, height = 0, className = '', children }:
 }
 
 /**
- * Yaw (radians) for a game object at `pos` to face its open side: the first walkable side tile (south, east,
+ * Yaw (radians) for a map object at `pos` to face its open side: the first walkable side tile (south, east,
  * north, west), e.g. a door in a wall facing the floor it opens onto. 0 (south) if none is open.
  */
 export function facingOpenSide(pos: Pos, isOpen: (p: Pos) => boolean): number {
@@ -130,21 +130,25 @@ export function HoverEdgeGlow({ color }: { color: string }) {
 }
 
 /**
- * A game object's name tag while it is hovered (e.g. a rift's "To the Crypt"): a small tooltip box, upright
+ * A map object's name tag while it is hovered (e.g. a rift's "To the Crypt"): a small tooltip box, upright
  * over its tile with its bottom edge at `height` world tiles (so it sits above anything that tall), shown at once
  * (no delay).
  */
-export function ObjectTag({ board, x, y, height, text }: { board: BoardLayout; x: number; y: number; height: number; text: string }) {
+export function ObjectTag({ board, x, y, height, text, icon }: { board: BoardLayout; x: number; y: number; height: number; text: string; icon?: ReactNode }) {
   return (
     <UprightAt board={board} x={x} y={y} height={height} className="z-30">
-      <MapTag text={text} className="-translate-y-1/2" />
+      <MapTag text={text} icon={icon} className="-translate-y-1/2" />
     </UprightAt>
   );
 }
 
-/** The map's name tag (a rift's destination, a key's name, a hovered enemy's name). */
-export function MapTag({ text, className = '' }: { text: string; className?: string }) {
-  return <div role="tooltip" className={`rf-tip px-2.5 py-1.5 whitespace-nowrap font-tech text-xs text-rift-soft ${className}`}>{text}</div>;
+/** The map's name tag (a rift's destination, a key's name, a hovered enemy's name), with an icon before it if any (an NPC's service). */
+export function MapTag({ text, icon, className = '' }: { text: string; icon?: ReactNode; className?: string }) {
+  return (
+    <div role="tooltip" className={`rf-tip px-2.5 py-1.5 whitespace-nowrap font-tech text-xs text-rift-soft ${icon ? 'flex items-center gap-1.5' : ''} ${className}`}>
+      {icon}{text}
+    </div>
+  );
 }
 
 /**

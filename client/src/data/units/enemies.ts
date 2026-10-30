@@ -48,6 +48,8 @@ export interface CreatureClassData {
 
   // Hostile creatures only (EnemyClassData); a summon drops nothing and is worth no XP
   dropChance?: number;   // items dropped on death: its whole part guaranteed, its fraction the chance of one more (1.2: one, and 20% for a second)
+  dropsGold?: number;    // gold dropped on death, rolled apart from items and read the same way (rolls of 5-10 x its level, summed: data/gear/loot.ts rollGold); none if absent
+  goldBonus?: number;    // percent more gold in what it drops (50: half as much again)
   xpMultiplier?: number; // XP worth relative to a standard enemy of its level (data/units/xp.ts killXp): tougher = more, bosses ~6
 }
 
@@ -211,7 +213,7 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
   {
     id: 'skeleton',
     name: 'Skeleton',
-    attributes: {},
+    attributes: { toughness: 2, strength: 2 },
     highAttributes: ['strength', 'finesse'],
     lowAttributes: ['mind', 'spirit'],
     baseHp: 15,
@@ -232,19 +234,20 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
         effects: [{ type: 'damage', appliesTo: 'target', damageElement: 'physical', minDamage: 4, maxDamage: 6 }],
       },
     ],
-    dropChance: 0.2,
+    dropChance: 0.25,
+    dropsGold: 0.1,
     xpMultiplier: 0.8,
     model: 'creature.skeleton',
   },
   {
     id: 'zombie',
     name: 'Zombie',
-    attributes: { strength: 2, toughness: 4 },
+    attributes: { strength: 4, toughness: 4 },
     highAttributes: ['toughness', 'strength'],
     lowAttributes: ['finesse', 'mind'],
     baseHp: 25,
     baseArmor: 10,
-    armorPerLevel: 4,
+    armorPerLevel: 5,
     passives: {
       hpRegen: { name: 'Regeneration', flat: 1 }
     },
@@ -272,7 +275,8 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
         ]
       }
     ],
-    dropChance: 0.3,
+    dropChance: 0.35,
+    dropsGold: 0.1,
     xpMultiplier: 1,
     model: 'creature.zombie',
   },
@@ -300,8 +304,8 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
         displayElement: 'ice',
         attackCategory: 'magic',
         effects: [
-          { type: 'damage', appliesTo: 'target', damageElement: 'shadow', minDamage: 1, maxDamage: 1 },
-          { type: 'damage', appliesTo: 'target', damageElement: 'ice', minDamage: 1, maxDamage: 1 }
+          { type: 'damage', appliesTo: 'target', damageElement: 'shadow', minDamage: 1, maxDamage: 2 },
+          { type: 'damage', appliesTo: 'target', damageElement: 'ice', minDamage: 1, maxDamage: 2 }
         ]
       },
       {
@@ -314,12 +318,13 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
         displayElement: 'ice',
         attackCategory: 'magic',
         effects: [
-          { type: 'damage', appliesTo: 'target', damageElement: 'shadow', minDamage: 3, maxDamage: 6 },
+          { type: 'damage', appliesTo: 'target', damageElement: 'shadow', minDamage: 4, maxDamage: 7 },
           { type: 'debuff', appliesTo: 'target', damageElement: 'ice', stats: { dodge: -10 }, rounds: 2 }
         ]
       }
     ],
     dropChance: 0.4,
+    dropsGold: 0.4,
     xpMultiplier: 1.3,
     model: 'creature.specter'
   },
@@ -360,7 +365,8 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
         ]
       }
     ],
-    dropChance: 0.2,
+    dropChance: 0.3,
+    dropsGold: 0.2,
     xpMultiplier: 1.2,
     model: 'creature.lava-slime',
   },
@@ -392,16 +398,17 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
       }
     ],
     dropChance: 0.3,
+    dropsGold: 0.2,
     xpMultiplier: 1,
     model: 'creature.hellhound'
   },
   {
     id: 'flame-golem',
     name: 'Flame Golem',
-    attributes: { strength: 4, toughness: 4 },
+    attributes: { strength: 4, toughness: 6 },
     highAttributes: ['strength', 'toughness'],
     lowAttributes: ['mind', 'finesse'],
-    baseHp: 35,
+    baseHp: 40,
     baseArmor: 20,
     armorPerLevel: 4,
     resistances: { fire: 30 },
@@ -424,6 +431,8 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
       }
     ],
     dropChance: 0.5,
+    dropsGold: 0.4,
+    goldBonus: 25,
     xpMultiplier: 2,
     model: 'creature.flame-golem'
   },
@@ -438,7 +447,7 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
     armorPerLevel: 2,
     resistances: { nature: 30 },
     passives: {
-      natureHit: { name: 'Potent', flat: 10 },
+      natureHit: { name: 'Potent', flat: 15 },
       naturePenetration: { name: 'Potent', flat: 10 }
     },
     abilities: [
@@ -452,7 +461,7 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
         attackCategory: 'magic',
         selfDestruct: true,
         effects: [
-          { type: 'damage', appliesTo: 'target', damageElement: 'nature', minDamage: 12, maxDamage: 15 }
+          { type: 'damage', appliesTo: 'target', damageElement: 'nature', minDamage: 12, maxDamage: 12 }
         ]
       }
     ],
@@ -460,7 +469,7 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
     xpMultiplier: 0.2,
     model: 'creature.fungal-spore'
   },
-    {
+  {
     id: 'sporetender',
     name: 'Sporetender',
     attributes: { spirit: 4, mind: 3, finesse: 4 },
@@ -502,22 +511,23 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
         range: 4,
         target: 'enemy',
         effects: [
-          { type: 'damage', appliesTo: 'target', damageElement: 'nature', minDamage: 3, maxDamage: 3 },
+          { type: 'damage', appliesTo: 'target', damageElement: 'nature', minDamage: 3, maxDamage: 5 },
           { type: 'dot', appliesTo: 'target', damageElement: 'poison', damagePerRound: 3, rounds: 3 }
         ]
       }
     ],
-    dropChance: 0.2,
+    dropChance: 0.4,
+    dropsGold: 0.3,
     xpMultiplier: 2,
     model: 'creature.sporetender'
   },
   {
     id: 'mirehulk',
     name: 'Mirehulk',
-    attributes: { toughness: 4, strength: 4 },
+    attributes: { toughness: 6, strength: 4 },
     highAttributes: ['toughness','strength'],
     lowAttributes: ['speed', 'finesse'],
-    baseHp: 35,
+    baseHp: 40,
     baseArmor: 20,
     armorPerLevel: 4,
     resistances: { nature: 30 },
@@ -553,7 +563,9 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
         ]
       }
     ],
-    dropChance: 0.3,
+    dropChance: 0.4,
+    dropsGold: 0.3,
+    goldBonus: 25,
     xpMultiplier: 2,
     model: 'creature.mirehulk'
   },
@@ -604,10 +616,10 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
   {
     id: 'gloomtoad',
     name: 'Gloomtoad',
-    attributes: { toughness: 4, spirit: 4 },
+    attributes: { toughness: 4, spirit: 2, mind: 2 },
     highAttributes: ['mind', 'spirit'],
     lowAttributes: ['finesse', 'speed'],
-    baseHp: 30,
+    baseHp: 35,
     baseArmor: 10,
     armorPerLevel: 5,
     resistances: { nature: 30, poison: 30 },
@@ -624,7 +636,7 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
         attackCategory: 'melee',
         displayElement: 'poison',
         effects: [
-          { type: 'damage', appliesTo: 'target', damageElement: 'poison', minDamage: 6, maxDamage: 9 },
+          { type: 'damage', appliesTo: 'target', damageElement: 'poison', minDamage: 6, maxDamage: 10 },
         ]
       },
       {
@@ -637,12 +649,13 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
         attackCategory: 'magic',
         displayElement: 'poison',
         effects: [
-          { type: 'damage', appliesTo: 'target', damageElement: 'poison', minDamage: 5, maxDamage: 7 },
+          { type: 'damage', appliesTo: 'target', damageElement: 'poison', minDamage: 5, maxDamage: 9 },
           { type: 'dot', appliesTo: 'target', damageElement: 'poison', damagePerRound: 5, rounds: 3 }
         ]
       }
     ],
-    dropChance: 0.1,
+    dropChance: 0.2,
+    dropsGold: 0.1,
     xpMultiplier: 1.5,
     model: 'creature.gloomtoad'
   },
@@ -697,6 +710,7 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
       }
     ],
     dropChance: 0.4,
+    dropsGold: 0.3,
     xpMultiplier: 0.8,
     model: 'creature.goblin-warrior'
   },
@@ -743,6 +757,7 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
       }
     ],
     dropChance: 0.4,
+    dropsGold: 0.3,
     xpMultiplier: 0.8,
     model: 'creature.goblin-archer'
   },
@@ -805,6 +820,7 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
       }
     ],
     dropChance: 0.4,
+    dropsGold: 0.4,
     xpMultiplier: 1,
     model: 'creature.goblin-shaman'
   },
@@ -856,6 +872,7 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
       }
     ],
     dropChance: 0.5,
+    dropsGold: 0.1,
     xpMultiplier: 2,
     model: 'creature.troll'
   }

@@ -1,6 +1,7 @@
 import { CLASSES, type ClassKey } from './classes';
-import { EMPTY_GEAR, generateArmor, generateOffhand, generateShield, generateWeapon, getGearArmorBonus, getGearBuffs, type GearSlots } from '../gear';
-import { ATTRIBUTE_KEYS, ATTRIBUTE_POINTS_PER_LEVEL, SKILL_KEYS, SKILL_POINTS_PER_LEVEL, recomputeStats, type ActiveBuff, type ActiveDot, type ActiveHot, type AttributeKey, type PlayerStatInput, type SkillKey, type Stats } from './stats';
+import { EMPTY_GEAR, generateArmor, generateOffhand, generateShield, generateWeapon, getGearArmorBonus, getGearBuffs, type GearSlots, type Item } from '../gear';
+import { equipSlotFor, gearWith, isProficient } from '../gear/inventory';
+import { ATTRIBUTE_KEYS, ATTRIBUTE_POINTS_PER_LEVEL, BUFFABLE_STATS, SKILL_KEYS, SKILL_POINTS_PER_LEVEL, recomputeStats, type ActiveBuff, type BuffableStat, type ActiveDot, type ActiveHot, type AttributeKey, type PlayerStatInput, type SkillKey, type Stats } from './stats';
 
 export interface PartyMemberConfig {
   characterName: string;
@@ -44,6 +45,38 @@ export function memberStatInput(m: PartyMemberConfig, level: number): PlayerStat
 /** A member's effective stats at the party's level: class, gear and spent points, with active buffs and gear affixes applied. */
 export const memberStats = (m: PartyMemberConfig, level: number, buffs: ActiveBuff[]): Stats =>
   recomputeStats(memberStatInput(m, level), [...buffs, ...getGearBuffs(m.gear)]);
+
+/** A stat's change on the gear (EquipCompare). */
+export interface StatDelta { stat: BuffableStat; delta: number }
+
+/**
+ * Comparing an item with what a member wears (item tooltips, Ctrl): the item in its slot now, and the stats the
+ * swap adds and removes: the items' own (implicits, affixes, armor), not what they feed (an attribute's HP).
+ */
+export interface EquipCompare {
+  equipped: Item | null;
+  deltas: StatDelta[];
+}
+
+/** The gear's own stats, summed by stat: its implicits and affixes, and its armor. */
+function gearStatTotals(gear: GearSlots): Map<BuffableStat, number> {
+  const totals = new Map<BuffableStat, number>([['armor', getGearArmorBonus(gear)]]);
+  for (const b of getGearBuffs(gear)) totals.set(b.stat, (totals.get(b.stat) ?? 0) + b.amount);
+  return totals;
+}
+
+/**
+ * What comparing `item` shows for a member (gearWith: as equipping it would, the other hand's item pushed off
+ * too), or null when they aren't proficient with it. Its stat changes in BUFFABLE_STATS order, unchanged ones left out.
+ */
+export function equipCompare(m: PartyMemberConfig, item: Item): EquipCompare | null {
+  if (!isProficient(CLASSES[m.selectedClass], item)) return null;
+  const before = gearStatTotals(m.gear), after = gearStatTotals(gearWith(m.gear, item));
+  return {
+    equipped: m.gear[equipSlotFor(m.gear, item)],
+    deltas: BUFFABLE_STATS.map(stat => ({ stat, delta: (after.get(stat) ?? 0) - (before.get(stat) ?? 0) })).filter(d => d.delta !== 0),
+  };
+}
 
 /**
  * Whether a party member stands on the map: only while alive. One who fell (the leader too) is off the map

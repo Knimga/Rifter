@@ -33,6 +33,7 @@ Reach for these before writing vertex math by hand. All coordinates are pre-fit 
 | `bipyr(m, c, r, h, sides, col)` | double-pointed crystal: gems, motes, spores, sparks |
 | `tendril(m, start, dir, len, segs, w0, col, { bend })` | a tapering strand: vines, tatters, tentacles, flame tongues, roots |
 | `fibSphere(n, turn)` | `n` directions spread evenly over a sphere: spikes, needles, motes, warts all around a body |
+| `scatterDir(d, tilt, rf, jit?)` | one `fibSphere` direction tipped by the set's `tilt` and jittered: a spiky ball's spikes, scattered instead of machined |
 | `onEllipsoid(c, r, dir, out)` | the point on a blob's surface in a direction: where to attach things so they sit on it |
 | `alongPath(points, t)` | a point part-way along a polyline: place things along a limb or strand |
 
@@ -49,12 +50,17 @@ Reach for these before writing vertex math by hand. All coordinates are pre-fit 
 | `FaceOpts.from`, `halo(..., from)` | a fading part's start color (an animation's `fades` step) |
 
 **Family helpers** (`designs/_*.ts`): shared shape code for a family of designs. `_character` (bodies, holds,
-clothing), `_sword`, `_axe` and the other weapons (`_bow`'s `bowShape`: the D-bow alone, for a creature to hold),
-`_armor` and the materials (`_cloth`, `_leather`, `_hide`, `_plate`: each armor series' pieces), `_shield`, `_rifter` (its states), `_object`, `_glow` (`floorGlow`), `_fungal` (`cap`,
+clothing and hair, e.g. `chesterfieldCoat` (an open coat, to mid-thigh or lower: `hem`, with accents in `trim`) and `capWithBangs` (fuller and longer with `volume` and `nape`); a body built with
+`restArms` holds nothing, both arms hanging at its sides, for NPCs), `_sword`, `_axe` and the other weapons (`_bow`'s `bowShape`: the D-bow alone, for a creature to hold),
+`_armor` and the materials (`_cloth`, `_leather`, `_hide`, `_plate`: each armor series' pieces), `_shield`, `_ring` (rings and amulets: `jewelryEntry`, jewelry's `BRONZE` and `SILVER`, and `bandDesign(id, metal)`: the plain band, flat inside and domed outside, its `top` anchor at the crown), `_amulet` (`amuletDesign(id, { stone, metal, glint? })`: an oval cabochon in a setting, its chain lying loose behind it; `glint` is the light its crown catches, a brighter shade of the stone's own hue (a dark stone given a warm glint turns muddy)), `_rifter` (its states), `_interactive`, `_decor` and `_loot` (an object or loot design's identity: `interactiveEntry`, `decorEntry`, `lootEntry`; `_decor` also has the
+merchant things' `DARK_WOOD` / `DARK_WOOD_SHADE` and `DECOR_IRON`, and `barrel`: a hooped barrel, optionally lidded), `_glow` (`floorGlow`), `_fungal` (`cap`,
 `mush`, `shelf`, `antler`), `_goblin` (every goblin's body: `goblinBody` with its helmets, or its pieces
 `goblinLook`, `goblinLegs`, `goblinTorso`, `goblinHead` for a goblin dressed differently; `goblinArm`; a body's
 `eye` for eyes other than the yellow ones, e.g. the Troll Tamer's glowing white, and `pauldronSize` for larger
-pauldrons), `_hood`
+pauldrons), `_golem` (the rock hulks, Flame Golem and Mirehulk: `golemStone` (rock lighter on its tops),
+`golemLimb` (a limb of cracked rocks, its cracks each golem's own: lava, moss), `golemFoot`, `golemHead` (skull,
+brow and glowing eyes)), `_robe` (a creature's robe: `loftRobe` lofts its outline, `RobeRing`s from the hem up;
+`robeAt` is its outline at any height, for things that grow from or sit on it), `_hood`
 (`archHood`: a creature's hood from a run of arches, round or pointed), `_staff`'s `gnarledStaff` (a creature's
 knotted wooden staff). When two designs need the same shape, it goes in a
 helper, never copied.
@@ -106,6 +112,10 @@ tint and its deep shade. Shade a tinted glow by its Tone (brighter on top, deepe
 - A halo the same color as the glowing face under it disappears into it: make halos hotter (mix toward white or
   yellow) or larger, so they bloom onto the dark around.
 - Halos are additive: overlapping ones add up fast. A few strong ones beat many weak ones.
+- `forge:sheet` draws halos much fainter than the game does: a halo that barely shows on the sheet can be the
+  right size in game. Size halos from their radius (about the distance the glow should reach), not from the
+  sheet, and check them in `/dev/forge` or the game (a Void Wisp body glow sized to show on the sheet reached far
+  past its spikes in game).
 - `xf` moves faces only: halos (and anchors, pivots) placed before an `xf` stay behind. Give halos their final
   position, or move them yourself.
 
@@ -122,6 +132,9 @@ tint and its deep shade. Shade a tinted glow by its Tone (brighter on top, deepe
   in 0..1; spread them over a shell (`fibSphere`) or draw the distance as `u ** 0.6`.
 - **Budget creep:** small pieces add up (a 9-sided cap is about 100 triangles). Use fewer sides for small or
   distant parts (`sides` options), and cap-less strands.
+- **Hidden caps:** every `frustum` (and each segment of a `tube`) caps both ends with a fan of `sides` triangles,
+  as many as its sides. On pieces whose ends are joined or buried (a wheel's rim, spokes into a hub, an axle into
+  its wheels) pass `caps: false`: it halved the Merchant's Cart's running gear.
 
 ## Checking your work
 `npm run forge:lint -- --drafts` (rules, determinism, budget) and then look at `forge:sheet`:

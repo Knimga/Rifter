@@ -1,4 +1,4 @@
-// The game screen's keyboard shortcuts: I toggles the party window; Escape backs out of whatever is on top.
+// The game screen's keyboard shortcuts: I toggles the party window (from a vendor's, switches to it); Escape backs out of whatever is on top.
 import { useEffect } from 'react';
 import { useLatest } from './useLatest';
 

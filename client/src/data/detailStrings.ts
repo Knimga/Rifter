@@ -1,6 +1,6 @@
 import { statSuffix, type AttributeKey, type BuffableStat, type DamageElement, type SkillKey } from "./units/stats";
 import { isAttackTrigger, type Ability, type AreaType, type Effect, type TargetType, type Trigger, type TriggerEffect } from "./combat/abilities";
-import type { GearSlot } from "./gear";
+import type { GearSlot, WeaponType } from "./gear";
 
 export const AttributeTooltips: Record<AttributeKey, string> = {
     strength: "Increases melee prowess and HP",
@@ -58,6 +58,13 @@ export const ATTR_LABEL: Record<AttributeKey, string> = {
 export const SLOT_LABEL: Record<GearSlot, string> = {
     helm: 'Helm', chest: 'Chest', gloves: 'Gloves', boots: 'Boots',
     mainhand: 'Main Hand', offhand: 'Off Hand',
+    amulet: 'Amulet', ring1: 'Ring 1', ring2: 'Ring 2',
+};
+
+/** One weapon of each type, as an item's tooltip names its type: '1h Mace' (the types are plural: proficiencies). */
+export const WEAPON_TYPE_SINGULAR: Record<WeaponType, string> = {
+    'Daggers': 'Dagger', '1h Swords': '1h Sword', '2h Swords': '2h Sword', '1h Maces': '1h Mace', '2h Maces': '2h Mace',
+    '1h Axes': '1h Axe', '2h Axes': '2h Axe', 'Bows': 'Bow', 'Crossbows': 'Crossbow', 'Staves': 'Staff', 'Wands': 'Wand',
 };
 
 /** First letter upper-case: 'perception' → 'Perception'. A function declaration (hoisted), so stats.ts can use it at load despite the import cycle. */
@@ -93,6 +100,9 @@ export function formatPassiveValue(stat: string, p: { flat?: number; percent?: n
 export function formatModifier(stat: string, value: number, percent = false): string {
     return `${formatSigned(value)}${percent ? '%' : statSuffix(stat)} ${formatStatLabel(stat)}`;
 }
+
+/** An amount of gold as players read it, with thousands separators: 1,109. */
+export const formatGold = (amount: number): string => amount.toLocaleString('en-US');
 
 /** A number with its sign, a typographic minus for negatives: '+1', '−2'. */
 export function formatSigned(value: number): string {

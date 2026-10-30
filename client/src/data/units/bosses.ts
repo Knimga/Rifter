@@ -50,7 +50,9 @@ export const BOSS_CLASSES: EnemyClassData[] = [
         ]
       }
     ],
-    dropChance: 2,
+    dropChance: 3,
+    dropsGold: 1,
+    goldBonus: 100,
     xpMultiplier: 6,
     model: 'creature.necromancer',
   },
@@ -105,7 +107,9 @@ export const BOSS_CLASSES: EnemyClassData[] = [
         ]
       }
     ],
-    dropChance: 2,
+    dropChance: 3,
+    dropsGold: 1,
+    goldBonus: 100,
     xpMultiplier: 6,
     model: 'creature.burning-spirit',
   },
@@ -161,14 +165,16 @@ export const BOSS_CLASSES: EnemyClassData[] = [
         ]
       }
     ],
-    dropChance: 2,
+    dropChance: 3,
+    dropsGold: 1,
+    goldBonus: 100,
     xpMultiplier: 6,
     model: 'creature.sporemother'
   },
   {
     id: 'troll-tamer',
     name: 'Troll Tamer',
-    attributes: { toughness: 4, strength: 4, finesse: 6, mind: 6 },
+    attributes: { toughness: 6, finesse: 4, spirit: 4, mind: 6 },
     highAttributes: ['toughness', 'mind'],
     lowAttributes: ['strength', 'spirit'],
     baseHp: 40,
@@ -176,8 +182,8 @@ export const BOSS_CLASSES: EnemyClassData[] = [
     armorPerLevel: 5,
     passives: {
       initiative: { name: 'Quick-witted', flat: 5 },
-      healing: { name: 'Rearer', flat: 2 },
-      healingReceived: { name: 'Bonded', flat: 4 }
+      healing: { name: 'Rearer', flat: 3 },
+      healingReceived: { name: 'Bonded', flat: 3 }
     },
     abilities: [
       {
@@ -186,10 +192,11 @@ export const BOSS_CLASSES: EnemyClassData[] = [
         apCost: 1,
         range: 4,
         target: 'ally',
+        area: 'blast2',
         displayElement: 'nature',
         effects: [
           // Each hit the bonded ally lands heals the tamer
-          { type: 'buff', appliesTo: 'target', rounds: 3, trigger: { when: 'attacking', on: 'hit',
+          { type: 'buff', appliesTo: 'target', maxStacks: 1, rounds: 3, trigger: { when: 'attacking', on: 'hit',
             effects: [{ type: 'heal', appliesTo: 'source', damageElement: 'nature', minHeal: 4, maxHeal: 6 }] } }
         ]
       },
@@ -213,7 +220,7 @@ export const BOSS_CLASSES: EnemyClassData[] = [
         useWeapon: true,
         attackCategory: 'ranged',
         effects: [
-          { type: 'damage', appliesTo: 'target', damageElement: 'physical', minDamage: 4, maxDamage: 6 },
+          { type: 'damage', appliesTo: 'target', damageElement: 'physical', minDamage: 4, maxDamage: 8 },
         ]
       },
       {
@@ -231,6 +238,8 @@ export const BOSS_CLASSES: EnemyClassData[] = [
       }      
     ],
     dropChance: 3,
+    dropsGold: 1,
+    goldBonus: 100,
     xpMultiplier: 6,
     model: 'creature.troll-tamer'
   }

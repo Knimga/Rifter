@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { Model } from '../../forge/core/types';
-import { ICON_CAMERA, ITEM_GROUND_PITCH, LIGHT, itemRestLift, keyLightDir } from '../../forge/core/stage-config';
+import { ICON_CAMERA, ITEM_GROUND_PITCH, LIGHT, iconCameraFor, itemRestLift, keyLightDir, type IconCamera } from '../../forge/core/stage-config';
 import { GAME_CAMERA, type ViewAngles } from '../camera';
 import type { BoardLayout } from '../board';
 
@@ -55,20 +55,46 @@ export function frameBoard(cam: THREE.OrthographicCamera, b: BoardLayout): void 
 }
 
 /**
- * Inventory icon camera (ICON_CAMERA, straight-on), framed so a model with these bounds fills the
- * view. Shared by the game's icon renderer and the forge's icon view, so both show the same icon.
+ * Inventory icon camera (`view`: ICON_CAMERA, straight-on; loot's is LOOT_ICON_CAMERA, iconCameraFor), framed so a
+ * model with these bounds fills the view. Shared by the game's icon renderer and the forge's icon view, so both show
+ * the same icon.
  */
-export function fitIconCamera(cam: THREE.PerspectiveCamera, min: ArrayLike<number>, max: ArrayLike<number>, aspect = 1): void {
+export function fitIconCamera(cam: THREE.PerspectiveCamera, min: ArrayLike<number>, max: ArrayLike<number>, aspect = 1, view: IconCamera = ICON_CAMERA): void {
   const span = Math.max(max[0] - min[0], max[1] - min[1], max[2] - min[2]);
   const cy = (min[1] + max[1]) / 2;
-  const e = (ICON_CAMERA.elevationDeg * Math.PI) / 180, d = span * 2.4;
-  cam.fov = ICON_CAMERA.fovDeg;
+  const e = (view.elevationDeg * Math.PI) / 180, d = (span * 2.4) / view.zoom;
+  cam.fov = view.fovDeg;
   cam.aspect = aspect;
   cam.near = d * 0.05;
   cam.far = d * 4;
   cam.updateProjectionMatrix();
-  cam.position.set(Math.sin(ICON_CAMERA.yawRad) * Math.cos(e) * d, cy + Math.sin(e) * d, Math.cos(ICON_CAMERA.yawRad) * Math.cos(e) * d);
+  cam.position.set(Math.sin(view.yawRad) * Math.cos(e) * d, cy + Math.sin(e) * d, Math.cos(view.yawRad) * Math.cos(e) * d);
   cam.lookAt(0, cy, 0);
+}
+
+/**
+ * Pose a model's object for its icon and give the bounds to frame (fitIconCamera): its icon camera (iconCameraFor)
+ * and `yaw` (the forge's turn; icons 0). A camera with `top` turns a model that marks a `top` anchor (a ring's gem):
+ * its top straight up, tipped toward the viewer about the horizontal (square to the line from top to bottom), then
+ * the whole turned about the view axis so the top is at `top.angleDeg` (the tilt turns with it). Shared by the game's
+ * icons and the forge's icon view, so both pose a model alike.
+ */
+export function poseIcon(obj: THREE.Object3D, model: Model, yaw = 0): { min: number[]; max: number[]; view: IconCamera } {
+  const view = iconCameraFor(model.designId);
+  const top = model.mesh.anchors.top;
+  obj.position.set(0, 0, 0);
+  if (!view.top || !top) {
+    obj.rotation.set(0, yaw, 0, 'YXZ');
+    return { min: [...model.mesh.bounds.min], max: [...model.mesh.bounds.max], view };
+  }
+  const about = (axis: THREE.Vector3, a: number) => new THREE.Quaternion().setFromAxisAngle(axis, a);
+  const X = new THREE.Vector3(1, 0, 0), Y = new THREE.Vector3(0, 1, 0), Z = new THREE.Vector3(0, 0, 1);
+  const up = about(Z, Math.PI / 2 - Math.atan2(top[1], top[0]));                           // its top straight up
+  const tilt = about(X, (view.top.tiltDeg * Math.PI) / 180);                                 // tipped toward the viewer
+  const place = about(Z, (view.top.angleDeg * Math.PI) / 180 - Math.PI / 2);                 // the top to its angle
+  obj.quaternion.copy(about(Y, yaw).multiply(place).multiply(tilt).multiply(up));
+  const box = new THREE.Box3().setFromObject(obj, true); // precise: a turned box's corners would frame it too loosely
+  return { min: box.min.toArray(), max: box.max.toArray(), view };
 }
 
 /**

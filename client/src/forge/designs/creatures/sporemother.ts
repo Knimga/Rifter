@@ -1,8 +1,9 @@
 import type { Design } from '../../core/types';
 import type { ColorFn } from '../../core/mesh';
-import { bipyr, blob, box, fibSphere, frustum, loft, onEllipsoid, tendril, wobbleRing } from '../../core/primitives';
+import { bipyr, blob, box, fibSphere, frustum, onEllipsoid, tendril } from '../../core/primitives';
 import { add, hslRGB, lerp3, mixC, mulC, norm, type RGB, type Vec3 } from '../../core/vec';
 import { antler, mush, shelf } from '../_fungal';
+import { loftRobe, robeAt, type RobeRing } from '../_robe';
 import { archHood } from '../_hood';
 import { gnarledStaff } from '../_staff';
 
@@ -51,28 +52,23 @@ const design: Design = {
     m.part('torso', [0, 0.6, 0]);
     // Short and broad: flaring wide at the hem, the shoulders low and bent forward. Its profile, ring by ring from
     // the hem: height, half-width, half-depth, how far forward (the hunch), how much its edge wobbles
-    const PROFILE: [number, number, number, number, number][] = [
+    const PROFILE: RobeRing[] = [
       [0.01, 0.44, 0.4, 0.04, 0.12], [0.16, 0.4, 0.36, 0.05, 0.08], [0.36, 0.34, 0.3, 0.08, 0.06],
       [0.54, 0.35, 0.3, 0.14, 0.05], [0.66, 0.33, 0.26, 0.22, 0.05], [0.72, 0.15, 0.13, 0.3, 0.04],
     ];
-    loft(m, PROFILE.map(([y, rx, rz, dz, jag]) => wobbleRing([0, y, dz], rx * W, rz * W, 12, jag, c.R)), robeColor, { j: 0.16 });
-    /** The robe's outline at height y (between its rings): half-width, half-depth, and its center's forward offset. */
-    const robeAt = (y: number) => {
-      const i = Math.max(0, Math.min(PROFILE.length - 2, PROFILE.findIndex((p) => p[0] > y) - 1));
-      const [y0, rx0, rz0, dz0] = PROFILE[i], [y1, rx1, rz1, dz1] = PROFILE[i + 1];
-      const t = Math.max(0, Math.min(1, (y - y0) / (y1 - y0)));
-      return { rx: (rx0 + (rx1 - rx0) * t) * W, rz: (rz0 + (rz1 - rz0) * t) * W, dz: dz0 + (dz1 - dz0) * t };
-    };
+    loftRobe(c, PROFILE, W, robeColor);
+    /** The robe's outline at height y (between its rings). */
+    const outline = (y: number) => robeAt(PROFILE, W, y);
     // Where things grow from her (the robe's surface, set `sink` into it so nothing floats over its wobble):
     /** A point on her back at height y, `x` to the side. */
     const onBack = (x: number, y: number, sink = 0.03): Vec3 => {
-      const { rx, rz, dz } = robeAt(y), k = Math.sqrt(Math.max(0, 1 - (x / rx) ** 2));
+      const { rx, rz, dz } = outline(y), k = Math.sqrt(Math.max(0, 1 - (x / rx) ** 2));
       return [x, y, dz - rz * k + sink];
     };
     /** A point on top of her (the shoulders and upper back, the robe's top slope) at x, z. */
     const onTop = (x: number, z: number, sink = 0.03): Vec3 => {
       for (let y = 0.72; y > 0.3; y -= 0.01) {
-        const { rx, rz, dz } = robeAt(y);
+        const { rx, rz, dz } = outline(y);
         if ((x / rx) ** 2 + ((z - dz) / rz) ** 2 <= 1) return [x, y - sink, z];
       }
       return [x, 0.3, z];
@@ -193,7 +189,7 @@ const design: Design = {
     // Motes: small orange lights drifting beside and above her (never inside her), each with a faint halo
     for (let i = 0, n = ri(9, 11); i < n; i++) {
       const y = rf(0.12, 1.15), a = rf(0, Math.PI * 2);
-      const { rx, rz, dz } = robeAt(Math.min(y, 0.72));
+      const { rx, rz, dz } = outline(Math.min(y, 0.72));
       const d = y > 0.75 ? rf(0.05, 0.35) : Math.max(rx, rz) + rf(0.08, 0.22);
       const p: Vec3 = [Math.cos(a) * d, y, dz + Math.sin(a) * d];
       bipyr(m, p, rf(0.01, 0.015), rf(0.015, 0.022), 4, GLOW, { e: 1 });

@@ -49,8 +49,8 @@ The forge folder holds the forge UI and the link between its models and game dat
 3. Nothing from `drafts/` or `dev/` ships in the production bundle (`main.tsx` gates the builder page behind `import.meta.env.DEV`).
 4. Item rarity glow (Superior and up) is applied by the renderer, never baked into a mesh. Loot never animates.
 
-## Linking designs to game objects
-Every enemy class, item base (weapon, armor slot, shield), class and game object has a required `model` field on its own data entry: the id of its design. The Rift and the Keystone are one tinted model each (`data/world/rifts.ts`): every rift and key is drawn with them, painted in its dungeon's `riftColor` (or, for a rift back to the Sanctum, `SANCTUM_RIFT_COLOR`; see the contract's Rifts & Keys).
+## Linking designs to game data
+Every enemy class, item base (weapon, armor slot, shield, ring, amulet), class, interactive object, decorative object, loot and NPC has a required `model` field on its own data entry: the id of its design. The Rift and the Keystone are one tinted model each (`data/world/rifts.ts`): every rift and key is drawn with them, painted in its dungeon's `riftColor` (or, for a rift back to the Sanctum, `SANCTUM_RIFT_COLOR`; see the contract's Rifts & Keys).
 
 ```ts
 model: 'creature.zombie',

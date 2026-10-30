@@ -1,4 +1,4 @@
-// Rifter family shape, shared by its designs (one per GAME_OBJECTS entry: rifter.ts dormant, rifter-active.ts
+// Rifter family shape, shared by its designs (one per INTERACTIVE_OBJECTS entry: rifter.ts dormant, rifter-active.ts
 // active): the Sanctum's arcane device for opening rifts. Carved stone, aged bronze and glowing runes: ritual and
 // machine. Two states (RifterState): dormant, its runes, crystals, vials and sphere glowing faintly; active, a
 // keystone in its socket and a rift open between its struts (built in from their own designs, rifts/keystone.ts
@@ -26,7 +26,7 @@ import type { Design } from '../core/types';
 import type { Mesh, ColorFn, FaceOpts } from '../core/mesh';
 import { bipyr, blob, box, frustum, ringPts, tube } from '../core/primitives';
 import { add, cross, mixC, mul, mulC, norm, rotX, rotZ, sub, type RGB, type Vec3 } from '../core/vec';
-import { objectEntry } from './_object';
+import { interactiveEntry } from './_interactive';
 import { embed } from '../core/embed';
 import { fitScale } from '../core/finalize';
 import { ITEM_SEED } from '../core/link';
@@ -367,14 +367,14 @@ export const RIFTER_TINT_PARTS = { keystone: ['pill'], rift: RIFT_PARTS } as con
 /** How long the rift takes to close when swapping keys (`close`): the game opens the next one after it. */
 export const RIFT_CLOSE_MS = 1000;
 
-/** A Rifter design for GAME_OBJECTS entry `objectId`, in `state` (one design per entry: rifter.ts, rifter-active.ts). */
+/** A Rifter design for INTERACTIVE_OBJECTS entry `objectId`, in `state` (one design per entry: rifter.ts, rifter-active.ts). */
 export function rifterDesign(objectId: string, state: RifterState): Design {
-  const { id, label, source } = objectEntry(objectId);
+  const { id, label, source } = interactiveEntry(objectId);
   const L = LIGHTS[state];
   const active = state === 'active';
   return {
     id, label, source,
-    category: 'object',
+    category: 'interactive',
     fit: FIT,
     budget: active ? 3500 : 2300, // active: the keystone and the rift too
     ...(active && {

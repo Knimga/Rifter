@@ -9,7 +9,7 @@ export const ITEM_SEED = 1;
 export const oneLook = (design: Design): boolean => design.fit.kind === 'item';
 
 /**
- * The seed a game object renders with. Items: always ITEM_SEED. Creatures and characters seed from the
+ * The seed a game thing renders with. Items: always ITEM_SEED. Creatures and characters seed from the
  * instance's own stable id (e.g. an enemy instance's id), so they vary between instances but each one
  * keeps its look. The game renderer and the forge page both use this.
  */
@@ -18,7 +18,7 @@ export const instanceSeed = (design: Design, instanceId: string): number => (one
 /** The approved design a link points at, or null if it isn't approved (yet). */
 export const linkedDesign = (designs: Record<string, Design>, link: ModelLink): Design | null => designs[link] ?? null;
 
-/** Build the model for one instance of a game object, exactly as the game renders it. */
+/** Build the model for one instance of a game thing (a unit, an item, an object), exactly as the game renders it. */
 export function buildInstance(design: Design, instanceId: string): Model {
   return buildModel(design, instanceSeed(design, instanceId));
 }

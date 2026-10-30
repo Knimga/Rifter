@@ -1,6 +1,6 @@
 import type { Design } from '../../core/types';
-import { bipyr, blob, frustum } from '../../core/primitives';
-import { add, mul, norm, type RGB, type Vec3 } from '../../core/vec';
+import { bipyr, blob, fibSphere, frustum, scatterDir } from '../../core/primitives';
+import { add, mul, type RGB, type Vec3 } from '../../core/vec';
 
 // Identity: a spore pod floating at about waist height, shaped like the Void Wisp (a faceted core bristling with
 // spikes in every direction) but sickly: a pale yellow-green core glowing at its heart, and many long, thin
@@ -48,12 +48,8 @@ const design: Design = {
     // seed. Three-sided and thin: an olive root, then pale orange or pale yellow to a fine point; some glow.
     const n = ri(40, 52);
     const turn = rf(0, Math.PI * 2), tilt = rf(-0.4, 0.4);
-    for (let i = 0; i < n; i++) {
-      const y = 1 - (2 * (i + 0.5)) / n;
-      const r = Math.sqrt(1 - y * y);
-      const a = i * 2.39996 + turn; // the golden angle
-      let dir: Vec3 = [Math.cos(a) * r, y, Math.sin(a) * r];
-      dir = norm([dir[0] + rf(-0.15, 0.15), dir[1] * Math.cos(tilt) + dir[2] * Math.sin(tilt) + rf(-0.15, 0.15), dir[2] * Math.cos(tilt) - dir[1] * Math.sin(tilt)]);
+    for (const d of fibSphere(n, turn)) {
+      const dir = scatterDir(d, tilt, rf);
       // Longer sideways than up and down: what sticks out to the sides reads at full size under the camera
       const len = SIZE * rf(0.13, 0.2) * (1 + (1 - Math.abs(dir[1])) * 0.3);
       const root = add(C, mul(dir, 0.06 * SIZE));

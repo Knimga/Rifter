@@ -98,6 +98,11 @@ export interface BodyBuild {
   boots?: number;
   /** How the arms hold the equipped weapon (default 'oneHand'); see Hold. */
   hold?: Hold;
+  /**
+   * Both arms hanging loosely at the sides, holding nothing (an NPC): the right arm as the left one, mirrored,
+   * not swung back for a weapon. Overrides `hold`.
+   */
+  restArms?: boolean;
 }
 
 /**
@@ -187,7 +192,7 @@ const CROSSBOW_RIGHT_ELBOW: Vec3 = [-0.95, -0.3, 0];
 export function armJoints(sx: 1 | -1, build: BodyBuild = {}): Arm {
   const out = (build.shoulderX ?? 0.225) - 0.225; // broader shoulders: the whole arm moves out
   const shoulder: Vec3 = [sx * (0.225 + out), TORSO.shoulder, 0];
-  const hold = build.hold ?? 'oneHand';
+  const hold = build.restArms ? 'oneHand' : build.hold ?? 'oneHand';
   if (sx > 0 && hold === 'crossbow') {
     // Cradling the stock from below, toward its middle; the elbow drops low and a little forward
     const fist = CROSSBOW_LEFT_FIST;
@@ -234,7 +239,7 @@ export function armJoints(sx: 1 | -1, build: BodyBuild = {}): Arm {
   const elbow: Vec3 = [sx * (0.29 + out), TORSO.shoulder - 0.28, -0.01];
   const wrist: Vec3 = [sx * (0.315 + out), TORSO.shoulder - 0.49, 0.11];
   const fist = add(wrist, [sx * 0.008, -0.03, 0.05]);
-  if (sx > 0) return { shoulder, elbow, wrist, fist };
+  if (sx > 0 || build.restArms) return { shoulder, elbow, wrist, fist };
   // Sword arm: swung back about the shoulder
   const swing = (p: Vec3) => add(shoulder, rotX(sub(p, shoulder), SWORD_ARM_SWING));
   return { shoulder, elbow: swing(elbow), wrist: swing(wrist), fist: swing(fist) };
@@ -319,6 +324,33 @@ export function buildBody(m: Mesh, look: BodyLook, build: BodyBuild = {}): void 
     slice(0.92, 0.42, 0.5, -0.01, 2.0), // crown
   ];
   loft(m, head, look.skin);
+}
+
+/**
+ * A cap of hair, smooth over the crown and back of the head (as ponytailHair's, without the tail), and a
+ * fringe of short spiky bangs along the forehead, pointing forward and down (the Acolyte's, Denisel's).
+ * `rf` jitters the bangs. `long`: longer hair, `volume` (e.g. 1.12) swelling it out from the head (bangs too), and
+ * `nape` (0..1) carrying it that far further down the back of the neck (0: to the nape, as the Acolyte's).
+ */
+export function capWithBangs(m: Mesh, color: RGB, rf: (a: number, b: number) => number, long: { volume?: number; nape?: number } = {}): void {
+  const { center: h, rx, ry, rz } = HEAD;
+  const v = long.volume ?? 1;
+  m.part('hair', h);
+  blob(m, add(h, [0, ry * 0.28, 0.002]), [rx * 1.17 * v, ry * 0.84 * v, rz * 1.2 * v], 1, 0.02, color, { floorY: h[1] + ry * 0.12 }); // crown
+  blob(m, add(h, [0, ry * 0.05, -0.04]), [rx * 1.12 * v, ry * 0.92 * v, rz * 0.9 * v], 1, 0.02, color, { floorY: h[1] - ry * 0.45 }); // back
+  if (long.nape) {
+    // Down the back of the neck: a tapering fall behind it, from under the back of the head
+    const fall = ry * 0.9 * long.nape;
+    blob(m, add(h, [0, -ry * 0.45 - fall / 2, -rz * 0.62]), [rx * 0.95 * v, ry * 0.35 + fall / 2, rz * 0.5], 1, 0.02, color);
+  }
+  // Bangs: a row across the front hairline, each a short spike over the forehead, the outer ones fanning out
+  const n = 5;
+  for (let i = 0; i < n; i++) {
+    const t = -1 + (2 * i) / (n - 1); // -1..1 across the forehead
+    const base: Vec3 = add(h, [t * rx * 0.72 * v, ry * (0.42 - Math.abs(t) * 0.1), rz * (0.98 - Math.abs(t) * 0.18) * v]);
+    const dir = norm([t * 0.45, -0.75, 0.55]);
+    frustum(m, base, add(base, mul(dir, rf(0.05, 0.065))), 0.03, 0.004, 4, color);
+  }
 }
 
 /**
@@ -546,6 +578,65 @@ export function hoodUp(m: Mesh, look: HoodLook): void {
     const r0 = tube[i], r1 = tube[(i + 1) % N];
     const ctr = mul(add(lip[i], lip[(i + 1) % N]), 0.5);
     for (let q = 0; q < 4; q++) m.quad(r0[q], r0[(q + 1) % 4], r1[(q + 1) % 4], r1[q], look.trim, ctr);
+  }
+}
+
+export interface CoatLook {
+  coat: RGB;
+  /** Its accents: the lapels, the turned-down collar, the pocket flaps, and the edging at the hem and cuffs. */
+  trim: RGB;
+  /** The shirt showing in the open front above the waist, and at the cuffs. */
+  shirt: RGB;
+  /** The trousers showing in the open front below it. */
+  pants: RGB;
+  /** The hem's height (local units: mid-thigh is about 0.64, the default; lower is longer, down to about 0.5). */
+  hem?: number;
+}
+
+/** Half-width of a coat's open front (local units): the faces within it show what is worn under it. */
+const COAT_OPEN = 0.075;
+
+/**
+ * A Chesterfield coat over the standard body: fitted at the waist, flaring a little over the hips and falling to
+ * mid-thigh or lower (`hem`, clear of the legs), worn open in front: down its middle, the shirt shows above the
+ * waist and the trousers below it. In its trim color: the lapels beside the opening, a turned-down collar, flap
+ * pockets at the hips, edging at the hem and the sleeve cuffs. Shirt cuffs at the wrists, and shoulder caps blending
+ * the sleeves in. The body's `sleeves` should be the coat's color (its sleeves). `build`: the body's (the arms' pose).
+ */
+export function chesterfieldCoat(m: Mesh, look: CoatLook, build: BodyBuild = {}): void {
+  const T = TORSO;
+  const N = 16; // a face either side of the front, narrow enough to read as the opening
+  const hem = look.hem ?? 0.64;
+  m.part('coat', [0, T.waist, 0]);
+  const color = (c: Vec3, n: Vec3): RGB => {
+    // Its caps (around the neck, under the hem) are its inside, never the opening's colors
+    if (c[2] <= 0 || Math.abs(n[1]) > 0.9) return look.coat;
+    const x = Math.abs(c[0]);
+    if (x < COAT_OPEN) return c[1] > T.hip ? look.shirt : look.pants;
+    // The lapels: beside the opening, over the chest
+    return x < COAT_OPEN * 1.9 && c[1] > T.chest - 0.04 ? look.trim : look.coat;
+  };
+  loft(m, [
+    ell(hem, 0.242, 0.17, N), ell(T.hip - 0.07, 0.224, 0.154, N), ell(T.hip, 0.212, 0.142, N), ell(T.waist, 0.17, 0.112, N),
+    ell(T.chest, 0.196, 0.127, N), ell(T.shoulder + 0.01, 0.214, 0.132, N), ell(T.collar, 0.146, 0.1, N),
+  ], color);
+  // Edging along the hem (open in front, like the coat)
+  const edge = (c: Vec3): RGB => (c[2] > 0 && Math.abs(c[0]) < COAT_OPEN ? look.pants : look.trim);
+  loft(m, [ell(hem + 0.045, 0.24, 0.168, N), ell(hem - 0.004, 0.247, 0.174, N)], edge, { caps: false });
+  // Turned-down collar, around the neck and over the shoulders' tops
+  loft(m, [ell(T.collar + 0.035, 0.15, 0.104, N), ell(T.collar - 0.04, 0.17, 0.114, N)], look.trim, { caps: false });
+  // Flap pockets at the hips, one each side of the opening
+  for (const sx of [-1, 1] as const) box(m, [sx * 0.15, T.hip - 0.06, 0.135], [0.08, 0.03, 0.012], look.trim, 0.02);
+
+  // The sleeves' cuffs (edged), the shirt cuffs showing past them at the wrists, and shoulder caps blending the
+  // sleeves into the coat
+  m.part('sleeves', [0, T.shoulder, 0]);
+  for (const sx of [-1, 1] as const) {
+    const a = armJoints(sx, build);
+    const dir = norm(sub(a.wrist, a.elbow));
+    frustum(m, sub(a.wrist, mul(dir, 0.075)), sub(a.wrist, mul(dir, 0.03)), 0.05, 0.05, 6, look.trim);
+    frustum(m, sub(a.wrist, mul(dir, 0.03)), add(a.wrist, mul(dir, 0.012)), 0.047, 0.046, 6, look.shirt);
+    blob(m, [a.shoulder[0] * 0.98, a.shoulder[1] + 0.01, 0], [0.07, 0.06, 0.078], 0, 0, look.coat, { floorY: a.shoulder[1] - 0.04 });
   }
 }
 

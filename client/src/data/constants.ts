@@ -47,6 +47,7 @@ export const COMBAT_TEXT_COLOR = {
   loot: 'var(--rift-loot)',
   warn: 'var(--rift-warn)',
   levelUp: 'var(--rift-acting)',
+  gold: 'var(--rift-gold)',
 } as const;
 
 /* ----- GAMEPLAY CONSTANTS ----- */

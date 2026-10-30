@@ -2,10 +2,10 @@
 // so the builder page never needs more than one WebGL context.
 import * as THREE from 'three';
 import type { Model } from '../core/types';
-import { lootYaw } from '../core/stage-config';
+import { iconCameraFor, lootYaw } from '../core/stage-config';
 import { GAME_CAMERA } from '../../viewEngine/camera';
 import { TILE_SIZE } from '../../viewEngine/board';
-import { addForgeLights, aimKeyLight, fitIconCamera, fitViewCamera, layItemOnGround, makeGameCamera } from '../../viewEngine/three/stage';
+import { addForgeLights, aimKeyLight, fitIconCamera, fitViewCamera, layItemOnGround, makeGameCamera, poseIcon } from '../../viewEngine/three/stage';
 import { animateParts, disposeObject, sharedMaterials, toThree, type AnimationProgress } from '../../viewEngine/three/toThree';
 
 export type CameraPreset = 'game' | 'icon' | 'top' | 'side';
@@ -93,12 +93,14 @@ export class ForgeView {
       obj.visible = true;
       animateParts(obj, sec, cell.progress);
 
-      const { min, max } = cell.model.mesh.bounds;
+      let min: number[] = [...cell.model.mesh.bounds.min], max: number[] = [...cell.model.mesh.bounds.max];
       const isItem = cell.model.mesh.anchors.center !== undefined;
       const game = opts.camera === 'game';
       // Game view: items lie flat on the tile, face up, resting on the floor, turned exactly as loot in the
-      // game (lootYaw); yaw then spins them in place on the floor. Other views keep items upright and centered.
+      // game (lootYaw); yaw then spins them in place on the floor. The icon view poses a model as its icon does
+      // (poseIcon: a ring turned with its top to the upper right). Other views keep items upright and centered.
       if (game && isItem) layItemOnGround(obj, cell.model, lootYaw() + cell.yaw);
+      else if (opts.camera === 'icon') ({ min, max } = poseIcon(obj, cell.model, cell.yaw));
       else { obj.rotation.set(0, cell.yaw, 0, 'YXZ'); obj.position.y = 0; }
       this.ground.visible = opts.ground && !game; // game view: the page's DOM tiles are the ground
       this.ground.position.y = isItem ? min[1] - 0.02 : 0;
@@ -112,7 +114,7 @@ export class ForgeView {
         this.r.clear();
         this.r.setClearColor(0x000000, 0);
       }
-      this.r.render(this.scene, this.cameraFor(opts.camera, w, h, min, max, isItem));
+      this.r.render(this.scene, this.cameraFor(opts.camera, w, h, min, max, isItem, cell.model.designId));
       obj.visible = false;
     }
     for (const m of Object.values(sharedMaterials)) m.wireframe = false;
@@ -125,7 +127,7 @@ export class ForgeView {
     }
   }
 
-  private cameraFor(preset: CameraPreset, w: number, h: number, min: number[], max: number[], isItem: boolean): THREE.Camera {
+  private cameraFor(preset: CameraPreset, w: number, h: number, min: number[], max: number[], isItem: boolean, designId: string): THREE.Camera {
     const aspect = w / h;
     const span = Math.max(max[0] - min[0], max[1] - min[1], max[2] - min[2]);
     if (preset === 'game') {
@@ -144,7 +146,7 @@ export class ForgeView {
     }
     const cy = (min[1] + max[1]) / 2;
     if (preset === 'icon') {
-      fitIconCamera(this.persp, min, max, aspect);
+      fitIconCamera(this.persp, min, max, aspect, iconCameraFor(designId));
       return this.persp;
     }
     // side: straight-on from the front (+z)

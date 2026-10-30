@@ -26,8 +26,8 @@ const LABEL_H = 0; // no per-cell text strip; a cell's name and seed show on hov
 const COLS = 6;
 // Left-panel sections, in order. Every Category must be listed (Record keeps that checked).
 const CATEGORY_LABEL: Record<Category, string> = {
-  creature: 'Creatures', summon: 'Summons', character: 'Classes', weapon: 'Weapons', armor: 'Armor', offhand: 'Offhands', object: 'Game Objects',
-  rift: 'Rifts & Keys',
+  creature: 'Creatures', summon: 'Summons', character: 'Classes', weapon: 'Weapons', armor: 'Armor', offhand: 'Offhands', jewelry: 'Rings & Amulets',
+  interactive: 'Interactive Objects', decor: 'Decorative Objects', loot: 'Loot', rift: 'Rifts & Keys', npc: 'NPCs',
 };
 const DUNGEON_KEYS = Object.keys(DUNGEONS);
 const toHex = (c: RGB) => `#${c.map((v) => Math.round(v).toString(16).padStart(2, '0')).join('')}`;

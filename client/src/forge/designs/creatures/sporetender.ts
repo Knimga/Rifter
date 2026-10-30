@@ -4,6 +4,7 @@ import type { Mesh, ColorFn } from '../../core/mesh';
 import { blob, bipyr, frustum, loft } from '../../core/primitives';
 import { add, alignY, hslRGB, mulC, norm, type RGB, type Vec3 } from '../../core/vec';
 import { antler, mush } from '../_fungal';
+import { ell } from '../_armor';
 
 // The Capstalker from an external designer's example (their "Fungal Forest Forge" page), as faithfully as the forge allows: a tall, thin
 // fey thing on bark legs, a stag skull with glowing eyes, bone antlers tipped with small mushrooms, a ragged
@@ -21,8 +22,6 @@ const CAPS: [RGB, RGB][] = [
 const GLOWS: RGB[] = [[80, 230, 190], [255, 170, 60], [150, 230, 70]];
 
 const jit = (c: BuildCtx, k: number) => 1 + (c.R() - 0.5) * k;
-const ell = (y: number, rx: number, rz: number, n: number): Vec3[] =>
-  Array.from({ length: n }, (_, i) => { const t = (i / n) * 2 * Math.PI; return [Math.cos(t) * rx, y, Math.sin(t) * rz]; });
 
 /** A leaf hanging from `base` along `dir`, `L` long and `w` wide. */
 function leaf(m: Mesh, base: Vec3, dir: Vec3, L: number, w: number, col: RGB): void {

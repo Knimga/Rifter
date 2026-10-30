@@ -35,9 +35,11 @@ export interface ZoneData {
   droppedItems: Record<string, Item[]>; // "x,y" → items dropped at that tile
   /** "x,y" → the rift key lying on that tile (a dungeon key: whose key it is), dropped by a boss. One per tile. */
   droppedKeys: Record<string, string>;
+  /** "x,y" → the gold lying on that tile (data/gear/loot.ts), dropped by enemies: one pile a tile, adding up. */
+  droppedGold: Record<string, number>;
 }
 
-/** A treasure chest on the map: its id (keys its contents), zone, tile, look (GAME_OBJECTS id) and the floor side its lock faces. */
+/** A treasure chest on the map: its id (keys its contents), zone, tile, look (INTERACTIVE_OBJECTS id) and the floor side its lock faces. */
 export interface DungeonChest {
   id: string;
   zoneId: number;
@@ -68,7 +70,7 @@ export interface DungeonData {
 }
 
 /**
- * Tiles of a zone that a game object stands on (a rift, chests): nobody walks onto or through
+ * Tiles of a zone that a map object stands on (a rift, chests): nobody walks onto or through
  * them, party or enemy. They stay floor (drawn as floor; they don't block sight or AoE). The Sanctum's
  * blockers are handled the same way by isSanctumWalkable.
  */
@@ -80,7 +82,7 @@ export const objectTilesOf = (d: DungeonData, zone: ZoneData): Set<string> => ne
 /** The zone's rift back to the Sanctum, if it has one. */
 export const zoneRift = (d: DungeonData, zoneId: number): Pos | null => d.rifts.find(r => r.zoneId === zoneId)?.pos ?? null;
 
-/** Walkable tiles of a zone: floor without a game object on it. */
+/** Walkable tiles of a zone: floor without a map object on it. */
 export function zoneWalkable(d: DungeonData, zone: ZoneData): (p: Pos) => boolean {
   const objects = objectTilesOf(d, zone);
   return (p) => zone.floors.has(posKey(p)) && !objects.has(posKey(p));
@@ -147,7 +149,7 @@ export interface DungeonConfig {
   bossZone: BossZoneConfig;
   floorColor: string;     // hex color for walkable floor tiles
   wallColor: string;      // hex color for wall/non-floor tiles
-  doorObject: string;     // GAME_OBJECTS id of the doors between zones
+  doorObject: string;     // INTERACTIVE_OBJECTS id of the doors between zones
   /**
    * The dungeon's color: the Sanctum's rift into it and its keystone are painted in it (data/world/rifts.ts; its
    * rifts back to the Sanctum are SANCTUM_RIFT_COLOR). Bright and saturated: the rift's deeper swirl and floor pool derive from it.
@@ -155,7 +157,7 @@ export interface DungeonConfig {
   riftColor: RGB;
   /** Its rift key's name ("Necrotic Key"): the key that opens a rift to it (data/world/rifts.ts), painted in riftColor. */
   keyName: string;
-  chestObject: string;    // GAME_OBJECTS id of the treasure chest in the boss room
+  chestObject: string;    // INTERACTIVE_OBJECTS id of the treasure chest in the boss room
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -191,7 +193,7 @@ function roomFloor(zone: Pick<ZoneData, 'floors'>, room: Rect): Pos[] {
 
 /**
  * The room's floor tile nearest its center (its center, unless that's an island or outside a cavern's shape).
- * `open`: only among the tiles with floor all around them, if there are any (a game object stood there never cuts a way off).
+ * `open`: only among the tiles with floor all around them, if there are any (a map object stood there never cuts a way off).
  */
 function roomSpot(zone: Pick<ZoneData, 'floors'>, room: Rect, open = false): Pos {
   const c = roomCenter(room);
@@ -461,7 +463,7 @@ function generateZone(id: number, width: number, height: number, zoneConfig: Zon
     connectBSP(root, floors, zoneConfig.corridorWidth);
   }
 
-  const zone: ZoneData = { id, width, height, floors, rooms, doors: [], islands: new Set(), droppedItems: {}, droppedKeys: {} };
+  const zone: ZoneData = { id, width, height, floors, rooms, doors: [], islands: new Set(), droppedItems: {}, droppedKeys: {}, droppedGold: {} };
   if (zoneConfig.islands) placeIslands(zone, zoneConfig.islands);
   return zone;
 }
@@ -493,7 +495,7 @@ function generateBossZoneMain(id: number, config: BossZoneConfig): { zone: ZoneD
   if (config.layout === 'caverns') carveCavern(floors, bossRoom);
   else fillRect(floors, bossRoom);
   return {
-    zone: { id, width: zoneSize, height: zoneSize, floors, rooms: [bossRoom], doors: [], islands: new Set(), droppedItems: {}, droppedKeys: {} },
+    zone: { id, width: zoneSize, height: zoneSize, floors, rooms: [bossRoom], doors: [], islands: new Set(), droppedItems: {}, droppedKeys: {}, droppedGold: {} },
     bossRoom,
   };
 }

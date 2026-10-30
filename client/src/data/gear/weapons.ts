@@ -11,13 +11,15 @@ export interface WeaponSeries {
   name: string;             // prefix applied to the weapon name: 'Plain Gladius' (see weaponName)
   requiredLevel: number;
   damageMultiplier: number; // scales the type's base damage (WEAPON_TYPE_DATA); starting gear is 1.0
+  /** Scales what its weapons sell for (value.ts): later tiers are worth more. Unused on starting gear (STARTER_VALUE). */
+  valueMultiplier: number;
   // Each named weapon of the series; `model` is its forge design: how it is drawn (icon and loot).
   weapons: Partial<Record<WeaponType, { name: string; model: ModelLink }>>
 }
 
 /** The first tier that drops: a step up from starting gear (STARTER_WEAPON_SERIES). */
 const PLAIN: WeaponSeries = {
-  id: 'plain', name: 'Plain', requiredLevel: 1, damageMultiplier: 1.2,
+  id: 'plain', name: 'Plain', requiredLevel: 1, damageMultiplier: 1.2, valueMultiplier: 1,
   weapons: {
     '1h Swords': { name: 'Gladius',       model: 'weapon.plain-gladius' },
     '2h Swords': { name: 'Bastard Sword', model: 'weapon.plain-bastard-sword' },
@@ -41,7 +43,7 @@ export const WEAPON_SERIES: WeaponSeries[] = [PLAIN];
  * weapons (weaker, drawn with Plain's models: they have no designs of their own).
  */
 export const STARTER_WEAPON_SERIES: WeaponSeries[] = [
-  { id: 'worn', name: 'Worn', requiredLevel: 1, damageMultiplier: 1.0, weapons: PLAIN.weapons },
+  { id: 'worn', name: 'Worn', requiredLevel: 1, damageMultiplier: 1.0, valueMultiplier: 1, weapons: PLAIN.weapons },
 ];
 
 /** Display name of a weapon: series name + the series' name for the type, e.g. Plain + '1h Swords' -> 'Plain Gladius'. */
@@ -59,6 +61,8 @@ export interface WeaponTypeData {
    * since it fills both hands. Bows and crossbows aren't (an archer's quiver goes with them), whatever the pose.
    */
   twoHanded: boolean;
+  /** How much its weapons sell for, against a one-hander's 1 (value.ts): staves and wands most, two-handers next. */
+  value: number;
   defaultAttackCategory: AttackCategory;
   /** The element its attack deals. A weapon without one (staves, wands) rolls one from `dropElements` when dropped. */
   defaultDamageElement?: DamageElement;
@@ -82,6 +86,7 @@ const MAGIC_WEAPON_ELEMENTS: readonly DamageElement[] = ['fire', 'ice', 'lightni
 
 export const WEAPON_TYPE_DATA: Record<WeaponType, WeaponTypeData> = {
   'Daggers': {
+    value: 0.9,
     baseDamage: { min: 4, max: 7 },
     range: 1,
     attackAp: 1,
@@ -95,6 +100,7 @@ export const WEAPON_TYPE_DATA: Record<WeaponType, WeaponTypeData> = {
     ],
   },
   '1h Swords': {
+    value: 1,
     baseDamage: { min: 5, max: 9 },
     range: 1,
     attackAp: 1,
@@ -108,6 +114,7 @@ export const WEAPON_TYPE_DATA: Record<WeaponType, WeaponTypeData> = {
     ],
   },
   '2h Swords': {
+    value: 1.5,
     baseDamage: { min: 8, max: 14 },
     range: 1,
     attackAp: 2,
@@ -123,6 +130,7 @@ export const WEAPON_TYPE_DATA: Record<WeaponType, WeaponTypeData> = {
     ],
   },
   '1h Maces': {
+    value: 1,
     baseDamage: { min: 6, max: 9 },
     range: 1,
     attackAp: 1,
@@ -137,6 +145,7 @@ export const WEAPON_TYPE_DATA: Record<WeaponType, WeaponTypeData> = {
     ],
   },
   '2h Maces': {
+    value: 1.5,
     baseDamage: { min: 9, max: 15 },
     range: 1,
     attackAp: 2,
@@ -152,6 +161,7 @@ export const WEAPON_TYPE_DATA: Record<WeaponType, WeaponTypeData> = {
     ],
   },
   '1h Axes': {
+    value: 1,
     baseDamage: { min: 4, max: 10 },
     range: 1,
     attackAp: 1,
@@ -167,6 +177,7 @@ export const WEAPON_TYPE_DATA: Record<WeaponType, WeaponTypeData> = {
     ],
   },
   '2h Axes': {
+    value: 1.5,
     baseDamage: { min: 7, max: 16 },
     range: 1,
     attackAp: 2,
@@ -182,6 +193,7 @@ export const WEAPON_TYPE_DATA: Record<WeaponType, WeaponTypeData> = {
     ],
   },
   'Bows': {
+    value: 1.2,
     baseDamage: { min: 6, max: 9 },
     range: 5,
     attackAp: 2,
@@ -198,6 +210,7 @@ export const WEAPON_TYPE_DATA: Record<WeaponType, WeaponTypeData> = {
     ],
   },
   'Crossbows': {
+    value: 1.2,
     baseDamage: { min: 6, max: 11 },
     range: 4,
     attackAp: 2,
@@ -214,6 +227,7 @@ export const WEAPON_TYPE_DATA: Record<WeaponType, WeaponTypeData> = {
     ],
   },
   'Staves': {
+    value: 2.2,
     baseDamage: { min: 6, max: 10 },
     range: 4,
     attackAp: 2,
@@ -230,6 +244,7 @@ export const WEAPON_TYPE_DATA: Record<WeaponType, WeaponTypeData> = {
     ],
   },
   'Wands': {
+    value: 1.9,
     baseDamage: { min: 3, max: 5 },
     range: 3,
     attackAp: 1,

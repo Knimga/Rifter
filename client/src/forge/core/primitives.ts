@@ -188,7 +188,7 @@ export function bipyr(m: Mesh, c: Vec3, r: number, h: number, n: number, col: Co
 
 /**
  * `n` directions spread evenly over a sphere (a Fibonacci spiral), the whole set turned `turn` radians about y:
- * spikes, needles, motes, warts all around a body. Jitter them yourself (norm(add(d, small noise))) so they
+ * spikes, needles, motes, warts all around a body. Jitter them (scatterDir, or norm(add(d, small noise))) so they
  * don't look machined.
  */
 export function fibSphere(n: number, turn = 0): Vec3[] {
@@ -197,6 +197,13 @@ export function fibSphere(n: number, turn = 0): Vec3[] {
     return [Math.cos(a) * r, y, Math.sin(a) * r];
   });
 }
+
+/**
+ * A fibSphere direction tipped `tilt` radians about x (draw one tilt for the whole set) and jittered by up to `jit`
+ * sideways and up or down (drawn with `rf`), then normalized: a spiky ball's spikes, scattered instead of machined.
+ */
+export const scatterDir = (d: Vec3, tilt: number, rf: (a: number, b: number) => number, jit = 0.15): Vec3 =>
+  norm([d[0] + rf(-jit, jit), d[1] * Math.cos(tilt) + d[2] * Math.sin(tilt) + rf(-jit, jit), d[2] * Math.cos(tilt) - d[1] * Math.sin(tilt)]);
 
 /**
  * The point on the surface of the ellipsoid at `c` with radii `r` (a blob's) in direction `dir` from its center,

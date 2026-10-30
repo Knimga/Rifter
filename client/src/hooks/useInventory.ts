@@ -1,19 +1,27 @@
-// The party's shared inventory: taking loot into it (piles, chests) and equipping from it / unequipping to it.
+// The party's shared inventory: taking loot into it (piles, chests) and equipping from it / unequipping to it. And
+// the party's gold, shared the same way.
 import { useCallback, useState } from 'react';
 import { CLASSES } from '../data/units/classes';
 import { COMBAT_TEXT_COLOR } from '../data/constants';
 import type { Pos } from '../data/world/grid';
 import type { GearSlot, GearSlots, Item } from '../data/gear';
-import { canEquip, canUnequip, equipFromInventory, takeIntoInventory, unequipToInventory, type Inventory } from '../data/gear/inventory';
+import { canEquip, canUnequip, emptyInventory, equipFromInventory, takeIntoInventory, unequipToInventory, type Inventory } from '../data/gear/inventory';
 import type { PartyMemberConfig } from '../data/units/party';
 import type { SpawnFloat } from './useFloatingText';
+
+/** The gold the party starts the game with. */
+const STARTING_GOLD = 0;
 
 export function useInventory({ party, setParty, spawnFloat }: {
   party: PartyMemberConfig[];
   setParty: (party: PartyMemberConfig[]) => void;
   spawnFloat: SpawnFloat;
 }) {
-  const [inventory, setInventory] = useState<Inventory>([]);
+  const [inventory, setInventory] = useState<Inventory>(emptyInventory);
+  // The party's gold, shared like the inventory (none at the start of the game)
+  const [gold, setGold] = useState(STARTING_GOLD);
+  /** Add gold (or, negative, spend it: never below 0). */
+  const addGold = useCallback((amount: number) => setGold(g => Math.max(0, g + amount)), []);
 
   /**
    * Take loot (a pile's items, a chest's item) into the inventory, as many as fit, with a float over `at`:
@@ -48,5 +56,5 @@ export function useInventory({ party, setParty, spawnFloat }: {
     applyGearChange(charIdx, unequipToInventory(inventory, member.gear, slot));
   }, [inventory, party, applyGearChange]);
 
-  return { inventory, takeLoot, equipItem, unequipItem };
+  return { inventory, setInventory, takeLoot, equipItem, unequipItem, gold, setGold, addGold };
 }

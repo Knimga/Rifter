@@ -24,7 +24,7 @@ export interface MapUnit {
   pos: Pos;
   /** Items (loot) lie flat on the floor and never turn; creatures stand and face their last move. */
   lying?: boolean;
-  /** The yaw (radians) a unit starts facing; game objects (a door facing its floor tile) keep it. Default 0. */
+  /** The yaw (radians) a unit starts facing; map objects (a door facing its floor tile) keep it. Default 0. */
   facing?: number;
   /**
    * The tile the unit last aimed an ability at. When `seq` changes, the unit turns to face it (until it

@@ -1,4 +1,5 @@
 import { keyPos, neighbors, posKey, type Pos } from './grid';
+import { decorObjectSpan } from './decorObjects';
 
 // ─── The Sanctum: fixed, hand-authored hub map (never procedurally generated) ──
 // On screen north is up-left (-y) and east up-right (+x). The main room (9 x 9), a hallway 3 wide and 3 long
@@ -28,13 +29,46 @@ export const SANCTUM = {
   playerStart: at(5, 5),
   followerStarts: [at(6, 5), at(7, 5)],
   /**
-   * The Rifter (GAME_OBJECTS 'rifter'): its middle tile, and the grid direction it faces (its front, where the party
+   * The Rifter (INTERACTIVE_OBJECTS 'rifter'): its middle tile, and the grid direction it faces (its front, where the party
    * uses it from). Centered against the east room's east wall, facing west, its three tiles along the wall.
    */
   rifter: { pos: at(17, 5), facing: [-1, 0] as const },
   /** Where the party arrives back from a dungeon (by a rift, or waking after a wipe): in front of the Rifter, in a line facing it, leader first. */
   riftArrival: [at(15, 5), at(14, 5), at(13, 5)],
+  /**
+   * The NPCs standing in the Sanctum (data/world/npcs.ts): each one's tile, and the grid direction it faces when no
+   * one is talking to it. Denisel, the vendor: in the main room's northwest corner, a tile in from both walls,
+   * facing into the room.
+   */
+  npcs: [{ id: 'denisel', pos: at(2, 2), facing: [1, 1] as const }],
+  /**
+   * The decorative objects in the Sanctum (data/world/decorObjects.ts): each one's middle tile and the grid direction
+   * it faces (its front). It fills its span's tiles (spanTiles), which nobody walks onto.
+   */
+  decor: [
+    // Denisel's cart, behind him along the west wall (its two tiles at x 1, y 1-2), facing into the room: its pole
+    // toward the north wall, its open back beside him
+    { id: 'merchants-cart', pos: at(1, 2), facing: [1, 0] as const },
+    // Barrels and sacks a tile north of Denisel, by the cart's pole: facing east, so the barrels (at the model's back
+    // left) stand in the tile's northwest corner and the sacks spill out to the southeast
+    { id: 'barrels-and-sacks', pos: at(2, 1), facing: [1, 0] as const },
+    // The weapon rack against the north wall beside the barrels, its weapons facing south into the room
+    { id: 'weapon-rack', pos: at(3, 1), facing: [0, 1] as const },
+  ] as readonly DecorPlacement[],
 } as const;
+
+/** Where a map places a decorative object (DECOR_OBJECTS id): its middle tile, and the grid direction its front faces. */
+export interface DecorPlacement {
+  id: string;
+  pos: Pos;
+  facing: readonly [number, number];
+}
+
+/** A Sanctum NPC's placement (SANCTUM.npcs). */
+export type NpcPlacement = (typeof SANCTUM.npcs)[number];
+
+/** The Sanctum NPC standing on `p`, if any. */
+export const sanctumNpcAt = (p: Pos): NpcPlacement | undefined => SANCTUM.npcs.find((n) => n.pos.x === p.x && n.pos.y === p.y);
 
 /** How many tiles the Rifter spans, side by side across the way it faces (its middle tile, and one each side). */
 const RIFTER_SPAN = 3;
@@ -60,6 +94,11 @@ export const SANCTUM_RECEPTACLE: Pos = (() => {
 /** The Rifter's three tiles: nobody walks onto or through them. */
 export const SANCTUM_RIFTER_TILES: ReadonlySet<string> = new Set(spanTiles(SANCTUM.rifter.pos, SANCTUM.rifter.facing, RIFTER_SPAN).map(posKey));
 
+/** Every tile the Sanctum's decorative objects fill (each across its span): not walkable. */
+export const SANCTUM_DECOR_TILES: ReadonlySet<string> = new Set(
+  SANCTUM.decor.flatMap((d) => spanTiles(d.pos, d.facing, decorObjectSpan(d.id)).map(posKey)),
+);
+
 /** Keys of the sanctum's floor tiles (its rooms and hallway): for sight and ability areas there. */
 export const SANCTUM_FLOORS: ReadonlySet<string> = new Set(
   Object.values(AREAS).flatMap(({ x, y, w, h }) =>
@@ -75,5 +114,5 @@ export const SANCTUM_SHOWN: ReadonlySet<string> = new Set([...SANCTUM_FLOORS].fl
 /** Anything that isn't the Sanctum's floor is wall. */
 export const isSanctumWall = (p: Pos) => !SANCTUM_FLOORS.has(posKey(p));
 
-/** Walls block the way, and so do the Rifter's three tiles. */
-export const isSanctumWalkable = (p: Pos) => !isSanctumWall(p) && !SANCTUM_RIFTER_TILES.has(posKey(p));
+/** Walls block the way, and so do the Rifter's three tiles and the NPCs. */
+export const isSanctumWalkable = (p: Pos) => !isSanctumWall(p) && !SANCTUM_RIFTER_TILES.has(posKey(p)) && !SANCTUM_DECOR_TILES.has(posKey(p)) && !sanctumNpcAt(p);

@@ -38,7 +38,7 @@ export const ARMOR_TYPE_DATA: Record<ArmorProficiency, ArmorTypeData> = {
     },
     invalidAffixes: [
       'strength', 'finesse', 'block', 'parry', 'glancingBlow', 
-      ...rangedStats, ...meleeStats, ...damageTypeAffixes(['physical','poison']),
+      ...rangedStats, ...meleeStats, ...damageTypeAffixes(['physical','poison','nature']),
       'redoubt', 'expertise',
     ],
   },
@@ -96,6 +96,14 @@ export const BASE_ARMOR_MULTIPLIER: Record<ArmorSlot, number> = {
   gloves: 0.35,
 };
 
+/** Each slot's share of what a piece sells for (value.ts: a chest piece is the base). */
+export const ARMOR_SLOT_VALUE: Record<ArmorSlot, number> = {
+  chest:  1.0,
+  helm:   0.7,
+  boots:  0.6,
+  gloves: 0.5,
+};
+
 // ─── Armor Series ─────────────────────────────────────────────────────────────
 
 export interface ArmorSeries {
@@ -105,6 +113,8 @@ export interface ArmorSeries {
   requiredLevel: number;
   /** Scales the armor its pieces give (the type's baseArmor x slot share); starting gear is 1.0. */
   armorMultiplier: number;
+  /** Scales what its pieces sell for (value.ts): later tiers are worth more. Unused on starting gear (STARTER_VALUE). */
+  valueMultiplier: number;
   names: Record<ArmorSlot, string>;   // item name per slot, after the series name: 'Apprentice Hood' (see armorName)
   // Each slot's forge design: how the item is drawn (icon and loot).
   models: Record<ArmorSlot, ModelLink>;
@@ -119,7 +129,7 @@ export function armorName(series: ArmorSeries, slot: ArmorSlot): string {
 export const ARMOR_SERIES: ArmorSeries[] = [
   // ── Cloth ─────────────────────────────────────────────────────────────────
   {
-    id: 'apprentice', name: 'Apprentice', armorType: 'Cloth', requiredLevel: 1, armorMultiplier: 1.2,
+    id: 'apprentice', name: 'Apprentice', armorType: 'Cloth', requiredLevel: 1, armorMultiplier: 1.2, valueMultiplier: 1,
     names: { helm: 'Hood',     chest: 'Robes',      gloves: 'Handwraps', boots: 'Shoes'   },
     models: {
       helm:   'armor.apprentice-hood',
@@ -131,7 +141,7 @@ export const ARMOR_SERIES: ArmorSeries[] = [
 
   // ── Light ─────────────────────────────────────────────────────────────────
   {
-    id: 'leather', name: 'Leather', armorType: 'Light', requiredLevel: 1, armorMultiplier: 1.2,
+    id: 'leather', name: 'Leather', armorType: 'Light', requiredLevel: 1, armorMultiplier: 1.2, valueMultiplier: 1,
     names: { helm: 'Cap',         chest: 'Jerkin',        gloves: 'Gloves',  boots: 'Boots'       },
     models: {
       helm:   'armor.leather-cap',
@@ -143,7 +153,7 @@ export const ARMOR_SERIES: ArmorSeries[] = [
 
   // ── Medium ────────────────────────────────────────────────────────────────
   {
-    id: 'hide', name: 'Hide', armorType: 'Medium', requiredLevel: 1, armorMultiplier: 1.2,
+    id: 'hide', name: 'Hide', armorType: 'Medium', requiredLevel: 1, armorMultiplier: 1.2, valueMultiplier: 1,
     names: { helm: 'Skullcap',  chest: 'Hauberk',        gloves: 'Gauntlets', boots: 'Boots' },
     models: {
       helm:   'armor.hide-skullcap',
@@ -155,7 +165,7 @@ export const ARMOR_SERIES: ArmorSeries[] = [
 
   // ── Heavy ─────────────────────────────────────────────────────────────────
   {
-    id: 'iron', name: 'Iron', armorType: 'Heavy', requiredLevel: 1, armorMultiplier: 1.2,
+    id: 'iron', name: 'Iron', armorType: 'Heavy', requiredLevel: 1, armorMultiplier: 1.2, valueMultiplier: 1.5,
     names: { helm: 'Helm',            chest: 'Breastplate',  gloves: 'Gauntlets', boots: 'Sabatons' },
     models: {
       helm:   'armor.iron-helm',

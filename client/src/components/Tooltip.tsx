@@ -1,11 +1,14 @@
 import { useState, useRef, type ReactNode, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import { PiMouseLeftClickFill, PiMouseRightClickFill } from 'react-icons/pi';
-import { isArmorItem, isOffhandItem, isShieldItem, isWeaponItem, type Item, type WeaponItem, type ArmorItem, type ShieldItem, type OffhandItem } from '../data/gear';
+import GoldAmount from './ui/GoldAmount';
+import { isArmorItem, isJewelryItem, isOffhandItem, isShieldItem, isWeaponItem, type Item, type WeaponItem, type ArmorItem, type ShieldItem, type OffhandItem, type JewelryItem } from '../data/gear';
 import { OFFHAND_KIND_NAME } from '../data/gear/offhands';
+import { JEWELRY_KIND_NAME } from '../data/gear/jewelry';
 import type { Stats } from '../data/units/stats';
+import type { EquipCompare, StatDelta } from '../data/units/party';
 import { RARITY_COLOR } from '../data/constants';
-import { formatModifier, weaponDamageLines } from '../data/detailStrings';
+import { WEAPON_TYPE_SINGULAR, formatModifier, weaponDamageLines } from '../data/detailStrings';
 import { getOffense } from '../data/combat/attackResolution';
 import { weaponDamageEffect } from '../data/combat/abilityExecution';
 import { EffectRow } from './ui/AbilityCard';
@@ -21,9 +24,19 @@ interface TooltipProps {
   gap?: number;
   /** The content is its own box (e.g. an AbilityCard): no tooltip frame (.rf-tip) around it. */
   bare?: boolean;
-  /** Where it opens: centered above (default), or below with right edges aligned (things at the top of the screen). */
-  placement?: 'above' | 'below-end';
+  /**
+   * Where it opens: centered above (default), centered below, or below with right edges aligned (things at the top
+   * of the screen).
+   */
+  placement?: 'above' | 'below' | 'below-end';
 }
+
+/** Where a tooltip's anchor point is on its target's box, and how it is moved from there, by placement. */
+const PLACE: Record<NonNullable<TooltipProps['placement']>, { at: (r: DOMRect) => { x: number; y: number }; move: (gap: number) => string }> = {
+  above: { at: (r) => ({ x: r.left + r.width / 2, y: r.top }), move: (gap) => `translate(-50%, calc(-100% - ${gap}px))` },
+  below: { at: (r) => ({ x: r.left + r.width / 2, y: r.bottom }), move: (gap) => `translate(-50%, ${gap}px)` },
+  'below-end': { at: (r) => ({ x: r.right, y: r.bottom }), move: (gap) => `translate(-100%, ${gap}px)` },
+};
 
 /** Shows `content` above (or below) its children while they are hovered or hold keyboard focus. */
 export function Tooltip({ content, children, className, style, gap = 8, bare = false, placement = 'above' }: TooltipProps) {
@@ -34,7 +47,7 @@ export function Tooltip({ content, children, className, style, gap = 8, bare = f
   const show = () => {
     if (!content || !ref.current) return;
     const r = ref.current.getBoundingClientRect();
-    setPos(placement === 'above' ? { x: r.left + r.width / 2, y: r.top } : { x: r.right, y: r.bottom });
+    setPos(PLACE[placement].at(r));
     setVisible(true);
   };
   const hide = () => setVisible(false);
@@ -46,7 +59,7 @@ export function Tooltip({ content, children, className, style, gap = 8, bare = f
         <div
           role="tooltip"
           className="fixed z-[9999] pointer-events-none font-tech text-rift-ink"
-          style={{ left: pos.x, top: pos.y, transform: placement === 'above' ? `translate(-50%, calc(-100% - ${gap}px))` : `translate(-100%, ${gap}px)` }}
+          style={{ left: pos.x, top: pos.y, transform: PLACE[placement].move(gap) }}
         >
           {bare ? content : <div className="rf-tip text-sm overflow-hidden">{content}</div>}
         </div>,
@@ -72,10 +85,10 @@ export function Hint({ text, className = 'inline-flex', children }: { text: stri
  * What clicking does, for the bottom of a tooltip: the mouse button as an icon, then the action, e.g.
  * [right-click] Equip. Use this instead of writing "Right-click to ..." in words.
  */
-export function ClickHint({ button, children, className = '' }: { button: 'left' | 'right'; children: ReactNode; className?: string }) {
+export function ClickHint({ button, children, className = '', color }: { button: 'left' | 'right'; children: ReactNode; className?: string; color?: string }) {
   const Icon = button === 'left' ? PiMouseLeftClickFill : PiMouseRightClickFill;
   return (
-    <div className={`flex items-center gap-1.5 text-[11px] text-rift-label ${className}`}>
+    <div className={`flex items-center gap-1.5 text-[11px] text-rift-label ${className}`} style={color ? { color } : undefined}>
       <Icon role="img" aria-label={`${button === 'left' ? 'Left' : 'Right'}-click:`} className="w-4 h-4 shrink-0 text-rift-muted" />
       <span>{children}</span>
     </div>
@@ -92,11 +105,31 @@ export function TextTip({ children }: { children: ReactNode }) {
 /** What right-clicking the item does here, if anything (equip it, unequip it, take it from a container). */
 export type ItemClickAction = 'Equip' | 'Unequip' | 'Loot';
 
+/**
+ * An item's side of a trade (the vendor window), shown at the bottom of its tooltip instead of its sell value: its
+ * price, and what right-clicking does or why it can't.
+ */
+export interface ItemTrade {
+  /** What the price is: 'Price' (the vendor's), 'Sells for' (the party's), 'Sold for', 'Bought for'. */
+  label: string;
+  price: number;
+  /** The party can't pay it: the price shows red. */
+  short?: boolean;
+  /** What right-clicking does ('Buy', 'Sell', 'Undo sale', 'Undo purchase'); none when it can't (`reason`). */
+  action?: string;
+  /** Why it can't be traded now ('Not enough gold', 'Inventory full'). */
+  reason?: string;
+  /** Its action undoes a trade of this visit: shown in gold, like its new marker. */
+  undo?: boolean;
+}
+
 interface ItemTooltipProps {
   stats?: Stats;
   proficient?: boolean;           // false marks the item type pink: the viewer can't use it
   clickAction?: ItemClickAction;  // shows the right-click hint
-  canCompare?: boolean;           // shows the Ctrl "Compare" hint (there is an equipped item to compare it with)
+  canCompare?: boolean;           // shows the Ctrl "Compare" hint (the viewer can equip it: equipCompare)
+  trade?: ItemTrade;              // its price and trade action (the vendor window), in place of its sell value
+  deltas?: StatDelta[];           // while comparing: the stats equipping it adds and removes (equipCompare), at the very bottom
 }
 
 /**
@@ -113,15 +146,16 @@ export function KeyHint({ keyName, children, className = '' }: { keyName: string
 }
 
 /**
- * An item's tooltip: name (rarity color), type, implicit, its main readout (weapon damage and range, or
- * armor), rolled affixes, then the hints: right-click at the left, Ctrl to compare at the right.
+ * An item's tooltip: name (rarity color), type and item level, implicit, its main readout (weapon damage and range, or
+ * armor), rolled affixes, what it sells for, then the hints: right-click at the left, Ctrl to compare at the right.
+ * While comparing, how equipping it changes the stats comes last: gains green, losses red.
  */
-function ItemTip({ item, type, proficient, clickAction, canCompare, children }: Omit<ItemTooltipProps, 'stats'> & { item: Item; type: string; children?: ReactNode }) {
+function ItemTip({ item, type, proficient, clickAction, canCompare, trade, deltas, children }: Omit<ItemTooltipProps, 'stats'> & { item: Item; type: string; children?: ReactNode }) {
   return (
     <div className="w-[236px] box-border px-3.5 py-3 text-xs">
       <div className="font-display text-sm tracking-[0.03em]" style={{ color: RARITY_COLOR[item.rarity] }}>{item.name}</div>
       <div className={`mt-[3px] text-[11px] capitalize ${proficient === false ? 'text-rift-unusable' : 'text-rift-muted'}`}>
-        {type}{proficient === false && <span className="normal-case"> · Not proficient</span>}
+        {type}{proficient === false && <span className="normal-case"> · Not proficient</span>} · Level {item.level}
       </div>
       {item.implicit && <div className="mt-1.5 text-rift-ink">{formatModifier(item.implicit.stat, item.implicit.value)}</div>}
       <div className="mt-1.5 flex flex-col gap-0.5 text-rift-soft">{children}</div>
@@ -130,10 +164,30 @@ function ItemTip({ item, type, proficient, clickAction, canCompare, children }: 
           {item.affixes.map((affix, i) => <div key={i}>{formatModifier(affix.stat, affix.value)}</div>)}
         </div>
       )}
+      {trade ? (
+        // The trade: a hairline, the price by its label, then what right-clicking does (or why it can't)
+        <div className="mt-2 pt-2 border-t border-rift-line">
+          <div className="flex items-center justify-between">
+            <span className="text-rift-muted">{trade.label}</span>
+            <GoldAmount amount={trade.price} label={trade.label} color={trade.short ? 'var(--rift-down)' : 'var(--rift-gold-text)'} />
+          </div>
+          {trade.action
+            ? <ClickHint button="right" className="mt-1.5" color={trade.undo ? 'var(--rift-levelup)' : undefined}>{trade.action}</ClickHint>
+            : trade.reason && <div className="mt-1.5 text-[11px] text-rift-down">{trade.reason}</div>}
+        </div>
+      ) : (
+        <GoldAmount amount={item.value} label="Sells for" className="mt-2 text-[11px] text-rift-soft" />
+      )}
       {(clickAction || canCompare) && (
         <div className="mt-2 flex items-center justify-between gap-3">
           {clickAction && <ClickHint button="right">{clickAction}</ClickHint>}
           {canCompare && <KeyHint keyName="Ctrl" className="ml-auto">Compare</KeyHint>}
+        </div>
+      )}
+      {deltas && (
+        <div className="mt-2 pt-2 border-t border-rift-line text-[11px] leading-[1.6]">
+          {deltas.length === 0 ? <div className="text-rift-muted">No stat changes</div>
+            : deltas.map(({ stat, delta }) => <div key={stat} className={delta > 0 ? 'text-rift-up' : 'text-rift-down'}>{formatModifier(stat, delta)}</div>)}
         </div>
       )}
     </div>
@@ -143,7 +197,7 @@ function ItemTip({ item, type, proficient, clickAction, canCompare, children }: 
 function WeaponTooltipContent({ item, stats, ...rest }: ItemTooltipProps & { item: WeaponItem }) {
   const bonus = stats ? getOffense(stats, item.attackCategory, item.damageElement).damage : 0;
   return (
-    <ItemTip item={item} type={`${item.weaponType} · ${item.attackCategory}`} {...rest}>
+    <ItemTip item={item} type={`${WEAPON_TYPE_SINGULAR[item.weaponType]} · ${item.attackCategory}`} {...rest}>
       {weaponDamageLines(weaponDamageEffect(item), bonus).map((line, i) => (
         <EffectRow key={i} label={line.label} value={line.value} tone={line.tone} element={line.element} />
       ))}
@@ -165,18 +219,26 @@ function OffhandTooltipContent({ item, stats: _stats, ...rest }: ItemTooltipProp
   return <ItemTip item={item} type={OFFHAND_KIND_NAME[item.offhandKind]} {...rest} />;
 }
 
+/** A ring or an amulet: like an offhand, only its implicit and affixes. */
+function JewelryTooltipContent({ item, stats: _stats, ...rest }: ItemTooltipProps & { item: JewelryItem }) {
+  return <ItemTip item={item} type={JEWELRY_KIND_NAME[item.slot]} {...rest} />;
+}
+
 /**
- * An item's tooltip with, while `comparing` (Ctrl held), the equipped item's tooltip beside it on the right,
- * bottoms aligned: the two side by side, no deltas. The hovered one stays where it would be alone. Each in its
- * own tooltip frame (use with a `bare` Tooltip).
+ * An item's tooltip with, while `comparing` (Ctrl held), how equipping it changes the stats at its bottom, and
+ * the equipped item's tooltip (if any) beside it on the right, bottoms aligned. The hovered one stays where it
+ * would be alone. Each in its own tooltip frame (use with a `bare` Tooltip). `compareWith` runs only once the
+ * tooltip shows; when it gives null (the viewer can't equip it), no comparing, just the item.
  */
-export function ItemCompareTooltip({ equipped, comparing, ...props }: ItemTooltipProps & { item: Item; equipped: Item | null; comparing: boolean }) {
+export function ItemCompareTooltip({ compareWith, comparing, ...props }: ItemTooltipProps & { item: Item; compareWith: (item: Item) => EquipCompare | null; comparing: boolean }) {
+  const compare = compareWith(props.item);
+  const on = comparing && compare;
   return (
     <div className="relative">
-      <div className="rf-tip text-sm overflow-hidden"><ItemTooltipContent {...props} canCompare={!!equipped} /></div>
-      {comparing && equipped && (
+      <div className="rf-tip text-sm overflow-hidden"><ItemTooltipContent {...props} canCompare={!!compare} deltas={on ? compare.deltas : undefined} /></div>
+      {on && compare.equipped && (
         <div className="rf-tip text-sm overflow-hidden absolute left-full bottom-0 ml-2">
-          <ItemTooltipContent item={equipped} stats={props.stats} />
+          <ItemTooltipContent item={compare.equipped} stats={props.stats} />
         </div>
       )}
     </div>
@@ -189,5 +251,6 @@ export function ItemTooltipContent(props: ItemTooltipProps & { item: Item }) {
   if (isWeaponItem(item)) return <WeaponTooltipContent {...props} item={item} />;
   if (isArmorItem(item) || isShieldItem(item)) return <ArmorTooltipContent {...props} item={item} />;
   if (isOffhandItem(item)) return <OffhandTooltipContent {...props} item={item} />;
+  if (isJewelryItem(item)) return <JewelryTooltipContent {...props} item={item} />;
   return null;
 }

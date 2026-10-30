@@ -36,3 +36,12 @@ export function pickWeighted<T>(items: readonly T[], weight: (item: T) => number
 
 /** True with probability p (0–1). */
 export const chance = (p: number) => Math.random() < p;
+
+/**
+ * How many times something happens, by a rate read as count and chance: its whole part happens for sure, its
+ * fraction is the chance of one more (0.3: a 30% chance of once; 1.2: once, and a 20% chance of twice).
+ */
+export function rollCount(rate: number): number {
+  const whole = Math.floor(rate);
+  return whole + (chance(rate - whole) ? 1 : 0);
+}

@@ -1,4 +1,4 @@
-// Model for Heavy Door (data/world/gameObjects.ts › heavy-door): a heavy dungeon door of dark wooden planks clasped in iron
+// Model for Heavy Door (data/world/interactiveObjects.ts › heavy-door): a heavy dungeon door of dark wooden planks clasped in iron
 // bands, set in a stone frame, with a closed iron grate at a character's head height.
 // Built facing +z (its front), width along x, standing on the floor; it sits in a wall tile, turned to face
 // the floor tile it opens onto. Both faces are dressed (it is seen from either side).
@@ -6,7 +6,7 @@ import type { Design } from '../../core/types';
 import type { Mesh } from '../../core/mesh';
 import { box, frustum } from '../../core/primitives';
 import { mulC, type RGB, type Vec3 } from '../../core/vec';
-import { objectEntry } from '../_object';
+import { interactiveEntry } from '../_interactive';
 
 const WOOD: RGB = [74, 50, 33];
 const WOOD_DARK: RGB = [58, 39, 26];
@@ -41,8 +41,8 @@ function grate(m: Mesh, s: number): void {
 }
 
 const design: Design = {
-  ...objectEntry('heavy-door'),
-  category: 'object',
+  ...interactiveEntry('heavy-door'),
+  category: 'interactive',
   fit: { kind: 'standing', height: 1.4, maxRadius: 0.5 },
   budget: 900,
   build(c) {

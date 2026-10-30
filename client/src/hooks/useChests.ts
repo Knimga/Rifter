@@ -1,14 +1,16 @@
-// Treasure chests: what each holds (filled the first time it is opened), the one whose window is open, and
-// taking items from it. Its window closes when the leader walks away or a fight starts; an emptied chest's
-// lid stands open.
+// Treasure chests: what each holds (filled the first time it is opened: items and gold), the one whose window is
+// open, and taking from it. Its window closes when the leader walks away or a fight starts; an emptied chest's lid
+// stands open.
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { rollContainerLoot } from '../data/gear/containers';
+import { isEmptied, rollContainerLoot, type ContainerContents } from '../data/gear/containers';
 import { isAdjacent, type Pos } from '../data/world/grid';
 import type { DungeonData } from '../data/world/dungeonGen';
 import type { Item } from '../data/gear';
 import { removeItem } from '../data/gear/inventory';
 
-export function useChests({ location, dungeon, currentZone, combatActive, playerPos, partyLevel, partyCanUse, takeLoot }: {
+const EMPTY: ContainerContents = { items: [], gold: 0 };
+
+export function useChests({ location, dungeon, currentZone, combatActive, playerPos, partyLevel, partyCanUse, takeLoot, takeGold }: {
   location: 'sanctum' | 'dungeon';
   dungeon: DungeonData | null;
   currentZone: number;
@@ -21,17 +23,19 @@ export function useChests({ location, dungeon, currentZone, combatActive, player
   partyCanUse: (item: Item) => boolean;
   /** Take items into the inventory (useInventory): the ones left over, or null if none was taken. */
   takeLoot: (items: Item[], at: Pos) => Item[] | null;
+  /** Take gold into the party's gold (it never needs inventory room). */
+  takeGold: (amount: number, at: Pos) => void;
 }) {
-  // Chests' contents by chest id, filled the first time each is opened (an emptied chest keeps [])
-  const [containers, setContainers] = useState<Record<string, Item[]>>({});
+  // Chests' contents by chest id, filled the first time each is opened (an emptied chest keeps EMPTY)
+  const [containers, setContainers] = useState<Record<string, ContainerContents>>({});
   const [openChestId, setOpenChestId] = useState<string | null>(null);
 
   // Chests whose contents have all been taken: their lids stand open
-  const emptiedChests = useMemo(() => new Set(Object.entries(containers).filter(([, items]) => items.length === 0).map(([id]) => id)), [containers]);
+  const emptiedChests = useMemo(() => new Set(Object.entries(containers).filter(([, c]) => isEmptied(c)).map(([id]) => id)), [containers]);
   // The current zone's chests (one in the boss room), and the one whose window is open
   const zoneChests = useMemo(() => (location === 'dungeon' && dungeon ? dungeon.chests.filter(c => c.zoneId === currentZone) : []), [location, dungeon, currentZone]);
   const openChest = openChestId ? zoneChests.find(c => c.id === openChestId) ?? null : null;
-  const openChestItems = openChest ? containers[openChest.id] ?? [] : [];
+  const openChestContents = openChest ? containers[openChest.id] ?? EMPTY : EMPTY;
 
   /**
    * Open a chest's window: next to it, never in combat (the map only offers it then; checked here too, so no
@@ -44,16 +48,29 @@ export function useChests({ location, dungeon, currentZone, combatActive, player
     setOpenChestId(chestId);
   }, [zoneChests, dungeon, partyLevel, partyCanUse, combatActive]);
 
-  /** Take one item from the open chest into the party inventory (not when it is full). Emptied, it closes. */
+  /** The open chest's contents become `next`; emptied, its window closes. */
+  const leave = useCallback((id: string, next: ContainerContents) => {
+    setContainers(prev => ({ ...prev, [id]: next }));
+    if (isEmptied(next)) setOpenChestId(null);
+  }, []);
+
+  /** Take one item from the open chest into the party inventory (not when it is full). */
   const lootChest = useCallback((idx: number) => {
     if (!openChest) return;
-    const items = containers[openChest.id] ?? [];
-    const item = items[idx];
+    const c = containers[openChest.id] ?? EMPTY;
+    const item = c.items[idx];
     if (!item || !takeLoot([item], openChest.pos)) return;
-    const left = removeItem(items, idx);
-    setContainers(prev => ({ ...prev, [openChest.id]: left }));
-    if (left.length === 0) setOpenChestId(null);
-  }, [openChest, containers, takeLoot]);
+    leave(openChest.id, { ...c, items: removeItem(c.items, idx) });
+  }, [openChest, containers, takeLoot, leave]);
+
+  /** Take the open chest's gold. */
+  const lootChestGold = useCallback(() => {
+    if (!openChest) return;
+    const c = containers[openChest.id] ?? EMPTY;
+    if (!c.gold) return;
+    takeGold(c.gold, openChest.pos);
+    leave(openChest.id, { ...c, gold: 0 });
+  }, [openChest, containers, takeGold, leave]);
 
   const closeChest = useCallback(() => setOpenChestId(null), []);
 
@@ -65,5 +82,5 @@ export function useChests({ location, dungeon, currentZone, combatActive, player
     if (openChestId && (!openChest || combatActive || !isAdjacent(playerPos, openChest.pos))) setOpenChestId(null);
   }, [openChestId, openChest, playerPos, combatActive]);
 
-  return { zoneChests, emptiedChests, openChest, openChestItems, openChestWindow, lootChest, closeChest, resetChests };
+  return { zoneChests, emptiedChests, openChest, openChestContents, openChestWindow, lootChest, lootChestGold, closeChest, resetChests };
 }

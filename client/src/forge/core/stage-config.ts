@@ -1,4 +1,4 @@
-import type { Vec3 } from './vec';
+﻿import type { Vec3 } from './vec';
 import { GAME_CAMERA, rad, turnWithView, type ViewAngles } from '../../viewEngine/camera';
 
 /**
@@ -12,7 +12,40 @@ import { GAME_CAMERA, rad, turnWithView, type ViewAngles } from '../../viewEngin
  * Inventory icon camera: straight-on (no elevation, no yaw), so an item's face is never tilted toward
  * or away from the viewer. Items are built facing +z, so this shows their true outline.
  */
-export const ICON_CAMERA = { elevationDeg: 0, yawRad: 0, fovDeg: 28 };
+export const ICON_CAMERA: IconCamera = { elevationDeg: 0, yawRad: 0, fovDeg: 28, zoom: 1 };
+
+/** How an icon is seen (fitIconCamera, poseIcon in viewEngine/three/stage.ts). */
+export interface IconCamera {
+  elevationDeg: number;
+  yawRad: number;
+  fovDeg: number;
+  /** How much larger than an item's framing the model shows (1: it fills the icon as items do). */
+  zoom: number;
+  /**
+   * A model with a `top` anchor (a ring's gem) is turned so that point is at `angleDeg` on the icon (from its middle:
+   * 0 right, 90 up), its top tipped `tiltDeg` toward the viewer about the axis across it (square to the line from its
+   * top to its bottom).
+   */
+  top?: { angleDeg: number; tiltDeg: number };
+}
+
+/**
+ * Rings' and amulets' icon camera (category `jewelry`): a little closer in, so a piece fills its slot. A ring is
+ * turned so its top (where its gem sits, its `top` anchor) is at the upper right, tipped toward the viewer across
+ * that line, so a band shows its depth (face-on it reads as a flat circle). On the floor they stay small: loot's
+ * size is `fit.size`.
+ */
+export const JEWELRY_ICON_CAMERA: IconCamera = { elevationDeg: 0, yawRad: 0, fovDeg: 28, zoom: 1.035, top: { angleDeg: 45, tiltDeg: 24 } };
+
+/**
+ * Loot's icon camera (category `loot`, e.g. the Gold Coins in a chest's slot): loot lies on the floor, so it is seen
+ * from above at an angle, like on the map, rather than straight-on (which would show coins edge-on).
+ */
+export const LOOT_ICON_CAMERA: IconCamera = { elevationDeg: 50, yawRad: 0, fovDeg: 28, zoom: 1 };
+
+/** The icon camera for a model, by its design id: loot's, jewelry's, or the items' straight-on one. */
+export const iconCameraFor = (designId: string): IconCamera =>
+  designId.startsWith('loot.') ? LOOT_ICON_CAMERA : designId.startsWith('jewelry.') ? JEWELRY_ICON_CAMERA : ICON_CAMERA;
 
 /**
  * Standing height of a player character, in tiles: the reference size for people. Matches the skeleton
@@ -21,7 +54,7 @@ export const ICON_CAMERA = { elevationDeg: 0, yawRad: 0, fovDeg: 28 };
 export const CHARACTER_HEIGHT = 1.12;
 
 /**
- * Items on the map (loot) lie FLAT on their tile, face up: rotate the model -90° about X (its +z face
+ * Items on the map (loot) lie FLAT on their tile, face up: rotate the model -90Â° about X (its +z face
  * turns up, its +y "tip" points north), then lift it so it rests on the floor, and turn it by lootYaw so
  * it keeps its icon's screen orientation. Used by the game renderer, the forge game view and forge:sheet.
  * A design can lie less tipped (fit.groundPitchDeg), or on its side (fit.groundRollDeg: turned about its front

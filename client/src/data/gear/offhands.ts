@@ -12,6 +12,8 @@ export interface ShieldTemplate {
   requiredLevel: number;
   /** Scales its armor (the type's baseArmor x SHIELD_ARMOR_MULTIPLIER); starting gear is 1.0. */
   armorMultiplier: number;
+  /** Scales what it sells for (value.ts). Unused on starting gear (STARTER_VALUE). */
+  valueMultiplier: number;
   model: ModelLink;           // its forge design: how it is drawn (icon and loot)
 }
 
@@ -20,9 +22,9 @@ export const SHIELD_ARMOR_MULTIPLIER = 0.80;
 
 /** Shields that drop as loot. */
 export const SHIELDS: ShieldTemplate[] = [
-  { id: 'buckler',     requiredLevel: 1, armorType: 'Light',  armorMultiplier: 1.2, name: 'Buckler',     model: 'offhand.buckler' },
-  { id: 'roundel',     requiredLevel: 1, armorType: 'Medium', armorMultiplier: 1.2, name: 'Roundel',     model: 'offhand.roundel' },
-  { id: 'kite-shield', requiredLevel: 1, armorType: 'Heavy',  armorMultiplier: 1.2, name: 'Kite Shield', model: 'offhand.kite-shield' },
+  { id: 'buckler',     requiredLevel: 1, armorType: 'Light',  armorMultiplier: 1.2, valueMultiplier: 1, name: 'Buckler',     model: 'offhand.buckler' },
+  { id: 'roundel',     requiredLevel: 1, armorType: 'Medium', armorMultiplier: 1.2, valueMultiplier: 1, name: 'Roundel',     model: 'offhand.roundel' },
+  { id: 'kite-shield', requiredLevel: 1, armorType: 'Heavy',  armorMultiplier: 1.2, valueMultiplier: 1, name: 'Kite Shield', model: 'offhand.kite-shield' },
 ];
 
 /**
@@ -47,6 +49,8 @@ export interface OffhandTemplate {
   name: string;
   requiredLevel: number;
   implicit: ImplicitDef;
+  /** Scales what it sells for (value.ts). Unused on starting gear (STARTER_VALUE). */
+  valueMultiplier: number;
   /** Affixes it never rolls. */
   invalidAffixes: BuffableStat[];
   model: ModelLink;           // its forge design: how it is drawn (icon and loot); '' while it has none
@@ -73,7 +77,7 @@ const FOCUS_INVALID_AFFIXES: BuffableStat[] = [
 /** Quivers that drop as loot. */
 export const QUIVERS: OffhandTemplate[] = [
   {
-    id: 'leather-quiver', name: 'Leather Quiver', requiredLevel: 1,
+    id: 'leather-quiver', name: 'Leather Quiver', requiredLevel: 1, valueMultiplier: 1,
     implicit: { stat: 'rangedDamage', baseValue: 2, growthPerLevel: 0 },
     invalidAffixes: QUIVER_INVALID_AFFIXES,
     model: 'offhand.leather-quiver',
@@ -83,7 +87,7 @@ export const QUIVERS: OffhandTemplate[] = [
 /** Starting gear only: never drops, so even a common first drop is an upgrade (+1 ranged damage, not +2). */
 export const STARTER_QUIVERS: OffhandTemplate[] = [
   {
-    id: 'worn-quiver', name: 'Worn Quiver', requiredLevel: 1,
+    id: 'worn-quiver', name: 'Worn Quiver', requiredLevel: 1, valueMultiplier: 1,
     implicit: { stat: 'rangedDamage', baseValue: 1, growthPerLevel: 0 },
     invalidAffixes: QUIVER_INVALID_AFFIXES,
     model: 'offhand.leather-quiver', // the Leather Quiver's (starting gear borrows the model of what it is a worn version of)
@@ -93,7 +97,7 @@ export const STARTER_QUIVERS: OffhandTemplate[] = [
 /** Foci that drop as loot. */
 export const FOCI: OffhandTemplate[] = [
   {
-    id: 'keen-amethyst', name: 'Keen Amethyst', requiredLevel: 1,
+    id: 'keen-amethyst', name: 'Keen Amethyst', requiredLevel: 1, valueMultiplier: 1.2, // foci sell for a little more
     implicit: { stat: 'spellcraft', baseValue: 2, growthPerLevel: 0 },
     invalidAffixes: FOCUS_INVALID_AFFIXES,
     model: 'offhand.keen-amethyst',
@@ -103,7 +107,7 @@ export const FOCI: OffhandTemplate[] = [
 /** Starting gear only: never drops, so even a common first drop is an upgrade (+1 spellcraft, not +2). */
 export const STARTER_FOCI: OffhandTemplate[] = [
   {
-    id: 'cracked-amethyst', name: 'Cracked Amethyst', requiredLevel: 1,
+    id: 'cracked-amethyst', name: 'Cracked Amethyst', requiredLevel: 1, valueMultiplier: 1,
     implicit: { stat: 'spellcraft', baseValue: 1, growthPerLevel: 0 },
     invalidAffixes: [],
     model: 'offhand.keen-amethyst', // the Keen Amethyst's (starting gear borrows the model of what it is a worn version of)

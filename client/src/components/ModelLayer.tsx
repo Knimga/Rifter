@@ -26,7 +26,10 @@ export interface MapLoot {
   tint?: RGB;
 }
 
-/** A game object on the map (a door, a rift): it stands on its tile, facing `facing` (yaw, radians), and never moves. */
+/**
+ * A fixed thing on the map (a door, a rift, an NPC): it stands on its tile, facing `facing` (yaw, radians), and never
+ * moves (an NPC may turn: `aim`).
+ */
 export interface MapObject {
   /** Stable for the map's lifetime (e.g. the door's id); also seeds its look. */
   id: string;
@@ -37,6 +40,8 @@ export interface MapObject {
   played?: string[];
   /** The color a tinted model (a rift) is drawn in: the color of where it leads (core/tint.ts). */
   tint?: RGB;
+  /** A tile it turns to face, when `seq` changes (an NPC turning to the one talking to it, and back: MapUnit.aim). */
+  aim?: UnitAim;
   /**
    * A tinted model holding two tinted things, each in its own color: a color per list of parts (tintModel's
    * `parts`), e.g. the active Rifter's keystone and its rift while the rift swaps keys. Instead of `tint`.
@@ -66,7 +71,7 @@ interface Props {
   enemies?: EnemyInstance[];
   /** Loot, one model per tile. Every item of a design looks the same. */
   loot?: MapLoot[];
-  /** Game objects (doors, rifts): fixed, each facing its own way. Keep the array stable while unchanged. */
+  /** Map objects (doors, rifts, chests, decor): fixed, each facing its own way. Keep the array stable while unchanged. */
   objects?: MapObject[];
   /** DOM drawn just above each enemy model's head (HP bar, effect dots). */
   renderEnemyOverlay?: (enemy: EnemyInstance) => ReactNode;
@@ -133,7 +138,7 @@ export default function ModelLayer({ board, party = [], enemies = [], loot = [],
   const lootCacheId = (l: MapLoot) => `item:${l.link}:${l.tint?.join(',') ?? ''}`;
   /** An object's colors, as text (its cache key and change key). */
   const tintKey = (o: MapObject) => `${o.tint?.join(',') ?? ''}${o.partTints?.map((t) => `${t.parts.join('+')}=${t.color.join(',')}`).join(';') ?? ''}`;
-  const objectKey = objects.map((o) => `${o.id}:${o.link}:${o.pos.x},${o.pos.y}:${o.facing}:${o.played?.join('+') ?? ''}:${tintKey(o)}`).join('|');
+  const objectKey = objects.map((o) => `${o.id}:${o.link}:${o.pos.x},${o.pos.y}:${o.facing}:${o.played?.join('+') ?? ''}:${tintKey(o)}:${o.aim?.seq ?? ''}`).join('|');
   const aimKey = Object.entries(aims).map(([id, a]) => `${id}:${a.seq}`).join('|');
   const units: MapUnit[] = useMemo(() => {
     const out = [...partyUnits, ...enemyUnits].map((u) => (aims[u.id] ? { ...u, aim: aims[u.id] } : u));
@@ -145,7 +150,7 @@ export default function ModelLayer({ board, party = [], enemies = [], loot = [],
         if (o.partTints) return o.partTints.reduce((m, t) => tintModel(m, t.color, t.parts), built);
         return o.tint ? tintModel(built, o.tint) : built;
       });
-      out.push({ id: o.id, model, pos: o.pos, facing: o.facing, played: o.played });
+      out.push({ id: o.id, model, pos: o.pos, facing: o.facing, played: o.played, ...(o.aim ? { aim: o.aim } : {}) });
     }
     for (const l of loot) {
       const design = linkedDesign(designs, l.link);

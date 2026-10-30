@@ -1,17 +1,19 @@
 // The party window: party rail, the member's model and equipment, the shared
 // inventory (or, its Keys tab, the keyring), and their attributes, skills and stats (StatsPanel). Values raised or
-// lowered by gear, buffs and debuffs show green / red with an arrow.
+// lowered by gear, buffs and debuffs show green / red (a green one's tooltip says by how much), pulse yellow when
+// the gear changes them, and (the stats, not the attributes and skills themselves) glow yellow while placed
+// level-up points change them.
 // Level-up: the party's XP bar on the rail; a member with points to
 // spend is marked on the rail, gets a header banner (Reset, Confirm) and + / - on their attribute and skill
 // rows. Placed points stay pending (kept by GameScreen, so closing the window keeps them) until Confirm.
 import { lazy, Suspense, useMemo, useState, type ComponentType, type MouseEvent } from 'react';
-import { Crown, Shirt, Hand, Footprints, Sword, Shield } from 'lucide-react';
+import { Crown, Shirt, Hand, Footprints, Sword, Shield, Gem, CircleDot } from 'lucide-react';
 import { CLASSES } from '../data/units/classes';
 import { ATTRIBUTE_KEYS, SKILL_KEYS, recomputeStats, type ActiveBuff, type Stats } from '../data/units/stats';
 import { GEAR_SLOTS, getGearBuffs, type GearSlot, type Item } from '../data/gear';
-import { hasPointsToSpend, memberStatInput, memberStats, noPendingPoints, pointsLeft, spendPoints, type PartyMemberConfig, type PendingPoints } from '../data/units/party';
+import { equipCompare, hasPointsToSpend, memberStatInput, memberStats, noPendingPoints, pointsLeft, spendPoints, type PartyMemberConfig, type PendingPoints } from '../data/units/party';
 import { xpToNext, type PartyProgress } from '../data/units/xp';
-import { INVENTORY_COLS, INVENTORY_SIZE, canEquip, canUnequip, isFull, isProficient, type Inventory } from '../data/gear/inventory';
+import { INVENTORY_COLS, INVENTORY_SIZE, canEquip, canUnequip, isProficient, type Inventory } from '../data/gear/inventory';
 import { AttributeTooltips, SkillTooltips, ATTR_LABEL, SLOT_LABEL, capitalize } from '../data/detailStrings';
 import { Tooltip, ItemTooltipContent, TextTip } from './Tooltip';
 import ItemIcon, { rarityGlow } from './ItemIcon';
@@ -20,9 +22,10 @@ import Portrait from './hud/Portrait';
 import { PanelTitle } from './ui/Panel';
 import { XpBar } from './hud/XpBar';
 import { characterLookKey, characterModel, heldGear } from './characterModel';
-import StatsPanel, { Val, type StatShift } from './StatsPanel';
+import StatsPanel, { GearChange, Val, type Shift, type StatShift } from './StatsPanel';
 import Keyring from './Keyring';
-import ModalWindow from './ui/ModalWindow';
+import ModalWindow, { WindowCloseButton } from './ui/ModalWindow';
+import GoldAmount from './ui/GoldAmount';
 import type { DungeonKey } from '../data/world/dungeons';
 
 // The turning model (lazy: it pulls in three.js)
@@ -36,6 +39,8 @@ interface Props {
   /** Each member's active buffs and debuffs (effects, not gear): what colors their stats red. */
   partyBuffs: ActiveBuff[][];
   inventory: Inventory;
+  /** The party's gold (shared, like the inventory). */
+  gold: number;
   /** The party's rift keys (shared, like the inventory), in the order obtained. */
   keys: readonly DungeonKey[];
   /** A key was obtained since the Keys tab was last opened: the tab glows gold. */
@@ -61,16 +66,21 @@ const WIDTH = 1296, HEIGHT = 830;
 const SLOT_ICON: Record<GearSlot, ComponentType<{ className?: string }>> = {
   helm: Crown, chest: Shirt, gloves: Hand, boots: Footprints,
   mainhand: Sword, offhand: Shield,
+  amulet: Gem, ring1: CircleDot, ring2: CircleDot,
 };
 
-// Grid position for each slot (col, row) in the 3×4 equipment grid
+// Grid position for each slot (col, row) in the 3×5 equipment grid: the head, the amulet under it, the hands
+// beside the chest, the rings beside the gloves, the boots at the bottom
 const SLOT_POS: Record<GearSlot, { col: number; row: number }> = {
   helm:     { col: 2, row: 1 },
-  chest:    { col: 2, row: 2 },
+  amulet:   { col: 2, row: 2 },
   mainhand: { col: 1, row: 3 },
-  gloves:   { col: 2, row: 3 },
+  chest:    { col: 2, row: 3 },
   offhand:  { col: 3, row: 3 },
-  boots:    { col: 2, row: 4 },
+  ring1:    { col: 1, row: 4 },
+  gloves:   { col: 2, row: 4 },
+  ring2:    { col: 3, row: 4 },
+  boots:    { col: 2, row: 5 },
 };
 
 /** Level-up controls on an attribute or skill row. */
@@ -86,7 +96,7 @@ interface PointControls {
  * A labelled value on a dark strip (attributes and skills); hovering or focusing the label explains it.
  * While levelling up, "+" adds a point (the banner's Reset takes them all back); the value includes placed points.
  */
-function TipRow({ label, tip, delta, value, caps, points }: { label: string; tip: string; delta: number; value: number; caps?: boolean; points?: PointControls }) {
+function TipRow({ label, tip, shift, caps, points }: { label: string; tip: string; shift: Shift; caps?: boolean; points?: PointControls }) {
   const name = capitalize(label.toLowerCase());
   return (
     <div className="flex items-center justify-between gap-1.5 box-border min-h-6 px-2.5 bg-rift-void border border-rift-seam rounded-sm">
@@ -100,7 +110,8 @@ function TipRow({ label, tip, delta, value, caps, points }: { label: string; tip
             <svg aria-hidden="true" width="8" height="8" viewBox="0 0 8 8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"><path d="M1 4h6M4 1v6" /></svg>
           </button>
         )}
-        <Val delta={delta} className="text-sm min-w-[2ch] justify-end">{value}</Val>
+        {/* Never yellow for placed points: the "+n" beside it shows those; only the stats they feed glow */}
+        <Val shift={{ ...shift, pending: false }} className="text-sm min-w-[2ch] justify-end">{shift.value}</Val>
       </span>
     </div>
   );
@@ -127,7 +138,7 @@ function GearSlotBox({ slot, item, stats, onUnequip }: { slot: GearSlot; item: I
   if (!item) {
     return (
       <div className="rf-eqs" style={pos} role="img" aria-label={`${SLOT_LABEL[slot]}: empty`}>
-        <EmptyIcon className="w-[26px] h-[26px] text-rift-rim" />
+        <EmptyIcon className="w-5 h-5 text-rift-rim" />
         <span className="text-[10px] tracking-[0.08em] uppercase">{SLOT_LABEL[slot]}</span>
       </div>
     );
@@ -135,14 +146,14 @@ function GearSlotBox({ slot, item, stats, onUnequip }: { slot: GearSlot; item: I
   return (
     <Tooltip gap={10} style={pos} content={<ItemTooltipContent item={item} stats={stats} clickAction={onUnequip ? 'Unequip' : undefined} />}>
       <div className={`rf-eqs is-filled ${rarityGlow(item).className}`} style={rarityGlow(item).style} aria-label={`${SLOT_LABEL[slot]}: ${item.name}`} onContextMenu={rightClick(true, onUnequip)}>
-        <ItemIcon item={item} className="w-[34px] h-[34px]" />
+        <ItemIcon item={item} className="w-[28px] h-[28px]" />
         <span className="text-[10px] tracking-[0.08em] uppercase">{SLOT_LABEL[slot]}</span>
       </div>
     </Tooltip>
   );
 }
 
-export default function CharacterSheet({ party, partyHp, partyMp, partyStats, partyBuffs, inventory, keys, hasNewKey, onSeeKeys, onClose, onEquipItem, onUnequipItem, progress, pending: pendingAll, onPendingChange, onConfirmPoints }: Props) {
+export default function CharacterSheet({ party, partyHp, partyMp, partyStats, partyBuffs, inventory, gold, keys, hasNewKey, onSeeKeys, onClose, onEquipItem, onUnequipItem, progress, pending: pendingAll, onPendingChange, onConfirmPoints }: Props) {
   const [selectedIdx, setSelectedIdx] = useState(0);
   // The Inventory panel's tab: the shared inventory, or the keyring
   const [tab, setTab] = useState<'items' | 'keys'>('items');
@@ -168,22 +179,34 @@ export default function CharacterSheet({ party, partyHp, partyMp, partyStats, pa
   // them. Green: raised above the base by an affix, implicit or effect on that stat itself (not through another:
   // Subtlety on gear raises crit too, but only Subtlety is green); red: an effect is lowering it now, even if it is
   // still above its base.
+  // The gear's share is what it adds over the base, the effects' what they add over that. Yellow: the placed,
+  // unconfirmed points change it (from the member's confirmed stats).
   const baseStats = recomputeStats(memberStatInput(shown, stats.level), []);
+  const geared = memberStats(shown, stats.level, []);
   const unlowered = memberStats(shown, stats.level, buffs.filter(b => b.amount >= 0 && (b.percent ?? 0) >= 0));
   const raised = new Set([...getGearBuffs(gear), ...buffs].filter(b => b.amount > 0 || (b.percent ?? 0) > 0).map(b => b.stat));
   /**
-   * How a stat stands: −1 an effect lowers it, 1 gear or an effect on it (`stat`; none for HP and MP, which only
-   * attributes raise) raises it above its base, 0 neither (Val's colors).
+   * How a stat stands: `dir` −1 an effect lowers it, 1 gear or an effect on it (`stat`; none for HP and MP, which
+   * only attributes raise) raises it above its base, 0 neither (Val's colors).
    */
-  const shift: StatShift = (stat, get) =>
-    get(stats) < get(unlowered) ? -1 : stat && raised.has(stat) && get(stats) > get(baseStats) ? 1 : 0;
+  const shift: StatShift = (stat, get) => {
+    const value = get(stats);
+    return {
+      value,
+      dir: value < get(unlowered) ? -1 : stat && raised.has(stat) && value > get(baseStats) ? 1 : 0,
+      gear: get(geared) - get(baseStats),
+      effects: value - get(geared),
+      pending: placed && value !== get(partyStats[selectedIdx]),
+    };
+  };
+  // What the member wears: a stat their gear changes pulses (Val)
+  const worn = { member: selectedIdx, gear: GEAR_SLOTS.map(s => gear[s]?.id ?? '').join(',') };
 
   // The member's model, holding their equipped weapon and offhand
   const held = heldGear(gear);
   const lookKey = characterLookKey(selectedClass, held.weapon, held.offhand);
   const model = useMemo(() => characterModel(selectedClass, held.weapon, held.offhand), [lookKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const invFull = isFull(inventory);
 
   const ready = leveling && left.attr === 0 && left.skill === 0;
   const setPending = (fn: (p: PendingPoints) => PendingPoints) => onPendingChange(selectedIdx, fn);
@@ -257,9 +280,7 @@ export default function CharacterSheet({ party, partyHp, partyMp, partyStats, pa
                 <button type="button" className={BANNER_BTN} disabled={!ready} onClick={() => onConfirmPoints(selectedIdx)}>Confirm</button>
               </div>
             )}
-            <button type="button" className="rf-btn flex-none w-11 h-11 flex items-center justify-center p-0 text-rift-soft" aria-label="Close" onClick={onClose}>
-              <svg aria-hidden="true" width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><path d="M2 2l10 10M12 2L2 12" /></svg>
-            </button>
+            <WindowCloseButton onClose={onClose} />
           </header>
 
           <div className="flex-1 min-h-0 flex gap-4 mt-3">
@@ -275,7 +296,7 @@ export default function CharacterSheet({ party, partyHp, partyMp, partyStats, pa
 
                 <section aria-label="Equipment" className="rf-panel flex-none flex flex-col px-3.5 pt-3.5 pb-3">
                   <PanelTitle variant="heading">Equipment</PanelTitle>
-                  <div className="flex-1 grid content-between mt-3.5 gap-x-6 gap-y-2" style={{ gridTemplateColumns: 'repeat(3, 84px)', gridTemplateRows: 'repeat(4, 60px)' }}>
+                  <div className="flex-1 grid content-between mt-3.5 gap-x-6 gap-y-1.5" style={{ gridTemplateColumns: 'repeat(3, 84px)', gridTemplateRows: 'repeat(5, 48px)' }}>
                     {GEAR_SLOTS.map(slot => (
                       <GearSlotBox key={slot} slot={slot} item={gear[slot]} stats={stats}
                         onUnequip={onUnequipItem && canUnequip(inventory, gear, slot) ? () => onUnequipItem(slot, selectedIdx) : null} />
@@ -288,16 +309,17 @@ export default function CharacterSheet({ party, partyHp, partyMp, partyStats, pa
                 {/* Two tabs, the shared inventory and the keyring; the panel keeps its
                     size between them */}
                 <div className="flex items-baseline justify-between mb-2.5">
-                  <div role="tablist" aria-label="Shared storage" className="flex items-baseline gap-[18px]">
+                  <div role="tablist" aria-label="Shared storage" className="flex items-baseline gap-[22px]">
                     <button type="button" role="tab" aria-selected={tab === 'items'} className={`rf-h rf-tab ${tab === 'items' ? 'is-on' : ''}`} onClick={() => setTab('items')}>
                       Inventory <span className="font-tech text-[10px] tracking-[0.1em] text-rift-label">Shared</span>
                     </button>
+                    <span aria-hidden="true" className="rf-tabsep" />
                     <button type="button" role="tab" aria-selected={tab === 'keys'} className={`rf-h rf-tab ${tab === 'keys' ? 'is-on' : ''} ${hasNewKey ? 'is-new' : ''}`} onClick={showKeys}>
                       Keys
                     </button>
                   </div>
                   {tab === 'items'
-                    ? <span className={`text-xs ${invFull ? 'text-rift-warn' : 'text-rift-muted'}`}>{inventory.length} / {INVENTORY_SIZE}{invFull ? ' · Full' : ''}</span>
+                    ? <GoldAmount amount={gold} label="Party gold" className="text-xs text-rift-soft" />
                     : <span className="text-xs text-rift-muted">{keys.length} {keys.length === 1 ? 'key' : 'keys'}</span>}
                 </div>
                 {tab === 'items' ? (
@@ -305,42 +327,44 @@ export default function CharacterSheet({ party, partyHp, partyMp, partyStats, pa
                     canUse={(item) => isProficient(classData, item)}
                     action={(item) => (onEquipItem && canEquip(classData, item, inventory, gear) ? 'Equip' : null)}
                     onAction={(i) => onEquipItem?.(i, selectedIdx)} unusableNote=", not proficient"
-                    equippedFor={(item) => gear[item.slot]} />
+                    compareWith={(item) => equipCompare(member, item)} />
                 ) : <Keyring keys={keys} />}
               </section>
             </div>
 
             {/* ── Right: attributes, skills, stats ── */}
-            <div className="flex-1 min-w-0 flex flex-col gap-2">
-              <div className="flex-none flex gap-2 items-stretch">
-                <section aria-label="Attributes" className="rf-panel flex-1 min-w-0 p-3 flex flex-col">
-                  <div className="flex items-baseline justify-between">
-                    <PanelTitle variant="heading">Attributes</PanelTitle>
-                    {leveling && <PointsLeft left={left.attr} />}
-                  </div>
-                  <div className="flex-1 min-h-0 grid grid-cols-1 auto-rows-fr gap-1 mt-2">
-                    {ATTRIBUTE_KEYS.map(attr => (
-                      <TipRow key={attr} label={ATTR_LABEL[attr]} tip={AttributeTooltips[attr]} caps points={attrPoints(attr)}
-                        value={stats.attributes[attr]} delta={shift(attr, s => s.attributes[attr])} />
-                    ))}
-                  </div>
-                </section>
-                <section aria-label="Skills" className="rf-panel flex-1 min-w-0 p-3">
-                  <div className="flex items-baseline justify-between">
-                    <PanelTitle variant="heading">Skills</PanelTitle>
-                    {leveling && <PointsLeft left={left.skill} />}
-                  </div>
-                  <div className="grid grid-cols-1 gap-1 mt-2">
-                    {SKILL_KEYS.map(skill => (
-                      <TipRow key={skill} label={capitalize(skill)} tip={SkillTooltips[skill]} points={skillPoints(skill)}
-                        value={stats.skills[skill]} delta={shift(skill, s => s.skills[skill])} />
-                    ))}
-                  </div>
-                </section>
-              </div>
+            <GearChange value={worn}>
+              <div className="flex-1 min-w-0 flex flex-col gap-2">
+                <div className="flex-none flex gap-2 items-stretch">
+                  <section aria-label="Attributes" className="rf-panel flex-1 min-w-0 p-3 flex flex-col">
+                    <div className="flex items-baseline justify-between">
+                      <PanelTitle variant="heading">Attributes</PanelTitle>
+                      {leveling && <PointsLeft left={left.attr} />}
+                    </div>
+                    <div className="flex-1 min-h-0 grid grid-cols-1 auto-rows-fr gap-1 mt-2">
+                      {ATTRIBUTE_KEYS.map(attr => (
+                        <TipRow key={attr} label={ATTR_LABEL[attr]} tip={AttributeTooltips[attr]} caps points={attrPoints(attr)}
+                          shift={shift(attr, s => s.attributes[attr])} />
+                      ))}
+                    </div>
+                  </section>
+                  <section aria-label="Skills" className="rf-panel flex-1 min-w-0 p-3">
+                    <div className="flex items-baseline justify-between">
+                      <PanelTitle variant="heading">Skills</PanelTitle>
+                      {leveling && <PointsLeft left={left.skill} />}
+                    </div>
+                    <div className="grid grid-cols-1 gap-1 mt-2">
+                      {SKILL_KEYS.map(skill => (
+                        <TipRow key={skill} label={capitalize(skill)} tip={SkillTooltips[skill]} points={skillPoints(skill)}
+                          shift={shift(skill, s => s.skills[skill])} />
+                      ))}
+                    </div>
+                  </section>
+                </div>
 
-              <StatsPanel stats={stats} hp={hp} mp={mp} shift={shift} />
-            </div>
+                <StatsPanel stats={stats} hp={hp} mp={mp} shift={shift} />
+              </div>
+            </GearChange>
           </div>
         </div>
     </ModalWindow>

@@ -10,8 +10,12 @@ export const CATEGORY_FOLDER: Record<Category, string> = {
   weapon: 'weapons',
   armor: 'armor',
   offhand: 'offhands',
-  object: 'objects',
+  jewelry: 'jewelry',
+  interactive: 'interactive',
+  decor: 'decor',
+  loot: 'loot',
   rift: 'rifts',
+  npc: 'npcs',
 };
 
 /**

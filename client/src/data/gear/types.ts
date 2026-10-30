@@ -6,10 +6,20 @@ import type { ModelLink } from '../../forge/core/types';
 
 export type ArmorSlot = 'helm' | 'chest' | 'gloves' | 'boots';
 export type WeaponSlot = 'mainhand' | 'offhand';
-export type GearSlot = ArmorSlot | WeaponSlot;
+/** Rings and amulets (jewelry.ts): every class wears them. */
+export type JewelryKind = 'ring' | 'amulet';
+/** Where jewelry is worn: one amulet, two rings (either ring takes any ring). */
+export type JewelrySlot = 'amulet' | 'ring1' | 'ring2';
+/** A slot a character wears or holds an item in. */
+export type GearSlot = ArmorSlot | WeaponSlot | JewelrySlot;
+/** What slot an item is for (Item.slot): a gear slot, except that a ring is for either ring slot ('ring'). */
+export type ItemSlot = ArmorSlot | WeaponSlot | JewelryKind;
 
 export const ARMOR_SLOTS: ArmorSlot[] = ['helm', 'chest', 'gloves', 'boots'];
-export const GEAR_SLOTS: GearSlot[] = ['helm', 'chest', 'gloves', 'boots', 'mainhand', 'offhand'];
+export const JEWELRY_KINDS: JewelryKind[] = ['ring', 'amulet'];
+export const GEAR_SLOTS: GearSlot[] = ['helm', 'chest', 'gloves', 'boots', 'mainhand', 'offhand', 'amulet', 'ring1', 'ring2'];
+/** The gear slots an item can go in: its own, or (a ring) either ring slot, Ring 1 first. */
+export const gearSlotsFor = (slot: ItemSlot): GearSlot[] => (slot === 'ring' ? ['ring1', 'ring2'] : [slot]);
 
 // ─── Item Interfaces ──────────────────────────────────────────────────────────
 
@@ -24,10 +34,14 @@ export interface Item {
   /** Unique per item. */
   id: string;
   name: string;
-  slot: GearSlot;
+  slot: ItemSlot;
   rarity: Rarity;
   affixes: Affix[];
   implicit?: Affix;       // fixed bonus from the base type; counts toward stats like an affix
+  /** What it sells for (gold), set when it is made (value.ts itemValue). */
+  value: number;
+  /** Its item level: what its implicit, armor and damage scale with (shown in its tooltip). */
+  level: number;
   /** The forge design it is drawn with (inventory icon, loot on the map), from its data entry. */
   model: ModelLink;
 }
@@ -51,6 +65,11 @@ export type OffhandKind = 'quiver' | 'focus';
 export interface OffhandItem extends Item {
   slot: 'offhand';
   offhandKind: OffhandKind;
+}
+
+/** A ring or an amulet (jewelry.ts): no armor, no proficiency needed; its stats are its implicit and affixes. */
+export interface JewelryItem extends Item {
+  slot: JewelryKind;
 }
 
 /** Weapon proficiencies that are weapons (mainhand), not offhands. */
@@ -95,7 +114,6 @@ export interface WeaponItem extends Item {
   weaponType: WeaponType;
   attackCategory: AttackCategory;
   damageElement: DamageElement;
-  level: number;
   minDamage: number;
   maxDamage: number;
   range: number;

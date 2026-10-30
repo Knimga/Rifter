@@ -32,7 +32,7 @@ export function useReach({ zone, dungeon, fog, partyTiles, zoneEnemies, mover, m
   const known = (key: string) => !fog || fog.visible.has(key) || fog.explored.has(key);
 
   // Where the mover can go this turn (tile key -> steps it costs), by the shared movement rules
-  // (partyMoveTargets): walls, game objects (the rift, chests) and enemies block the way, and nobody stops on
+  // (partyMoveTargets): walls, map objects (the rift, chests) and enemies block the way, and nobody stops on
   // an occupied tile (party members and summoned allies can be walked through). Never into unseen fog.
   const moveTargets = useMemo(() => {
     const isWalkable = zone && dungeon ? zoneWalkable(dungeon, zone) : isSanctumWalkable;

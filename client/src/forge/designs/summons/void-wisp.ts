@@ -1,6 +1,6 @@
 import type { Design } from '../../core/types';
-import { blob, frustum } from '../../core/primitives';
-import { add, mul, norm, type RGB, type Vec3 } from '../../core/vec';
+import { blob, fibSphere, frustum, scatterDir } from '../../core/primitives';
+import { add, mul, type RGB, type Vec3 } from '../../core/vec';
 import { floorGlow } from '../_glow';
 
 // Identity: the Occultist's Void Wisp, a small crystalline star of black and violet floating at about waist height
@@ -12,6 +12,10 @@ const BLACK: RGB = [20, 14, 30];
 const DARK: RGB = [58, 34, 92];
 const VIOLET: RGB = [138, 76, 214];
 const GLOW: RGB = [206, 148, 255];
+/** The body's halo: violet, hotter than the spikes so it blooms onto the dark around them. */
+const HALO: RGB = [170, 100, 255];
+/** How far past the spikes' midpoints the halo's radius goes (its glow fades out toward its edge). */
+const HALO_REACH = 2;
 
 /** Where the star's center floats above the floor. */
 const FLOAT_Y = 0.6;
@@ -45,12 +49,9 @@ const design: Design = {
     // Four-sided (crystalline), each a black root and a violet point; some points glow.
     const n = ri(8, 10);
     const turn = rf(0, Math.PI * 2), tilt = rf(-0.4, 0.4);
-    for (let i = 0; i < n; i++) {
-      const y = 1 - (2 * (i + 0.5)) / n;
-      const r = Math.sqrt(1 - y * y);
-      const a = i * 2.39996 + turn; // the golden angle
-      let dir: Vec3 = [Math.cos(a) * r, y, Math.sin(a) * r];
-      dir = norm([dir[0] + rf(-0.15, 0.15), dir[1] * Math.cos(tilt) + dir[2] * Math.sin(tilt) + rf(-0.15, 0.15), dir[2] * Math.cos(tilt) - dir[1] * Math.sin(tilt)]);
+    let reach = 0; // the spikes' tips' distances from the center, summed
+    for (const d of fibSphere(n, turn)) {
+      const dir = scatterDir(d, tilt, rf);
       // Longer sideways than up and down: what sticks out to the sides reads at full size under the camera
       const len = SIZE * 0.8 * rf(0.2, 0.3) * (1 + (1 - Math.abs(dir[1])) * 0.35);
       const root = add(C, mul(dir, 0.05 * SIZE));
@@ -59,7 +60,12 @@ const design: Design = {
       const w = SIZE * 0.8 * rf(0.075, 0.095);
       frustum(m, root, mid, w, w * 0.7, 4, BLACK, { j: 0.2 });
       frustum(m, mid, tip, w * 0.7, 0.003, 4, c.chance(0.35) ? GLOW : c.pick([VIOLET, DARK]), { e: 0, j: 0.15, caps: false });
+      reach += 0.05 * SIZE + len;
     }
+
+    // A violet glow around the body, from the core out to about half the spikes' length. A halo fades out well
+    // before its radius, so its radius goes a little past the spikes' midpoints (HALO_REACH)
+    m.halo(C, (reach / n) * 0.5 * HALO_REACH, HALO);
 
     return 'Void Wisp';
   },

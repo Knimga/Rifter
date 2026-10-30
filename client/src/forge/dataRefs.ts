@@ -9,10 +9,14 @@ import { SUMMON_CLASSES } from '../data/units/summons';
 import { STARTER_WEAPON_SERIES, WEAPON_SERIES, weaponName } from '../data/gear/weapons';
 import { ARMOR_SERIES, STARTER_ARMOR_SERIES, armorName } from '../data/gear/armor';
 import { OFFHANDS, SHIELDS, STARTER_SHIELDS } from '../data/gear/offhands';
+import { JEWELRY } from '../data/gear/jewelry';
 import { CLASSES, type ClassKey } from '../data/units/classes';
-import { GAME_OBJECTS } from '../data/world/gameObjects';
+import { INTERACTIVE_OBJECTS } from '../data/world/interactiveObjects';
+import { DECOR_OBJECTS } from '../data/world/decorObjects';
+import { LOOT } from '../data/gear/loot';
 import { RIFT_MODELS } from '../data/world/rifts';
-import { ARMOR_SLOTS, type WeaponType } from '../data/gear/types';
+import { NPCS } from '../data/world/npcs';
+import { ARMOR_SLOTS, JEWELRY_KINDS, type WeaponType } from '../data/gear/types';
 
 export interface DataEntry {
   ref: DataRef;
@@ -69,17 +73,35 @@ export function allDataEntries(): DataEntry[] {
     path: `data/gear/offhands.ts › ${o.list} ${o.id}`,
     link: o.model,
   }));
+  const jewelry: DataEntry[] = JEWELRY_KINDS.flatMap((kind) => JEWELRY[kind].map((t) => ({
+    ref: { table: 'jewelry' as const, key: t.id },
+    name: t.name,
+    path: `data/gear/jewelry.ts › ${kind} ${t.id}`,
+    link: t.model,
+  })));
   const classes: DataEntry[] = (Object.entries(CLASSES) as [ClassKey, (typeof CLASSES)[ClassKey]][]).map(([key, c]) => ({
     ref: { table: 'classes', key },
     name: c.name,
     path: `data/units/classes.ts › ${key}`,
     link: c.model,
   }));
-  const objects: DataEntry[] = GAME_OBJECTS.map((o) => ({
-    ref: { table: 'gameObjects', key: o.id },
+  const interactive: DataEntry[] = INTERACTIVE_OBJECTS.map((o) => ({
+    ref: { table: 'interactiveObjects', key: o.id },
     name: o.name,
-    path: `data/world/gameObjects.ts › ${o.id}`,
+    path: `data/world/interactiveObjects.ts › ${o.id}`,
     link: o.model,
+  }));
+  const decor: DataEntry[] = DECOR_OBJECTS.map((o) => ({
+    ref: { table: 'decorObjects', key: o.id },
+    name: o.name,
+    path: `data/world/decorObjects.ts › ${o.id}`,
+    link: o.model,
+  }));
+  const loot: DataEntry[] = LOOT.map((l) => ({
+    ref: { table: 'loot', key: l.id },
+    name: l.name,
+    path: `data/gear/loot.ts › ${l.id}`,
+    link: l.model,
   }));
   const rifts: DataEntry[] = Object.values(RIFT_MODELS).map((r) => ({
     ref: { table: 'rifts', key: r.id },
@@ -87,7 +109,13 @@ export function allDataEntries(): DataEntry[] {
     path: `data/world/rifts.ts › ${r.id}`,
     link: r.model,
   }));
-  return [...enemies, ...summons, ...weapons, ...armor, ...offhands, ...classes, ...objects, ...rifts];
+  const npcs: DataEntry[] = NPCS.map((n) => ({
+    ref: { table: 'npcs', key: n.id },
+    name: n.name,
+    path: `data/world/npcs.ts › ${n.id}`,
+    link: n.model,
+  }));
+  return [...enemies, ...summons, ...weapons, ...armor, ...offhands, ...jewelry, ...classes, ...interactive, ...decor, ...loot, ...rifts, ...npcs];
 }
 
 // Built on first use. Game data is static at runtime (a hot reload re-runs this module).
@@ -120,6 +148,9 @@ export function checkDataRefs(list: { design: Design; stem: string }[]): string[
   }
   const designsById = new Map(list.map(({ design }) => [design.id, design]));
   for (const entry of allDataEntries()) {
+    // A blank link ('') is an entry with no design yet: nothing to check (the game draws nothing for it; jewelry
+    // without one doesn't drop)
+    if (!entry.link) continue;
     const d = designsById.get(entry.link);
     if (!d) problems.push(`${entry.path}: links ${entry.link}, which has no design file (approved or draft)`);
     else if (refKey(d.source) !== refKey(entry.ref)) problems.push(`${entry.path}: links ${d.id}, but that design is for ${refKey(d.source)}`);

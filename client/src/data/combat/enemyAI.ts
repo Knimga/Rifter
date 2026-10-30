@@ -124,7 +124,7 @@ export function computeEnemyTurn(
   floors: Set<string>,
   /** Foes' threat, by key (CombatState.threat); none = 0. Enemies hold none, so a summon picks the closest. */
   threat: Record<string, number> = {},
-  /** Floor tiles a game object stands on (the rift): it can't walk onto or through them (sight isn't blocked). */
+  /** Floor tiles a map object stands on (the rift): it can't walk onto or through them (sight isn't blocked). */
   objectTiles: ReadonlySet<string> = new Set(),
   /** What it has left this turn: AP, and tiles already paid for (combat.ts moveCost). Default: a fresh turn. */
   budget: { ap: number; paidTiles: number } = { ap: enemy.stats.apMax, paidTiles: 0 },
@@ -146,7 +146,7 @@ export function computeEnemyTurn(
   if (targets.length === 0) return noAction;
 
   // Where it can stand after this step (nearest first, its own tile included): over floor, through its own side
-  // but never its foes or a game object, never on anyone, within the tiles it has paid for plus one more move
+  // but never its foes or a map object, never on anyone, within the tiles it has paid for plus one more move
   // (1 AP), if it has the AP
   const movement = enemy.stats.movement;
   const isFloor = (p: Pos) => floors.has(posKey(p)) && !objectTiles.has(posKey(p));

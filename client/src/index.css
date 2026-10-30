@@ -60,6 +60,9 @@
   --rift-foe-edge: #3a2a28;
   --rift-debuff-edge: #6d4a46;
   --rift-loot: #d1a766;
+  --rift-gold: #d9ba5d;      /* gold: the coin icon */
+  --rift-gold-text: #e6d9a8; /* an amount of gold being traded (the vendor's prices, the party's gold there) */
+  --rift-noprof: #c4544f;    /* not proficient: the red tint of an item cell the viewer can't use (every grid) */
   --rift-levelup: #e2d496;   /* level-up cues and XP fill: "act now", deliberately not the --glow accent */
   --rift-xp-track: #1a1c20;
   --rift-fog: #050608;       /* fog of war over unseen tiles (read by the map renderer: viewEngine/three/fog.ts) */
@@ -294,7 +297,7 @@
 
   /* Party window: equipment slot, inventory cell, hoverable stat label */
   .rf-eqs {
-    position: relative; width: 84px; height: 60px; box-sizing: border-box; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+    position: relative; width: 84px; height: 48px; box-sizing: border-box; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
     background: var(--rift-raised); border: 1px solid var(--rift-edge); border-radius: 2px; color: var(--rift-label);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), inset 0 -2px 8px rgba(0, 0, 0, 0.6);
     transition: border-color 220ms ease, box-shadow 220ms ease;
@@ -306,27 +309,70 @@
     background: var(--rift-sunk); border: 1px solid var(--rift-seam); border-radius: 2px; box-shadow: inset 0 1px 6px rgba(0, 0, 0, 0.7);
     transition: border-color 220ms ease, box-shadow 220ms ease;
   }
-  .rf-cell.is-filled { background: var(--rift-raised); border-color: var(--rift-rim); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), inset 0 -2px 8px rgba(0, 0, 0, 0.6); }
+  /* A filled cell's background is three layers: a wash (--cell-wash: not proficient), a glow (--cell-glow: rarity),
+     its color. Each mark sets its own layer, so they all show together. */
+  .rf-cell.is-filled {
+    --cell-wash: linear-gradient(transparent, transparent); --cell-glow: linear-gradient(transparent, transparent);
+    background: var(--cell-wash), var(--cell-glow), var(--rift-raised); border-color: var(--rift-rim); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), inset 0 -2px 8px rgba(0, 0, 0, 0.6);
+  }
   .rf-cell.is-filled:hover { border-color: color-mix(in srgb, var(--glow) 55%, var(--rift-edge)); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 0 16px color-mix(in srgb, var(--glow) 22%, transparent); }
   /* An item better than Common: a faint glow of its rarity color (--rarity, inline) inside its cell or slot,
      and a tinted border. A background, so the hover glow still shows on top. See rarityGlow (ItemIcon.tsx). */
-  .rf-cell.is-filled.has-rarity, .rf-eqs.is-filled.has-rarity {
+  .rf-cell.is-filled.has-rarity { --cell-glow: radial-gradient(circle at 50% 55%, color-mix(in srgb, var(--rarity) 20%, transparent), transparent 72%); }
+  .rf-eqs.is-filled.has-rarity {
     background: radial-gradient(circle at 50% 55%, color-mix(in srgb, var(--rarity) 20%, transparent), transparent 72%), var(--rift-raised);
   }
   .rf-cell.is-filled.has-rarity:not(:hover), .rf-eqs.is-filled.has-rarity:not(:hover) { border-color: color-mix(in srgb, var(--rarity) 32%, var(--rift-rim)); }
-  /* An item the viewer can't use (not proficient): a faint red wash over the cell, under its icon (an inset shadow
-     filling it, so a rarity glow still shows through), kept on hover */
-  .rf-cell.is-filled.is-unusable { box-shadow: inset 0 0 0 23px color-mix(in srgb, var(--rift-hp) 16%, transparent), inset 0 -2px 8px rgba(0, 0, 0, 0.6); }
-  .rf-cell.is-filled.is-unusable:hover { box-shadow: inset 0 0 0 23px color-mix(in srgb, var(--rift-hp) 16%, transparent), 0 0 16px color-mix(in srgb, var(--glow) 22%, transparent); }
-  /* The Inventory panel's tabs (Inventory, Keys): the active one full and underlined in the glow, the other faint.
-     A newly obtained key lights the Keys tab in the level-up gold until it is opened. */
+  /* An item the viewer can't use (not proficient), in every grid (the party inventory, a chest, the vendor's): a red
+     wash over the cell under its icon (a rarity glow still shows through) and a red border, brighter on hover */
+  .rf-cell.is-filled.is-unusable {
+    --cell-wash: linear-gradient(color-mix(in srgb, var(--rift-noprof) 14%, transparent), color-mix(in srgb, var(--rift-noprof) 14%, transparent));
+    border-color: color-mix(in srgb, var(--rift-noprof) 40%, transparent);
+  }
+  .rf-cell.is-filled.is-unusable:hover, .rf-cell.is-filled.is-unusable:focus-visible { border-color: color-mix(in srgb, var(--rift-noprof) 75%, transparent); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), inset 0 -2px 8px rgba(0, 0, 0, 0.6), 0 0 16px color-mix(in srgb, var(--rift-noprof) 25%, transparent); }
+  /* The vendor window's cells (VendorWindow.tsx). Dim: one that can't be traded now (too dear, no room), its icon
+     faded. New: just bought or sold this visit, a gold border and glow and a coin in its corner (ItemGrid); it wins
+     over the red border (the red wash stays). */
+  .rf-cell.is-filled.is-dim > * { opacity: 0.5; }
+  .rf-cell.is-filled.is-new { border-color: color-mix(in srgb, var(--rift-levelup) 50%, transparent); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), inset 0 -2px 8px rgba(0, 0, 0, 0.6), 0 0 12px color-mix(in srgb, var(--rift-levelup) 20%, transparent); }
+  .rf-cell.is-filled.is-new:hover, .rf-cell.is-filled.is-new:focus-visible { border-color: color-mix(in srgb, var(--rift-levelup) 85%, transparent); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), inset 0 -2px 8px rgba(0, 0, 0, 0.6), 0 0 18px color-mix(in srgb, var(--rift-levelup) 32%, transparent); }
+  .rf-cell-coin { position: absolute; top: 3px; left: 3px; width: 9px; height: 9px; color: var(--rift-gold); filter: drop-shadow(0 0 3px color-mix(in srgb, var(--rift-gold) 80%, transparent)); }
+  .rf-cell.is-filled.is-dim > .rf-cell-coin { opacity: 1; }
+  .rf-cell.is-filled:focus-visible { outline: 1px solid color-mix(in srgb, var(--glow) 60%, transparent); outline-offset: 2px; }
+  /* The vendor window's party member buttons: who items are checked against (the party rail's selected look) */
+  .rf-mem {
+    display: flex; align-items: center; gap: 8px; min-height: 40px; padding: 0 12px 0 5px; box-sizing: border-box; color: inherit; text-align: left;
+    background: var(--rift-panel); border: 1px solid var(--rift-line); border-radius: 2px; transition: border-color 220ms ease, box-shadow 220ms ease;
+  }
+  .rf-mem:hover { border-color: var(--rift-rim-hi); }
+  .rf-mem.is-sel { background: var(--rift-raised-hi); border-color: color-mix(in srgb, var(--glow) 50%, var(--rift-edge)); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 0 18px color-mix(in srgb, var(--glow) 14%, transparent); }
+  .rf-mem:focus-visible { outline: 1px solid color-mix(in srgb, var(--glow) 60%, transparent); outline-offset: 2px; }
+  /* The party's gold in the vendor window: it pulses on every trade, and flashes red on one that fails. Two copies
+     of each, so a repeat restarts it */
+  .rf-gold { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; color: var(--rift-gold-text); transform-origin: right center; }
+  .rf-gold.fx-a { animation: rf-gp-a 800ms ease-in-out; }
+  .rf-gold.fx-b { animation: rf-gp-b 800ms ease-in-out; }
+  .rf-gold.bad-a { animation: rf-gb-a 800ms ease-in-out; }
+  .rf-gold.bad-b { animation: rf-gb-b 800ms ease-in-out; }
+  @keyframes rf-gp-a { 0%, 100% { transform: scale(1); text-shadow: 0 0 0 transparent; } 35% { transform: scale(1.1); text-shadow: 0 0 14px color-mix(in srgb, var(--rift-gold-text) 85%, transparent), 0 0 4px color-mix(in srgb, var(--rift-gold-text) 60%, transparent); } }
+  @keyframes rf-gp-b { 0%, 100% { transform: scale(1); text-shadow: 0 0 0 transparent; } 35% { transform: scale(1.1); text-shadow: 0 0 14px color-mix(in srgb, var(--rift-gold-text) 85%, transparent), 0 0 4px color-mix(in srgb, var(--rift-gold-text) 60%, transparent); } }
+  @keyframes rf-gb-a { 0%, 100% { color: var(--rift-gold-text); } 35% { color: var(--rift-down); text-shadow: 0 0 12px color-mix(in srgb, var(--rift-down) 70%, transparent); } }
+  @keyframes rf-gb-b { 0%, 100% { color: var(--rift-gold-text); } 35% { color: var(--rift-down); text-shadow: 0 0 12px color-mix(in srgb, var(--rift-down) 70%, transparent); } }
+  @media (prefers-reduced-motion: reduce) { .rf-gold { animation: none !important; } .rf-mem { transition: none; } }
+  /* Tabs (the party window's Inventory and Keys, the vendor's shelves): the active one full and underlined in the
+     glow, the other faint, a short rule between them. A newly obtained key lights the Keys tab in the level-up
+     gold, glowing and gently pulsing until it is opened. */
   .rf-tab { appearance: none; background: none; border: 0; border-bottom: 1px solid transparent; padding: 0 0 3px; margin: 0; opacity: 0.45; transition: opacity 180ms ease, border-color 180ms ease; }
   .rf-tab:hover { opacity: 0.8; }
-  .rf-tab.is-new { opacity: 1; color: var(--rift-levelup); text-shadow: 0 0 14px color-mix(in srgb, var(--rift-levelup) 90%, transparent), 0 0 6px color-mix(in srgb, var(--rift-levelup) 75%, transparent), 0 0 2px color-mix(in srgb, var(--rift-levelup) 60%, transparent); }
+  .rf-tab.is-new { opacity: 1; color: var(--rift-levelup); text-shadow: 0 0 18px color-mix(in srgb, var(--rift-levelup) 100%, transparent), 0 0 8px color-mix(in srgb, var(--rift-levelup) 90%, transparent), 0 0 3px color-mix(in srgb, var(--rift-levelup) 75%, transparent); animation: rf-tab-new 2400ms ease-in-out infinite; }
   .rf-tab.is-new.is-on { border-bottom-color: color-mix(in srgb, var(--rift-levelup) 55%, transparent); }
   .rf-tab.is-on { opacity: 1; border-bottom-color: color-mix(in srgb, var(--glow) 55%, transparent); }
   .rf-tab:focus-visible { outline: 1px solid color-mix(in srgb, var(--glow) 60%, transparent); outline-offset: 4px; }
-  @media (prefers-reduced-motion: reduce) { .rf-tab { transition: none; } }
+  @keyframes rf-tab-new { 50% { text-shadow: 0 0 10px color-mix(in srgb, var(--rift-levelup) 55%, transparent), 0 0 4px color-mix(in srgb, var(--rift-levelup) 50%, transparent), 0 0 1px color-mix(in srgb, var(--rift-levelup) 40%, transparent); } }
+  .rf-tabsep { align-self: center; flex: none; width: 1px; height: 14px; background: var(--rift-edge); }
+  @media (prefers-reduced-motion: reduce) { .rf-tab { transition: none; } .rf-tab.is-new { animation: none; } }
+  /* A stat that unconfirmed level-up points change (StatsPanel's Val): yellow, softly glowing, until Confirm or Reset */
+  .rf-val-pend { color: var(--rift-levelup); text-shadow: 0 0 8px color-mix(in srgb, var(--rift-levelup) 55%, transparent); }
   /* The keyring (Keyring.tsx): one dark box, as tall as the inventory grid, two columns of ten keys */
   .rf-keyring {
     height: 246px; box-sizing: border-box; padding: 8px 12px; display: grid; grid-template-rows: repeat(10, 1fr); grid-auto-flow: column;

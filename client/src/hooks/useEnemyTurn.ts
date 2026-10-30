@@ -20,7 +20,7 @@ type Refs = {
   threat: MutableRefObject<Record<string, number>>;
   zone: MutableRefObject<ZoneData | null>;
   currentZone: MutableRefObject<number>;
-  /** Tiles of the zone a game object stands on (objectTilesOf): not walkable. */
+  /** Tiles of the zone a map object stands on (objectTilesOf): not walkable. */
   zoneObjects: MutableRefObject<Set<string>>;
   /**
    * `aimAt`: the tile the ability was aimed at (the caster's model turns to face it first). Returns the

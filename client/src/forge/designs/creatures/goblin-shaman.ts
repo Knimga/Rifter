@@ -1,8 +1,9 @@
 import type { Design } from '../../core/types';
 import type { ColorFn, Mesh } from '../../core/mesh';
-import { bipyr, blob, box, frustum, loft, tendril, tube, wobbleRing } from '../../core/primitives';
+import { bipyr, blob, box, frustum, tendril, tube } from '../../core/primitives';
 import { add, hslRGB, lerp3, mixC, mul, mulC, norm, sub, type RGB, type Vec3 } from '../../core/vec';
 import { GOBLIN_RED, goblinArm, goblinHead, goblinHeadCenter, goblinLook, goblinShoulder } from '../_goblin';
+import { loftRobe, type RobeRing } from '../_robe';
 import { archHood } from '../_hood';
 
 // Identity: the goblin body (designs/_goblin.ts) in a very dark grey robe with purple and red accents: hugging its
@@ -70,11 +71,11 @@ const design: Design = {
       if (cen[1] < 0.06 || (cen[1] < 0.44 && Math.abs(cen[0]) < 0.035 && n[2] > 0.5)) return PURPLE;
       return n[1] > 0.45 ? mulC(cloth(cen, n), 1.2) : cloth(cen, n);
     };
-    const PROFILE: [number, number, number, number, number][] = [
+    const PROFILE: RobeRing[] = [
       [0.01, 0.27, 0.27, 0.05, 0.1], [0.2, 0.22, 0.2, 0.04, 0.05], [0.46, 0.15, 0.14, hunch * 0.3, 0.02],
       [0.62, 0.19, 0.17, hunch * 0.5, 0.03], [0.78, 0.2, 0.17, hunch * 0.78, 0.03], [0.88, 0.13, 0.12, hunch, 0.02],
     ];
-    loft(m, PROFILE.map(([y, rx, rz, dz, jag]) => wobbleRing([0, y, dz], rx * W, rz * W, 12, jag, c.R)), robeColor, { j: 0.16 });
+    loftRobe(c, PROFILE, W, robeColor);
     blob(m, [0, 0.8, hunch * 0.45 - 0.07], [0.19 * W, 0.15, 0.14], 0, 0.15, robeColor); // the hump
     frustum(m, [0, 0.43, hunch * 0.28], [0, 0.5, hunch * 0.32], 0.158 * W, 0.162 * W, 8, GOBLIN_RED); // sash
     box(m, [-0.08 * W, 0.34, 0.14 * W + hunch * 0.28], [0.05, 0.17, 0.02], GOBLIN_RED, 0.2); // its hanging end

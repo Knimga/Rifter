@@ -1,8 +1,9 @@
 import type { Design } from '../../core/types';
 import type { ColorFn } from '../../core/mesh';
-import { blob, box, crackedBlob, frustum } from '../../core/primitives';
+import { blob, crackedBlob, frustum } from '../../core/primitives';
 import { hslRGB, mixC, mulC, type RGB, type Vec3 } from '../../core/vec';
 import { mush, shelf } from '../_fungal';
+import { golemFoot, golemHead, golemLimb, golemStone } from '../_golem';
 
 // Identity: the Flame Golem's hulk of rock (here a warm dark brown), gone to the swamp. Instead of lava, its
 // cracks are grown over with dark green moss and patches of dark orange rust-lichen. Hunched like a gorilla: a
@@ -31,7 +32,6 @@ const design: Design = {
     const m = c.mesh;
     const { rf, ri } = c;
     const rock = hslRGB(ri(16, 24), rf(22, 30), rf(17, 22)); // always a warm dark brown (never the Golem's cooler grey-brown)
-    const rockHi = mulC(rock, 1.35);
     const moss = hslRGB(ri(105, 135), rf(24, 36), rf(13, 18));
     const lichen = hslRGB(ri(18, 28), rf(50, 64), rf(18, 24)); // dark orange
     // What grows in the cracks: moss, with patches of lichen where a slow wave through the body crosses a threshold
@@ -41,8 +41,7 @@ const design: Design = {
       Math.sin(cen[0] * 7 + phase[0]) + Math.sin(cen[1] * 6 + phase[1]) + Math.sin(cen[2] * 8 + phase[2]) > 0.9 ? lichen : moss;
     const W = rf(0.95, 1.08); // build: bulk
 
-    // Rock faces facing up catch more light (weathered tops); the rest stay dark
-    const stone = (_cen: Vec3, n: Vec3): RGB => (n[1] > 0.6 ? rockHi : rock);
+    const stone = golemStone(rock);
     /** Share of the faces grown over (moss, lichen): the torso's masses, and the (less) limbs. Lit, not glowing. */
     const TORSO_MOSS = 0.33, LIMB_MOSS = 0.2;
     const MOSS = { j: 0.18 };
@@ -53,15 +52,8 @@ const design: Design = {
       return [x, y, ctr[2] + face * (r[2] * k + 0.015)];
     };
 
-    /** A rocky limb from `a` to `b`: a chain of overlapping lumpy mossy rocks (radius r0 tapering to r1). */
-    const limb = (a: Vec3, b: Vec3, r0: number, r1: number, n: number) => {
-      const len = Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]);
-      for (let i = 0; i < n; i++) {
-        const t = (i + 0.5) / n, rr = r0 + (r1 - r0) * t;
-        const p: Vec3 = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
-        crackedBlob(m, p, [rr, Math.max(rr, (len / n) * 0.78), rr], 0, 0.22, stone, growth, LIMB_MOSS, { j: 0.2 }, MOSS);
-      }
-    };
+    // Rocky limbs grown over with moss and lichen
+    const limb = golemLimb(m, stone, growth, LIMB_MOSS, MOSS);
     /** A vine hanging from `p` (on a surface): thin, in 4-5 segments, drifting a little (`sx`: outward) as it falls. */
     const vine = (p: Vec3, sx: number) => {
       const col = c.pick(VINES);
@@ -89,7 +81,7 @@ const design: Design = {
       limb(hip, knee, 0.15, 0.13, 1);
       mossy(knee, [0.14, 0.13, 0.14], 0, LIMB_MOSS);
       limb(knee, ankle, 0.13, 0.12, 1);
-      box(m, [ankle[0], 0.07, ankle[2] + 0.05], [0.26, 0.14, 0.32], rock, 0.25);
+      golemFoot(m, ankle, rock);
     }
 
     // Body, hunched over: pelvis, belly, a chest thrust forward and down, and behind them a hunched back: a
@@ -114,14 +106,7 @@ const design: Design = {
 
     // Head: small, sunk low and forward between the shoulders; a heavy brow over small round glowing green eyes
     m.part('head', [0, 1.24, 0.46]);
-    const H: Vec3 = [0, 1.26, 0.56];
-    const eye = c.pick(EYES);
-    blob(m, H, [0.15, 0.13, 0.14], 0, 0.18, stone);
-    box(m, [0, H[1] + 0.08, H[2] + 0.04], [0.26, 0.055, 0.1], rock, 0.2);
-    for (const sx of [-1, 1]) {
-      blob(m, [sx * 0.065, H[1] + 0.02, H[2] + 0.125], [0.042, 0.042, 0.035], 0, 0.05, eye, { e: 0.95, j: 0.05 });
-      m.halo([sx * 0.065, H[1] + 0.02, H[2] + 0.16], 0.11, eye);
-    }
+    golemHead(m, [0, 1.26, 0.56], stone, rock, c.pick(EYES));
 
     // Big boulder shoulders thrust forward; long arms dangling straight down like a gorilla's, leaning a little
     // outward, the huge fists resting on their knuckles on the ground. Vines hang off each shoulder.

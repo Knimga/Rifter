@@ -1,4 +1,4 @@
-// Model for Basic Treasure Chest (data/world/gameObjects.ts › basic-treasure-chest): a plain wooden chest of
+// Model for Basic Treasure Chest (data/world/interactiveObjects.ts › basic-treasure-chest): a plain wooden chest of
 // horizontal planks under a rounded (barrel) lid, clasped in iron: two straps over the lid and down the
 // body, a rim along the lid's edge, iron corner caps, and a hasp with a padlock on the front.
 // Built facing +z (the lock), width along x, standing on the floor.
@@ -9,7 +9,7 @@ import type { Design } from '../../core/types';
 import type { Mesh } from '../../core/mesh';
 import { box, frustum, loft } from '../../core/primitives';
 import { mulC, type RGB, type Vec3 } from '../../core/vec';
-import { objectEntry } from '../_object';
+import { interactiveEntry } from '../_interactive';
 
 const WOOD: RGB = [84, 54, 32];
 const WOOD_DARK: RGB = [68, 44, 26];
@@ -47,8 +47,8 @@ function bodyStrap(m: Mesh, x: number): void {
 }
 
 const design: Design = {
-  ...objectEntry('basic-treasure-chest'),
-  category: 'object',
+  ...interactiveEntry('basic-treasure-chest'),
+  category: 'interactive',
   fit: { kind: 'standing', height: 0.5, maxRadius: 0.45 },
   budget: 700,
   // Looted: the lid swings open on its back hinge, left ajar

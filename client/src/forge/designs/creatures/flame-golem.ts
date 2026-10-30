@@ -1,6 +1,7 @@
 import type { Design } from '../../core/types';
-import { blob, box, crackedBlob, frustum } from '../../core/primitives';
-import { hslRGB, mixC, mulC, type RGB, type Vec3 } from '../../core/vec';
+import { blob, crackedBlob, frustum } from '../../core/primitives';
+import { hslRGB, mixC, type RGB, type Vec3 } from '../../core/vec';
+import { golemFoot, golemHead, golemLimb, golemStone } from '../_golem';
 
 // Identity: a hulking golem of cooled rock veined with lava. Tall but bent: a hunched back and low-slung
 // head between big boulder shoulders, long arms swung back and bent at the elbow, hanging almost to the
@@ -19,30 +20,17 @@ const design: Design = {
     const m = c.mesh;
     const { rf, ri } = c;
     const rock = hslRGB(ri(8, 18), rf(10, 18), rf(17, 23));
-    const rockHi = mulC(rock, 1.35);
     const lava = hslRGB(ri(18, 28), 100, rf(52, 58));
     const eye: RGB = [255, 150, 30]; // bright orange, always
     const spikeColor = mixC(rock, [14, 10, 10], 0.4);
     const W = rf(0.95, 1.08); // build: bulk
     const spikes = ri(5, 8);
 
-    // Rock faces facing up catch more light (weathered tops); the rest stay dark
-    const stone = (_cen: Vec3, n: Vec3): RGB => (n[1] > 0.6 ? rockHi : rock);
+    const stone = golemStone(rock);
     /** Share of the faces that are glowing lava veins: the torso's masses, and the (less cracked) limbs. */
     const TORSO_LAVA = 0.33, LIMB_LAVA = 0.2;
-
-    /**
-     * A rocky limb from `a` to `b`: a chain of overlapping lumpy cracked rocks (radius r0 tapering to r1), so
-     * it reads bumpy and veined with lava instead of a smooth tube.
-     */
-    const limb = (a: Vec3, b: Vec3, r0: number, r1: number, n: number) => {
-      const len = Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]);
-      for (let i = 0; i < n; i++) {
-        const t = (i + 0.5) / n, rr = r0 + (r1 - r0) * t;
-        const p: Vec3 = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
-        crackedBlob(m, p, [rr, Math.max(rr, (len / n) * 0.78), rr], 0, 0.22, stone, lava, LIMB_LAVA, { j: 0.2 });
-      }
-    };
+    // Rocky limbs veined with lava
+    const limb = golemLimb(m, stone, lava, LIMB_LAVA);
 
     m.anchor('feet', [0, 0, 0.02]); // between the feet: this point goes to the tile center
 
@@ -53,7 +41,7 @@ const design: Design = {
       limb(hip, knee, 0.15, 0.13, 1);
       crackedBlob(m, knee, [0.14, 0.13, 0.14], 0, 0.2, stone, lava, LIMB_LAVA, { j: 0.2 });
       limb(knee, ankle, 0.13, 0.12, 1);
-      box(m, [ankle[0], 0.07, ankle[2] + 0.05], [0.26, 0.14, 0.32], rock, 0.25);
+      golemFoot(m, ankle, rock);
     }
 
     // Body: pelvis, belly, a broad chest pushed forward and a hunched back behind it, all a third lava
@@ -65,13 +53,7 @@ const design: Design = {
 
     // Head: small, low and forward, sunk between the shoulders; a heavy brow over small round glowing eyes
     m.part('head', [0, 1.46, 0.36]);
-    const H: Vec3 = [0, 1.5, 0.46];
-    blob(m, H, [0.15, 0.13, 0.14], 0, 0.18, stone);
-    box(m, [0, H[1] + 0.08, H[2] + 0.04], [0.26, 0.055, 0.1], rock, 0.2);
-    for (const sx of [-1, 1]) {
-      blob(m, [sx * 0.065, H[1] + 0.02, H[2] + 0.125], [0.042, 0.042, 0.035], 0, 0.05, eye, { e: 0.95, j: 0.05 });
-      m.halo([sx * 0.065, H[1] + 0.02, H[2] + 0.16], 0.11, eye);
-    }
+    golemHead(m, [0, 1.5, 0.46], stone, rock, eye);
 
     // Big boulder shoulders; long arms swung back from the shoulder and bent at the elbow, hanging nearly to
     // the ground beside the body (not held out in front), leaning outward, ending in huge fists

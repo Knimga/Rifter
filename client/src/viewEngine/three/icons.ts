@@ -4,7 +4,7 @@ import { buildModel } from '../../forge/core/build';
 import { ITEM_SEED } from '../../forge/core/link';
 import { tintModel } from '../../forge/core/tint';
 import type { RGB } from '../../forge/core/vec';
-import { addForgeLights, fitIconCamera } from './stage';
+import { addForgeLights, fitIconCamera, poseIcon } from './stage';
 import { disposeObject, toThree } from './toThree';
 
 /**
@@ -29,7 +29,10 @@ export class IconRenderer {
     const obj = toThree(model);
     this.scene.add(obj);
     if (frame) frame(this.cam, obj);
-    else fitIconCamera(this.cam, model.mesh.bounds.min, model.mesh.bounds.max);
+    else {
+      const { min, max, view } = poseIcon(obj, model);
+      fitIconCamera(this.cam, min, max, 1, view);
+    }
     this.r.render(this.scene, this.cam);
     const url = this.r.domElement.toDataURL('image/png');
     this.scene.remove(obj);
