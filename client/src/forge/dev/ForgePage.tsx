@@ -11,6 +11,7 @@ import { buildPreview, classHolds, classOf } from '../equip';
 import { HOLD_LABEL } from '../designs/_character';
 import { CATEGORY_FOLDER } from '../core/folders';
 import type { WeaponType } from '../../data/gear/types';
+import { TINT_CHOICES, tintChoice } from '../tintChoices';
 import { DUNGEONS } from '../../data/world/dungeons';
 import { isTinted, tintModel } from '../core/tint';
 import type { RGB } from '../core/vec';
@@ -29,7 +30,7 @@ const CATEGORY_LABEL: Record<Category, string> = {
   creature: 'Creatures', summon: 'Summons', character: 'Classes', weapon: 'Weapons', armor: 'Armor', offhand: 'Offhands', jewelry: 'Rings & Amulets',
   interactive: 'Interactive Objects', decor: 'Decorative Objects', loot: 'Loot', rift: 'Rifts & Keys', npc: 'NPCs',
 };
-const DUNGEON_KEYS = Object.keys(DUNGEONS);
+const TINT_KEYS = TINT_CHOICES.map((t) => t.key);
 const toHex = (c: RGB) => `#${c.map((v) => Math.round(v).toString(16).padStart(2, '0')).join('')}`;
 const fromHex = (h: string): RGB => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16)) as RGB;
 const CATEGORIES = Object.keys(CATEGORY_LABEL) as Category[];
@@ -50,7 +51,7 @@ function readUrl() {
     seed: Number(q.get('seed') ?? 1),
     count: Number(q.get('count') ?? 12),
     camera: (q.get('cam') as CameraPreset) ?? 'game',
-    tint: q.get('tint') ?? DUNGEON_KEYS[0],
+    tint: q.get('tint') ?? TINT_KEYS[0],
   };
 }
 
@@ -88,13 +89,13 @@ export default function ForgePage() {
   // Which of the design's one-time animations (PartAnimation) plays on a loop in every cell; null = the model at rest
   const [animation, setAnimation] = useState<string | null>(null);
   const [status, setStatus] = useState('');
-  // Rifts & Keys: the dungeon whose color they are shown in, or 'custom' (the picker's color, to try new ones)
-  const [tintKey, setTintKey] = useState(initial.tint.startsWith('#') ? 'custom' : DUNGEON_KEYS.includes(initial.tint) ? initial.tint : DUNGEON_KEYS[0]);
-  const [customTint, setCustomTint] = useState<RGB>(initial.tint.startsWith('#') ? fromHex(initial.tint) : DUNGEONS[DUNGEON_KEYS[0]].riftColor);
+  // Tinted models (Rifts & Keys, the Affix Shard): the color they are shown in (a dungeon's, or a shard category's), or 'custom' (the picker's color, to try new ones)
+  const [tintKey, setTintKey] = useState(initial.tint.startsWith('#') ? 'custom' : TINT_KEYS.includes(initial.tint) ? initial.tint : TINT_KEYS[0]);
+  const [customTint, setCustomTint] = useState<RGB>(initial.tint.startsWith('#') ? fromHex(initial.tint) : TINT_CHOICES[0].color);
 
   const entry = entries.find((e) => e.id === selectedId) ?? entries[0];
   const shownDesign = entry ? (entry.approved ?? entry.draft)! : null;
-  const tint: RGB = tintKey === 'custom' ? customTint : DUNGEONS[tintKey].riftColor;
+  const tint: RGB = tintKey === 'custom' ? customTint : tintChoice(tintKey)!.color;
   // The exact game data entry this design is the model for (lint guarantees it exists and the names match)
   const source = shownDesign ? dataEntry(shownDesign.source) : undefined;
   // The tiles a side it stands on in game (a large creature's 2×2): its floor shows that square
@@ -334,9 +335,9 @@ export default function ForgePage() {
             </>
           )}
           {tinted && (
-            <div className="flex items-center gap-2" title="Rifts and keystones are one model each, painted in a dungeon's riftColor (data/world/dungeons.ts)">
+            <div className="flex items-center gap-2" title="Rifts, keystones and the Affix Shard are one model each, painted in a dungeon's riftColor (data/world/dungeons.ts) or a shard category's color (data/gear/shards.ts)">
               <select className={INPUT + ' w-36'} value={tintKey} onChange={(e) => setTintKey(e.target.value)}>
-                {DUNGEON_KEYS.map((k) => <option key={k} value={k}>{DUNGEONS[k].name}</option>)}
+                {TINT_CHOICES.map((t) => <option key={t.key} value={t.key}>{t.name}</option>)}
                 <option value="custom">Custom…</option>
               </select>
               <input type="color" className="w-8 h-6 bg-transparent" value={toHex(tint)}

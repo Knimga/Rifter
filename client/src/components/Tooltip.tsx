@@ -7,7 +7,8 @@ import { OFFHAND_KIND_NAME } from '../data/gear/offhands';
 import { JEWELRY_KIND_NAME } from '../data/gear/jewelry';
 import type { Stats } from '../data/units/stats';
 import type { EquipCompare } from '../data/units/party';
-import { RARITY_COLOR } from '../data/constants';
+import { AFFIX_GROUP_COLOR, RARITY_COLOR } from '../data/constants';
+import { affixGroup } from '../data/gear/enchanting';
 import { WEAPON_TYPE_SINGULAR, formatModifier, weaponDamageLines } from '../data/detailStrings';
 import { getOffense } from '../data/combat/attackResolution';
 import { weaponDamageEffect } from '../data/combat/abilityExecution';
@@ -102,8 +103,8 @@ export function TextTip({ children }: { children: ReactNode }) {
 
 // ─── Item tooltips ────────────────────────────────────────────────────────────
 
-/** What right-clicking the item does here, if anything (equip it, unequip it, take it from a container). */
-export type ItemClickAction = 'Equip' | 'Unequip' | 'Loot';
+/** What right-clicking the item does here, if anything (equip it, unequip it, take it from a container, enchant it). */
+export type ItemClickAction = 'Equip' | 'Unequip' | 'Loot' | 'Place on bench';
 
 /**
  * An item's side of a trade (the vendor window), shown at the bottom of its tooltip instead of its sell value: its
@@ -131,6 +132,8 @@ interface ItemTooltipProps {
   trade?: ItemTrade;              // its price and trade action (the vendor window), in place of its sell value
   /** While comparing: what equipping it changes (equipCompare): a weapon's damage, then the stats it adds and removes, at the very bottom. */
   compare?: Pick<EquipCompare, 'deltas' | 'damage'>;
+  /** Its affixes in their groups' colors, each with its tier at the right (the enchanter's window). */
+  affixTiers?: boolean;
 }
 
 /** A damage range as tooltips show it: '6–9', or '7' when it can only roll one number. */
@@ -165,7 +168,7 @@ export function KeyHint({ keyName, children, className = '' }: { keyName: string
  * armor), rolled affixes, what it sells for, then the hints: right-click at the left, Ctrl to compare at the right.
  * While comparing, how equipping it changes the stats comes last: gains green, losses red.
  */
-function ItemTip({ item, type, proficient, clickAction, canCompare, trade, compare, children }: Omit<ItemTooltipProps, 'stats'> & { item: Item; type: string; children?: ReactNode }) {
+function ItemTip({ item, type, proficient, clickAction, canCompare, trade, compare, affixTiers, children }: Omit<ItemTooltipProps, 'stats'> & { item: Item; type: string; children?: ReactNode }) {
   return (
     <div className="w-[236px] box-border px-3.5 py-3 text-xs">
       <div className="font-display text-sm tracking-[0.03em]" style={{ color: RARITY_COLOR[item.rarity] }}>{item.name}</div>
@@ -176,7 +179,11 @@ function ItemTip({ item, type, proficient, clickAction, canCompare, trade, compa
       <div className="mt-1.5 flex flex-col gap-0.5 text-rift-soft">{children}</div>
       {item.affixes.length > 0 && (
         <div className="mt-2 pt-2 border-t border-rift-line leading-[1.6] text-rift-affix">
-          {item.affixes.map((affix, i) => <div key={i}>{formatModifier(affix.stat, affix.value)}</div>)}
+          {item.affixes.map((affix, i) => affixTiers ? (
+            <div key={i} className="flex justify-between" style={{ color: AFFIX_GROUP_COLOR[affixGroup(affix)] }}>
+              <span>{formatModifier(affix.stat, affix.value)}</span><span className="text-rift-off">T{affix.tier ?? 1}</span>
+            </div>
+          ) : <div key={i}>{formatModifier(affix.stat, affix.value)}</div>)}
         </div>
       )}
       {trade ? (
@@ -210,10 +217,22 @@ function ItemTip({ item, type, proficient, clickAction, canCompare, trade, compa
   );
 }
 
+/**
+ * An item's type line, under its name (its tooltip, the enchanter's bench): a weapon's type and attack category, armor's
+ * or a shield's armor type, an offhand's or a piece of jewelry's kind.
+ */
+export function itemTypeLine(item: Item): string {
+  if (isWeaponItem(item)) return `${WEAPON_TYPE_SINGULAR[item.weaponType]} · ${item.attackCategory}`;
+  if (isArmorItem(item) || isShieldItem(item)) return `${item.armorType} ${isShieldItem(item) ? 'Shield' : 'Armor'}`;
+  if (isOffhandItem(item)) return OFFHAND_KIND_NAME[item.offhandKind];
+  if (isJewelryItem(item)) return JEWELRY_KIND_NAME[item.slot];
+  return '';
+}
+
 function WeaponTooltipContent({ item, stats, ...rest }: ItemTooltipProps & { item: WeaponItem }) {
   const bonus = stats ? getOffense(stats, item.attackCategory, item.damageElement).damage : 0;
   return (
-    <ItemTip item={item} type={`${WEAPON_TYPE_SINGULAR[item.weaponType]} · ${item.attackCategory}`} {...rest}>
+    <ItemTip item={item} type={itemTypeLine(item)} {...rest}>
       {weaponDamageLines(weaponDamageEffect(item), bonus).map((line, i) => (
         <EffectRow key={i} label={line.label} value={line.value} tone={line.tone} element={line.element} />
       ))}
@@ -224,7 +243,7 @@ function WeaponTooltipContent({ item, stats, ...rest }: ItemTooltipProps & { ite
 
 function ArmorTooltipContent({ item, stats: _stats, ...rest }: ItemTooltipProps & { item: ArmorItem | ShieldItem }) {
   return (
-    <ItemTip item={item} type={`${item.armorType} ${isShieldItem(item) ? 'Shield' : 'Armor'}`} {...rest}>
+    <ItemTip item={item} type={itemTypeLine(item)} {...rest}>
       <EffectRow label="Armor" value={String(item.armorValue)} tone="base" />
     </ItemTip>
   );
@@ -232,12 +251,12 @@ function ArmorTooltipContent({ item, stats: _stats, ...rest }: ItemTooltipProps 
 
 /** A quiver or a focus: no armor, only its implicit and affixes (ItemTip shows them). */
 function OffhandTooltipContent({ item, stats: _stats, ...rest }: ItemTooltipProps & { item: OffhandItem }) {
-  return <ItemTip item={item} type={OFFHAND_KIND_NAME[item.offhandKind]} {...rest} />;
+  return <ItemTip item={item} type={itemTypeLine(item)} {...rest} />;
 }
 
 /** A ring or an amulet: like an offhand, only its implicit and affixes. */
 function JewelryTooltipContent({ item, stats: _stats, ...rest }: ItemTooltipProps & { item: JewelryItem }) {
-  return <ItemTip item={item} type={JEWELRY_KIND_NAME[item.slot]} {...rest} />;
+  return <ItemTip item={item} type={itemTypeLine(item)} {...rest} />;
 }
 
 /**

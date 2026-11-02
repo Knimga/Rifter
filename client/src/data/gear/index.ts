@@ -3,7 +3,7 @@ import type { ArmorProficiency } from '../units/classes';
 export * from './types';
 export type { DamageElement } from '../units/stats';
 export { DAMAGE_ELEMENTS } from '../units/stats';
-import type { DamageElement, ActiveBuff } from '../units/stats';
+import type { DamageElement, ActiveBuff, BuffableStat } from '../units/stats';
 import type { ArmorSlot, WeaponType, GearSlots, Item, ArmorItem, ShieldItem, OffhandItem, OffhandKind, WeaponItem, JewelryItem, JewelryKind, Affix, ImplicitDef, Rarity } from './types';
 import { ARMOR_SLOTS, GEAR_SLOTS, JEWELRY_KINDS, MAGIC_ELEMENTS } from './types';
 
@@ -12,7 +12,7 @@ import { itemValue } from './value';
 import { SHIELD_ARMOR_MULTIPLIER, SHIELDS, STARTER_SHIELDS, SHIELD_IMPLICIT, OFFHANDS } from './offhands';
 import { JEWELRY, droppableJewelry } from './jewelry';
 import { STARTER_WEAPON_SERIES, WEAPON_SERIES, WEAPON_TYPE_DATA, weaponInvalidAffixes, weaponName } from './weapons';
-import { AFFIX_SLOTS_PER_GROUP, rollAffixes, starvedAffixGroups } from './affixes';
+import { AFFIX_SLOTS_PER_GROUP, rollAffixes, starvedAffixGroups, type AffixItemKind } from './affixes';
 import { chance, pick, rollCount } from '../random';
 
 export const EMPTY_GEAR: GearSlots = {
@@ -231,6 +231,25 @@ export function generateJewelry(
     model: template.model,
     implicit: resolveImplicit(template.implicit, level),
   };
+}
+
+/**
+ * How an existing item takes affixes (enchanting, gear/enchanting.ts), as when it was made: the affixes its type never
+ * rolls, and the kind of item its affix values scale by (ITEM_KIND_VALUE_SCALE). An offhand or a piece of jewelry is
+ * found by its template's name.
+ */
+export function itemAffixRules(item: Item): { invalid: ReadonlySet<BuffableStat>; kind: AffixItemKind } {
+  if (isWeaponItem(item)) {
+    return { invalid: new Set(weaponInvalidAffixes(item.weaponType)), kind: WEAPON_TYPE_DATA[item.weaponType].twoHanded ? 'twoHand' : 'oneHand' };
+  }
+  if (isArmorItem(item)) return { invalid: new Set(ARMOR_TYPE_DATA[item.armorType].invalidAffixes), kind: 'armor' };
+  if (isShieldItem(item)) return { invalid: new Set(ARMOR_TYPE_DATA[item.armorType].invalidAffixes), kind: 'oneHand' };
+  if (isOffhandItem(item)) {
+    const { drops, starter } = OFFHANDS[item.offhandKind];
+    return { invalid: new Set([...drops, ...starter].find(t => t.name === item.name)?.invalidAffixes ?? []), kind: 'oneHand' };
+  }
+  if (isJewelryItem(item)) return { invalid: new Set(JEWELRY[item.slot].find(t => t.name === item.name)?.invalidAffixes ?? []), kind: 'armor' };
+  return { invalid: new Set(), kind: 'armor' };
 }
 
 // ─── Loot Drops ───────────────────────────────────────────────────────────────

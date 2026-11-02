@@ -38,9 +38,12 @@ export const SANCTUM = {
   /**
    * The NPCs standing in the Sanctum (data/world/npcs.ts): each one's tile, and the grid direction it faces when no
    * one is talking to it. Denisel, the vendor: in the main room's northwest corner, a tile in from both walls,
-   * facing into the room.
+   * facing into the room. Ethela, the enchanter: in the opposite (southeast) corner, likewise.
    */
-  npcs: [{ id: 'denisel', pos: at(2, 2), facing: [1, 1] as const }],
+  npcs: [
+    { id: 'denisel', pos: at(2, 2), facing: [1, 1] as const },
+    { id: 'ethela', pos: at(8, 8), facing: [-1, -1] as const },
+  ] as readonly NpcPlacement[],
   /**
    * The decorative objects in the Sanctum (data/world/decorObjects.ts): each one's middle tile and the grid direction
    * it faces (its front). It fills its span's tiles (spanTiles), which nobody walks onto.
@@ -54,6 +57,11 @@ export const SANCTUM = {
     { id: 'barrels-and-sacks', pos: at(2, 1), facing: [1, 0] as const },
     // The weapon rack against the north wall beside the barrels, its weapons facing south into the room
     { id: 'weapon-rack', pos: at(3, 1), facing: [0, 1] as const },
+    // Ethela's table against the east wall (its three tiles at x 9, y 7-9), facing west into the room: its middle, the
+    // ritual circle, right beside her
+    { id: 'enchanters-table', pos: at(9, 8), facing: [-1, 0] as const },
+    // Her supplies a tile south of her, the chest's back against the south wall, the barrel and sacks facing north
+    { id: 'enchanters-supplies', pos: at(8, 9), facing: [0, -1] as const },
   ] as readonly DecorPlacement[],
 } as const;
 
@@ -64,8 +72,12 @@ export interface DecorPlacement {
   facing: readonly [number, number];
 }
 
-/** A Sanctum NPC's placement (SANCTUM.npcs). */
-export type NpcPlacement = (typeof SANCTUM.npcs)[number];
+/** Where a map places an NPC (NPCS id): its tile, and the grid direction it faces when no one is talking to it. */
+export interface NpcPlacement {
+  id: string;
+  pos: Pos;
+  facing: readonly [number, number];
+}
 
 /** The Sanctum NPC standing on `p`, if any. */
 export const sanctumNpcAt = (p: Pos): NpcPlacement | undefined => SANCTUM.npcs.find((n) => n.pos.x === p.x && n.pos.y === p.y);

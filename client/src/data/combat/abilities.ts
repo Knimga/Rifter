@@ -120,6 +120,17 @@ export interface Ability {
   effects: Effect[];
 }
 
+/**
+ * How much an ability's MP cost grows per caster level above 1: a quarter of its base cost a level. MP pools grow with
+ * level (Mind × level), so a fixed cost would soon hardly touch them; this keeps spells a real drain, while a bigger
+ * pool (Mind, +MP gear) still buys more casts.
+ */
+export const MP_COST_PER_LEVEL = 0.25;
+
+/** What an ability costs in MP for a caster of `level` (party member or creature alike): its mpCost, grown with level. */
+export const mpCostAt = (ability: Pick<Ability, 'mpCost'>, level: number): number =>
+  Math.round(ability.mpCost * (1 + MP_COST_PER_LEVEL * Math.max(0, level - 1)));
+
 /** Effect types an enemy-target ability applies to its targets (executeAction); any other there does nothing. */
 const ENEMY_TARGET_EFFECTS: ReadonlySet<Effect['type']> = new Set(['damage', 'dot', 'debuff', 'root']);
 

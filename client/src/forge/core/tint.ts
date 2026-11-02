@@ -1,8 +1,10 @@
-// Tinted models: one model drawn in many colors (forge category "Rifts & Keys": the rift and the keystone, each
-// painted in a dungeon's riftColor). A design marks the faces and halos that take the tint (FaceOpts.tint,
-// Mesh.halo's tint) with a Tone: how much of the tint, and of its deep shade, they add to their own color. The
+// Tinted models: one model drawn in many colors (forge categories "Rifts & Keys": the rift and the keystone, each
+// painted in a dungeon's riftColor; and "Loot": the Affix Shard, painted in its category's color). A design marks the
+// faces and halos that take the tint (FaceOpts.tint, Mesh.halo's tint) with a Tone: how much of the tint, and of its deep
+// shade, they add to their own color. The
 // model itself never depends on the tint (it builds, caches and lints like any other); the color is applied when
 // it is drawn: tintModel, by the game's renderer and the forge's views. Pure TS.
+import type { Mesh } from './mesh';
 import type { Model, Tone } from './types';
 import type { RGB } from './vec';
 
@@ -48,4 +50,21 @@ export function tintModel(model: Model, color: RGB, parts?: readonly string[]): 
     ? { ...h, c: h.c.map((c, k) => Math.min(1, c + h.t![0] * bright[k] + h.t![1] * deep[k])) as [number, number, number] }
     : h));
   return { ...model, mesh: { ...mesh, colors, ...(fromColors && { fromColors }), halos } };
+}
+
+/**
+ * Paint the tinted faces added to `m` since face `from` in `color` for good, as tintModel would when drawing, and
+ * leave them untinted: a tinted design embedded in fixed colors (the Affix Shards scatter's shards, each its own
+ * color). Faces only: halos keep their tint.
+ */
+export function paintTint(m: Mesh, from: number, color: RGB): void {
+  const deep = tintDeep(color);
+  const paint = (c: RGB, [b, d]: Tone): RGB => c.map((v, k) => Math.min(255, v + b * color[k] + d * deep[k])) as RGB;
+  for (const f of m.faces.slice(from)) {
+    if (!f.t) continue;
+    const t = f.t;
+    f.c = paint(f.c, [(t[0][0] + t[1][0] + t[2][0]) / 3, (t[0][1] + t[1][1] + t[2][1]) / 3]);
+    if (f.vc) f.vc = [paint(f.vc[0], t[0]), paint(f.vc[1], t[1]), paint(f.vc[2], t[2])];
+    delete f.t;
+  }
 }

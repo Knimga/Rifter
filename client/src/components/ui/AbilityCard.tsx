@@ -1,7 +1,7 @@
 // An ability, shown in the UI theme's tooltip style: name, a
 // small-caps line (category · MP · target · range), then its effects as short sentences (abilitySentences), their
 // key numbers highlighted. Used as a card in the character select dossier and the game's ability tooltips.
-import type { Ability } from '../../data/combat/abilities';
+import { mpCostAt, type Ability } from '../../data/combat/abilities';
 import { PHYSICAL_ELEMENTS, type DamageElement, type WeaponItem } from '../../data/gear';
 import { toAction } from '../../data/combat/abilityExecution';
 import { isArea } from '../../data/combat/areas';
@@ -30,8 +30,10 @@ export const elementTint = (element: DamageElement): string => (PHYSICAL_ELEMENT
  * `weapon`: the weapon the ability is used with, so a weapon ability takes its AP cost and element (its text describes only what it adds to the weapon).
  * `weaponAttack`: the card is the weapon's plain attack (no MP shown).
  */
-export default function AbilityCard({ ability, weapon = null, weaponAttack = false, warning, elevated = false, className = '' }: {
+export default function AbilityCard({ ability, weapon = null, weaponAttack = false, level = 1, warning, elevated = false, className = '' }: {
   ability: Ability;
+  /** The caster's level: its MP cost grows with it (mpCostAt). Default 1 (character select). */
+  level?: number;
   weapon?: WeaponItem | null;
   weaponAttack?: boolean;
   /** A note under the effects, e.g. 'Not enough mana'. */
@@ -46,7 +48,7 @@ export default function AbilityCard({ ability, weapon = null, weaponAttack = fal
   const tint = abilityTint(ability, weapon);
   const meta = [
     category,
-    weaponAttack ? null : `${ability.mpCost} MP`,
+    weaponAttack ? null : `${mpCostAt(ability, level)} MP`,
     TARGET_LABEL[ability.target],
     ability.target === 'self' ? null : `Range ${ability.range}`,
     ability.area && isArea(ability) ? AREA_LABEL[ability.area] : null,

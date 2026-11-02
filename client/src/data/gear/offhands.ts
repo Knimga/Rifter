@@ -72,6 +72,7 @@ const QUIVER_INVALID_AFFIXES: BuffableStat[] = [
 const FOCUS_INVALID_AFFIXES: BuffableStat[] = [
   ...meleeStats, ...rangedStats, 'strength', 'finesse', 'toughness',
   'redoubt', 'expertise', 'parry', 'block', ...damageTypeAffixes(['physical','poison']),
+  'mp'
 ];
 
 /** Quivers that drop as loot. */

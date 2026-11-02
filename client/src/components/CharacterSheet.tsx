@@ -1,5 +1,6 @@
 // The party window: party rail, the member's model and equipment, the shared
-// inventory (or, its Keys tab, the keyring), and their attributes, skills and stats (StatsPanel). Values raised or
+// inventory (or, its Shards tab, the party's affix shards, or its Keys tab, the keyring), and their attributes,
+// skills and stats (StatsPanel). Values raised or
 // lowered by gear, buffs and debuffs show green / red (a green one's tooltip says by how much), pulse yellow when
 // the gear changes them, and (the stats, not the attributes and skills themselves) glow yellow while placed
 // level-up points change them.
@@ -13,17 +14,20 @@ import { ATTRIBUTE_KEYS, SKILL_KEYS, recomputeStats, type ActiveBuff, type Stats
 import { GEAR_SLOTS, getGearBuffs, type GearSlot, type Item } from '../data/gear';
 import { equipCompare, hasPointsToSpend, memberStatInput, memberStats, noPendingPoints, pointsLeft, spendPoints, type PartyMemberConfig, type PendingPoints } from '../data/units/party';
 import { xpToNext, type PartyProgress } from '../data/units/xp';
-import { INVENTORY_COLS, INVENTORY_SIZE, canEquip, canUnequip, isProficient, type Inventory } from '../data/gear/inventory';
+import { INVENTORY_COLS, INVENTORY_SIZE, canEquip, canSwapGear, canUnequip, isProficient, type Inventory } from '../data/gear/inventory';
 import { AttributeTooltips, SkillTooltips, ATTR_LABEL, SLOT_LABEL, capitalize } from '../data/detailStrings';
 import { Tooltip, ItemTooltipContent, TextTip } from './Tooltip';
 import ItemIcon, { rarityGlow } from './ItemIcon';
 import ItemGrid from './ItemGrid';
+import { sameSpot, useItemDrag, type ItemSpot } from '../hooks/useItemDrag';
 import Portrait from './hud/Portrait';
 import { PanelTitle } from './ui/Panel';
 import { XpBar } from './hud/XpBar';
 import { characterLookKey, characterModel, heldGear } from './characterModel';
 import StatsPanel, { GearChange, Val, type Shift, type StatShift } from './StatsPanel';
 import Keyring from './Keyring';
+import ShardsTab, { type ShardFilter } from './ShardsTab';
+import type { ShardCounts } from '../data/gear/shards';
 import ModalWindow, { WindowCloseButton } from './ui/ModalWindow';
 import GoldAmount from './ui/GoldAmount';
 import type { DungeonKey } from '../data/world/dungeons';
@@ -41,6 +45,8 @@ interface Props {
   inventory: Inventory;
   /** The party's gold (shared, like the inventory). */
   gold: number;
+  /** The party's affix shards (shared, like the inventory): how many of each type it carries. */
+  shards: ShardCounts;
   /** The party's rift keys (shared, like the inventory), in the order obtained. */
   keys: readonly DungeonKey[];
   /** A key was obtained since the Keys tab was last opened: the tab glows gold. */
@@ -48,8 +54,14 @@ interface Props {
   /** The Keys tab was opened (the new key has been seen). */
   onSeeKeys: () => void;
   onClose: () => void;
-  onEquipItem?: (inventoryIdx: number, charIdx: number) => void;
-  onUnequipItem?: (slot: GearSlot, charIdx: number) => void;
+  /** Equip an inventory item on a member: in its own slot, or `slot` (dragged onto it). */
+  onEquipItem?: (inventoryIdx: number, charIdx: number, slot?: GearSlot) => void;
+  /** Unequip a member's item: into inventory slot `to` (an empty one it was dragged to), else the first empty one. */
+  onUnequipItem?: (slot: GearSlot, charIdx: number, to?: number) => void;
+  /** Move an inventory item to another slot (dragged there), trading places with any item there. */
+  onMoveItem?: (from: number, to: number) => void;
+  /** Swap a member's items in two gear slots (one dragged onto the other: a ring to the other ring slot). */
+  onSwapGear?: (from: GearSlot, to: GearSlot, charIdx: number) => void;
   /** The party's shared level and XP. */
   progress: PartyProgress;
   /** Each member's placed, unconfirmed level-up points. */
@@ -132,12 +144,18 @@ const rightClick = (hasItem: boolean, action: (() => void) | null) => (e: MouseE
   action?.();
 };
 
-function GearSlotBox({ slot, item, stats, onUnequip }: { slot: GearSlot; item: Item | null; stats: Stats; onUnequip: (() => void) | null }) {
+function GearSlotBox({ slot, item: worn, stats, onUnequip, drag }: {
+  slot: GearSlot; item: Item | null; stats: Stats; onUnequip: (() => void) | null;
+  /** Dragging items (useItemDrag): an equipped item can be dragged out, and its slot shows empty meanwhile. */
+  drag: ReturnType<typeof useItemDrag>;
+}) {
   const EmptyIcon = SLOT_ICON[slot];
   const pos = { gridColumn: SLOT_POS[slot].col, gridRow: SLOT_POS[slot].row };
+  const here: ItemSpot = { kind: 'gear', slot };
+  const item = sameSpot(drag.dragging, here) ? null : worn;
   if (!item) {
     return (
-      <div className="rf-eqs" style={pos} role="img" aria-label={`${SLOT_LABEL[slot]}: empty`}>
+      <div className="rf-eqs" style={pos} role="img" aria-label={`${SLOT_LABEL[slot]}: empty`} data-drop-gear={slot}>
         <EmptyIcon className="w-5 h-5 text-rift-rim" />
         <span className="text-[10px] tracking-[0.08em] uppercase">{SLOT_LABEL[slot]}</span>
       </div>
@@ -145,7 +163,7 @@ function GearSlotBox({ slot, item, stats, onUnequip }: { slot: GearSlot; item: I
   }
   return (
     <Tooltip gap={10} style={pos} content={<ItemTooltipContent item={item} stats={stats} clickAction={onUnequip ? 'Unequip' : undefined} />}>
-      <div className={`rf-eqs is-filled ${rarityGlow(item).className}`} style={rarityGlow(item).style} aria-label={`${SLOT_LABEL[slot]}: ${item.name}`} onContextMenu={rightClick(true, onUnequip)}>
+      <div className={`rf-eqs is-filled ${rarityGlow(item).className}`} style={rarityGlow(item).style} aria-label={`${SLOT_LABEL[slot]}: ${item.name}`} data-drop-gear={slot} onContextMenu={rightClick(true, onUnequip)} onPointerDown={(e) => drag.start(here, e)}>
         <ItemIcon item={item} className="w-[28px] h-[28px]" />
         <span className="text-[10px] tracking-[0.08em] uppercase">{SLOT_LABEL[slot]}</span>
       </div>
@@ -153,11 +171,15 @@ function GearSlotBox({ slot, item, stats, onUnequip }: { slot: GearSlot; item: I
   );
 }
 
-export default function CharacterSheet({ party, partyHp, partyMp, partyStats, partyBuffs, inventory, gold, keys, hasNewKey, onSeeKeys, onClose, onEquipItem, onUnequipItem, progress, pending: pendingAll, onPendingChange, onConfirmPoints }: Props) {
+export default function CharacterSheet({ party, partyHp, partyMp, partyStats, partyBuffs, inventory, gold, shards, keys, hasNewKey, onSeeKeys, onClose, onEquipItem, onUnequipItem, onMoveItem, onSwapGear, progress, pending: pendingAll, onPendingChange, onConfirmPoints }: Props) {
   const [selectedIdx, setSelectedIdx] = useState(0);
-  // The Inventory panel's tab: the shared inventory, or the keyring
-  const [tab, setTab] = useState<'items' | 'keys'>('items');
+  // The Inventory panel's tab: the shared inventory, the party's shards, or the keyring
+  const [tab, setTab] = useState<'items' | 'shards' | 'keys'>('items');
   const showKeys = () => { setTab('keys'); onSeeKeys(); };
+  // The Shards tab's selected category and Carried / All toggle: kept while the window stays open, and (the window
+  // being new each time it opens) starting at All and Carried every time
+  const [shardCategory, setShardCategory] = useState<ShardFilter>('all');
+  const [shardsAll, setShardsAll] = useState(false);
 
   const member = party[selectedIdx];
   const { characterName, selectedClass, gear } = member;
@@ -171,6 +193,28 @@ export default function CharacterSheet({ party, partyHp, partyMp, partyStats, pa
   const shown = placed ? spendPoints(member, pending) : member;
   const stats = placed ? memberStats(shown, partyStats[selectedIdx].level, buffs) : partyStats[selectedIdx];
   const classData = CLASSES[selectedClass];
+  // Dragging items. From the inventory: onto another slot (it moves, or trades places), or onto a gear slot of the
+  // selected member's it fits and they can wear (it is equipped there). From the member's gear: onto an empty
+  // inventory slot (unequipped there), onto an item there that can take its place (they trade places), or onto
+  // another of their gear slots it fits (a ring to the other ring slot: they swap).
+  const drag = useItemDrag({
+    canDrop: (from, to) => {
+      if (from.kind === 'inventory') {
+        return to.kind === 'inventory' ? !!onMoveItem : !!onEquipItem && canEquip(classData, inventory[from.idx], inventory, gear, to.slot);
+      }
+      if (to.kind === 'gear') return !!onSwapGear && canSwapGear(gear, from.slot, to.slot);
+      const there = inventory[to.idx];
+      return there ? !!onEquipItem && canEquip(classData, there, inventory, gear, from.slot) : !!onUnequipItem;
+    },
+    onDrop: (from, to) => {
+      if (from.kind === 'inventory') {
+        if (to.kind === 'inventory') onMoveItem?.(from.idx, to.idx);
+        else onEquipItem?.(from.idx, selectedIdx, to.slot);
+      } else if (to.kind === 'gear') onSwapGear?.(from.slot, to.slot, selectedIdx);
+      else if (inventory[to.idx]) onEquipItem?.(to.idx, selectedIdx, from.slot);
+      else onUnequipItem?.(from.slot, selectedIdx, to.idx);
+    },
+  });
   const hp = partyHp[selectedIdx] ?? stats.hp;
   const mp = partyMp[selectedIdx] ?? stats.mp;
 
@@ -299,14 +343,14 @@ export default function CharacterSheet({ party, partyHp, partyMp, partyStats, pa
                   <div className="flex-1 grid content-between mt-3.5 gap-x-6 gap-y-1.5" style={{ gridTemplateColumns: 'repeat(3, 84px)', gridTemplateRows: 'repeat(5, 48px)' }}>
                     {GEAR_SLOTS.map(slot => (
                       <GearSlotBox key={slot} slot={slot} item={gear[slot]} stats={stats}
-                        onUnequip={onUnequipItem && canUnequip(inventory, gear, slot) ? () => onUnequipItem(slot, selectedIdx) : null} />
+                        onUnequip={onUnequipItem && canUnequip(inventory, gear, slot) ? () => onUnequipItem(slot, selectedIdx) : null} drag={drag} />
                     ))}
                   </div>
                 </section>
               </div>
 
               <section aria-label="Inventory" className="rf-panel flex-none p-3.5">
-                {/* Two tabs, the shared inventory and the keyring; the panel keeps its
+                {/* Three tabs, the shared inventory, the party's shards and the keyring; the panel keeps its
                     size between them */}
                 <div className="flex items-baseline justify-between mb-2.5">
                   <div role="tablist" aria-label="Shared storage" className="flex items-baseline gap-[22px]">
@@ -314,20 +358,26 @@ export default function CharacterSheet({ party, partyHp, partyMp, partyStats, pa
                       Inventory <span className="font-tech text-[10px] tracking-[0.1em] text-rift-label">Shared</span>
                     </button>
                     <span aria-hidden="true" className="rf-tabsep" />
+                    <button type="button" role="tab" aria-selected={tab === 'shards'} className={`rf-h rf-tab ${tab === 'shards' ? 'is-on' : ''}`} onClick={() => setTab('shards')}>
+                      Shards
+                    </button>
+                    <span aria-hidden="true" className="rf-tabsep" />
                     <button type="button" role="tab" aria-selected={tab === 'keys'} className={`rf-h rf-tab ${tab === 'keys' ? 'is-on' : ''} ${hasNewKey ? 'is-new' : ''}`} onClick={showKeys}>
                       Keys
                     </button>
                   </div>
-                  {tab === 'items'
-                    ? <GoldAmount amount={gold} label="Party gold" className="text-xs text-rift-soft" />
-                    : <span className="text-xs text-rift-muted">{keys.length} {keys.length === 1 ? 'key' : 'keys'}</span>}
+                  {tab === 'keys'
+                    ? <span className="text-xs text-rift-muted">{keys.length} {keys.length === 1 ? 'key' : 'keys'}</span>
+                    : <GoldAmount amount={gold} label="Party gold" className="text-xs text-rift-soft" />}
                 </div>
-                {tab === 'items' ? (
+                {tab === 'shards' ? (
+                  <ShardsTab counts={shards} category={shardCategory} onCategory={setShardCategory} showAll={shardsAll} onShowAll={setShardsAll} />
+                ) : tab === 'items' ? (
                   <ItemGrid items={inventory} cols={INVENTORY_COLS} size={INVENTORY_SIZE} stats={stats}
                     canUse={(item) => isProficient(classData, item)}
                     action={(item) => (onEquipItem && canEquip(classData, item, inventory, gear) ? 'Equip' : null)}
                     onAction={(i) => onEquipItem?.(i, selectedIdx)} unusableNote=", not proficient"
-                    compareWith={(item) => equipCompare(shown, item, stats)} />
+                    compareWith={(item) => equipCompare(shown, item, stats)} drag={drag} />
                 ) : <Keyring keys={keys} />}
               </section>
             </div>

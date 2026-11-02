@@ -13,8 +13,7 @@ export const BOSS_CLASSES: EnemyClassData[] = [
     highAttributes: ['mind', 'toughness'],
     lowAttributes: ['finesse', 'speed'],
     baseHp: 25,
-    baseArmor: 15,
-    armorPerLevel: 3,
+    baseArmor: 12,
     resistances: { shadow: 20 },
     abilities: [
       {
@@ -63,8 +62,7 @@ export const BOSS_CLASSES: EnemyClassData[] = [
     highAttributes: ['mind', 'spirit'],
     lowAttributes: ['speed', 'strength'],
     baseHp: 40,
-    baseArmor: 20,
-    armorPerLevel: 5,
+    baseArmor: 19,
     resistances: { fire: 30, physical: 20 },
     passives: {
       dodge: { name: 'Ethereal', flat: 10 },
@@ -120,8 +118,7 @@ export const BOSS_CLASSES: EnemyClassData[] = [
     highAttributes: ['toughness', 'spirit'],
     lowAttributes: ['speed', 'finesse'],
     baseHp: 40,
-    baseArmor: 15,
-    armorPerLevel: 5,
+    baseArmor: 13,
     resistances: { nature: 30, poison: 30 },
     passives: {
       hpRegen: { name: 'Mycoblood', flat: 2 },
@@ -178,8 +175,7 @@ export const BOSS_CLASSES: EnemyClassData[] = [
     highAttributes: ['toughness', 'mind'],
     lowAttributes: ['strength', 'spirit'],
     baseHp: 40,
-    baseArmor: 20,
-    armorPerLevel: 5,
+    baseArmor: 17,
     passives: {
       initiative: { name: 'Quick-witted', flat: 5 },
       healing: { name: 'Rearer', flat: 3 },
@@ -249,9 +245,9 @@ export const BOSS_CLASSES: EnemyClassData[] = [
     attributes: { toughness: 4, finesse: 4, speed: 6, mind: 6 },
     highAttributes: ['speed', 'mind'],
     lowAttributes: ['strength', 'spirit'],
-    baseHp: 40,
-    baseArmor: 30,
-    armorPerLevel: 5,
+    large: true,
+    baseHp: 50,
+    baseArmor: 26,
     resistances: { poison: 30 },
     passives: {
       movement: { name: 'Skitterer', flat: 1 }
@@ -308,7 +304,7 @@ export const BOSS_CLASSES: EnemyClassData[] = [
     dropChance: 3,
     dropsGold: 1,
     goldBonus: 100,
-    model: ''
+    model: 'creature.pale-broodmother'
   }
 ];
 

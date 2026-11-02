@@ -1,5 +1,5 @@
 import { bodySize, isArmed, type EnemyInstance } from '../units/enemies';
-import type { Ability, Effect } from './abilities';
+import { mpCostAt, type Ability, type Effect } from './abilities';
 import { aimedArea, isArea, isSelfBurst, unitsInArea } from './areas';
 import { bodyDistance, bodySight, covers, fits, footprint, footprintKeys, inRangeAndSight, posKey, reachableTiles, samePos, type Body, type Pos } from '../world/grid';
 import { shuffle } from '../random';
@@ -12,6 +12,11 @@ import { isRooted, stackCap, stackCount, stackKey, type ActiveBuff } from '../un
 export interface Foe extends Body {
   key: string;  // unitKey: identifies it in the result, and its threat (CombatState.threat)
   hp: number;
+  /**
+   * Its active buffs and debuffs: a buff isn't cast on a friend that already has it, and a capped buff or debuff isn't
+   * put on a foe that already has all its stacks (by source).
+   */
+  buffs?: readonly ActiveBuff[];
 }
 
 /**
@@ -20,8 +25,6 @@ export interface Foe extends Body {
  */
 export interface Friend extends Foe {
   maxHp: number;
-  /** Its active buffs: an ally buff isn't cast on a unit that already has it (by source). */
-  buffs?: readonly ActiveBuff[];
   /** It attacks with a physical weapon (a held weapon, a useWeapon ability): a weaponOnly trigger is any use to it. */
   armed?: boolean;
 }
@@ -73,6 +76,15 @@ const hasBuffFrom = (buffs: readonly ActiveBuff[] | undefined, a: Ability) => {
   return stackCount(buffs ?? [], stackKey(a.name, eff)) >= (Number.isFinite(cap) ? cap : 1);
 };
 
+/**
+ * Whether a foe already has all the stacks it can of a buff or debuff that ability `a` puts on its target (one with a
+ * cap: maxStacks, or a trigger): `a` isn't used on it again, since that would only replace a stack. An uncapped one
+ * never is.
+ */
+const atStackCap = (buffs: readonly ActiveBuff[] | undefined, a: Ability) => a.effects.some(e =>
+  (e.type === 'buff' || e.type === 'debuff') && e.appliesTo === 'target' && Number.isFinite(stackCap(e)) &&
+  stackCount(buffs ?? [], stackKey(a.name, e)) >= stackCap(e));
+
 /** Whether a buff ability sets a weaponOnly trigger (only worth casting on a unit that is armed). */
 const buffsWeapon = (a: Ability) => a.effects.some(e => e.type === 'buff' && !!e.trigger?.weaponOnly);
 
@@ -107,6 +119,8 @@ const summonOf = (a: Ability) => a.effects.find((e): e is Extract<Effect, { type
  *        highest threat, then closest, then random), and for each, its usable attacks in a random preferred
  *        order. So a high-threat foe walled off behind others gives way to the next target it can reach.
  *     Otherwise area attacks are never used on a single foe: it saves them (and their MP) for a better chance.
+ *     An attack that puts a capped buff or debuff on its target (maxStacks) is never aimed at a foe that already
+ *     has all its stacks, and an area one doesn't count such foes among its hits.
  *  2. If its preferred ability this turn is a buff (a self one not yet active, or an ally one with a unit of its
  *     side in reach that hasn't got it: the one nearest its foes; an area one only where it takes in another
  *     unit of its side, as many as it can), it uses that instead, so buffs and attacks
@@ -175,7 +189,7 @@ export function computeEnemyTurn(
   };
   // Can it move to `pos` and use `a` there, on what it has left?
   const affordableFrom = (a: Ability, pos: Pos) => a.apCost + moveOf(pos).apSpent <= ap;
-  const canUse = (a: Ability) => enemy.currentMp >= a.mpCost && a.apCost <= ap;
+  const canUse = (a: Ability) => enemy.currentMp >= mpCostAt(a, enemy.level) && a.apCost <= ap;
   const selfAction = (a: Ability): EnemyAction => act(null, a, enemy.id, { ...enemy.pos });
   // Is `to` (a unit or a tile) within `range` of it standing at `from`, and in sight?
   const inReach = (from: Pos, to: Pos | Body, range: number) => inRangeAndSight(me(from), to, range, floors);
@@ -192,8 +206,8 @@ export function computeEnemyTurn(
   //    Not when one of its attacks already reaches a target from where it stands (it only lacks the AP this
   //    turn): a ranged enemy keeps its distance instead of walking up to the party with AP left over.
   const closeIn = (): EnemyAction => {
-    const inRangeNow = enemy.classData.abilities.some(a => a.target === 'enemy' && a.mpCost <= enemy.currentMp &&
-      targets.some(t => inReach(enemy.pos, t, a.range)));
+    const inRangeNow = enemy.classData.abilities.some(a => a.target === 'enemy' && mpCostAt(a, enemy.level) <= enemy.currentMp &&
+      targets.some(t => inReach(enemy.pos, t, a.range) && !atStackCap(t.buffs, a)));
     if (inRangeNow) return noAction;
     // One move's worth first; a large creature with nowhere nearer it fits on that, as far as its AP takes it
     const reaches = longMap === reachMap ? [reach] : [reach, [...longMap.values()].filter(standsAt)];
@@ -325,7 +339,8 @@ export function computeEnemyTurn(
       const aims = isSelfBurst(a) ? [pos]
         : targets.filter(t => inReach(pos, t, a.range)).map(t => t.pos);
       for (const aim of aims) {
-        const hits = unitsInArea(areaFrom(a, pos, aim), targets);
+        // Foes that already have all the stacks of its buff or debuff don't count (atStackCap)
+        const hits = unitsInArea(areaFrom(a, pos, aim), targets).filter(t => !atStackCap(t.buffs, a));
         if (hits.length >= minAoeHits && hits.length > (bestAoe?.hits.length ?? 0)) bestAoe = { pos, a, aim, hits };
       }
     }
@@ -334,8 +349,9 @@ export function computeEnemyTurn(
   if (bestAoe) return act(moveTo(bestAoe.pos), bestAoe.a, bestAoe.hits[0].key, bestAoe.aim);
 
   // 1b. Otherwise the first target + single-target attack it can land this turn, from the nearest tile that works
+  //     (never one whose buff or debuff the target already has all the stacks of: atStackCap)
   for (const target of targets) {
-    for (const a of attacks.filter(a => !isArea(a))) {
+    for (const a of attacks.filter(a => !isArea(a) && !atStackCap(target.buffs, a))) {
       for (const { pos } of reach) {
         if (!affordableFrom(a, pos) || !inReach(pos, target, a.range)) continue;
         return act(moveTo(pos), a, target.key, target.pos);

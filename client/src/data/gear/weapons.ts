@@ -96,7 +96,8 @@ export const WEAPON_TYPE_DATA: Record<WeaponType, WeaponTypeData> = {
     implicit: { stat: 'meleeCrit', baseValue: 5, growthPerLevel: 0.5 },
     invalidAffixes: [
       'healing', 'glancingBlow', 'devotion', 'redoubt',
-      ...rangedStats, ...nonWeaponAffixes, ...damageTypeAffixes(['holy'])
+      ...rangedStats, ...nonWeaponAffixes, 'mp', 'hp',
+      ...damageTypeAffixes(['fire','ice','lightning','nature','holy'])
     ],
   },
   '1h Swords': {
@@ -124,7 +125,7 @@ export const WEAPON_TYPE_DATA: Record<WeaponType, WeaponTypeData> = {
     implicit: { stat: 'meleeHit', baseValue: 3, growthPerLevel: 0.5 },
     invalidAffixes: [
       'spirit', 'finesse', 'glancingBlow', 'subtlety', 'perception',
-      ...rangedStats, ...nonWeaponAffixes, 
+      ...rangedStats, ...nonWeaponAffixes,
       ...damageTypeAffixes(['magic'], {only: ['Hit','Penetration']}),
       ...damageTypeAffixes(['poison','shadow','ice'])
     ],
@@ -155,7 +156,7 @@ export const WEAPON_TYPE_DATA: Record<WeaponType, WeaponTypeData> = {
     implicit: { stat: 'armor', baseValue: 6, growthPerLevel: 0.4 },
     invalidAffixes: [
       'finesse', 'mind', 'spirit',  'meleeCrit', 'initiative', 'subtlety', 'perception',
-      ...rangedStats, ...nonWeaponAffixes, 'magicHit', 'magicCrit',
+      ...rangedStats, ...nonWeaponAffixes, 'magicHit', 'magicCrit', 'mp',
       ...damageTypeAffixes(['magic'], {only: ['Hit','Penetration']}),
       ...damageTypeAffixes(['poison','shadow','ice'])
     ],
@@ -171,7 +172,7 @@ export const WEAPON_TYPE_DATA: Record<WeaponType, WeaponTypeData> = {
     implicit: { stat: 'meleeDamage', baseValue: 2, growthPerLevel: 0.4 },
     invalidAffixes: [
       'mind', 'spirit', 'healing', 'subtlety', 'perception', 'spellcraft', 'devotion',
-      ...rangedStats, ...magicStats, ...nonWeaponAffixes,
+      ...rangedStats, ...magicStats, ...nonWeaponAffixes, 'mp',
       ...damageTypeAffixes(['magic'], {only: ['Hit','Penetration']}),
       ...damageTypeAffixes(['shadow','ice'])
     ],
@@ -187,7 +188,7 @@ export const WEAPON_TYPE_DATA: Record<WeaponType, WeaponTypeData> = {
     implicit: { stat: 'meleeDamage', baseValue: 4, growthPerLevel: 0.7 },
     invalidAffixes: [
       'mind', 'spirit', 'healing', 'subtlety', 'perception', 'spellcraft', 'devotion',
-      ...rangedStats, ...magicStats, ...nonWeaponAffixes,
+      ...rangedStats, ...magicStats, ...nonWeaponAffixes, 'mp',
       ...damageTypeAffixes(['magic'], {only: ['Hit','Penetration']}),
       ...damageTypeAffixes(['poison','shadow','ice'])
     ],
@@ -238,7 +239,7 @@ export const WEAPON_TYPE_DATA: Record<WeaponType, WeaponTypeData> = {
     invalidAffixes: [
       'strength', 'finesse', 'parry', 'glancingBlow', 'dodge', 
       'evasion', 'redoubt', 'expertise', 'subtlety',
-      'armor', 'block', 'hpRegen', //allows mpRegen
+      'armor', 'block', 'hpRegen', 'hp',
       ...meleeStats, ...rangedStats,
       ...damageTypeAffixes(['physical','poison'])
     ],
@@ -255,7 +256,7 @@ export const WEAPON_TYPE_DATA: Record<WeaponType, WeaponTypeData> = {
     invalidAffixes: [
       'strength', 'finesse', 'parry', 'glancingBlow', 'dodge', 
       'evasion', 'redoubt', 'expertise', 'subtlety',
-      'armor', 'block', 'hpRegen', //allows mpRegen
+      'armor', 'block', 'hpRegen', 'hp',
       ...meleeStats, ...rangedStats,
       ...damageTypeAffixes(['physical','poison'])
     ],

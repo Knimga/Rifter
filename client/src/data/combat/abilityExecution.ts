@@ -1,4 +1,5 @@
 import type { Ability, Effect, PassiveTrigger, Trigger, TriggerOutcome } from './abilities';
+import { mpCostAt } from './abilities';
 import { MIN_THREAT_MULTIPLIER, stackCap, stackKey, tickStack, type ActiveBuff, type ActiveDot, type ActiveHot, type BuffableStat, type Stats } from '../units/stats';
 import type { AttackCategory, DamageElement, WeaponItem } from '../gear';
 import { WEAPON_TYPE_DATA } from '../gear/weapons';
@@ -544,7 +545,7 @@ export function executeAction(caster: CombatUnit, action: Ability, targets: Comb
     return damaged;
   };
 
-  changeFor(caster).mpSpent = action.mpCost;
+  changeFor(caster).mpSpent = mpCostAt(action, caster.stats.level);
   const effects = effectsOf(action);
   const targetEffects = effects.filter(e => e.appliesTo === 'target');
   const casterEffects = effects.filter(e => e.appliesTo === 'caster');

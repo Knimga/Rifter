@@ -1,6 +1,7 @@
 import { useMemo, lazy, Suspense } from 'react';
 import { FaCoins } from 'react-icons/fa';
 import { loot } from '../data/gear/loot';
+import { totalShards, type ShardCounts } from '../data/gear/shards';
 import { formatGold } from '../data/detailStrings';
 import type { AreaType, TargetType } from '../data/combat/abilities';
 import type { ActiveBuff, ActiveHot, ActiveDot } from '../data/units/stats';
@@ -97,6 +98,8 @@ interface Props {
   droppedKeys?: Record<string, DungeonKey>;
   /** Gold lying on the floor ("x,y" → how much): drawn as the Gold Coins model, picked up by a click. */
   droppedGold?: Record<string, number>;
+  /** Affix shards lying on the floor ("x,y" → which): drawn as the Affix Shards model, picked up by a click. */
+  droppedShards?: Record<string, ShardCounts>;
   /** Where each unit last aimed an ability; its model turns to face it. */
   aims?: Record<string, UnitAim>;
   /** The 3D layer has drawn its first frame (ModelLayer onReady): the page stops hiding the map. */
@@ -110,7 +113,7 @@ interface Props {
   fog: FogState | null;
 }
 
-export default function DungeonMap({ playerPos, activeMoverPos, party, moveTargets, moveApCost, onMove, onLocationChange, onDoorClick, chests, emptiedChests, onOpenChest, activeTarget, activeAbilityArea, areaTone, actionRange, onAbilityUse, onAbilityDeselect, onMemberSelect, enemies, inCombat, isPlayerTurn, activeCombatantId, floatingTexts, onFloatingTextComplete, zone, riftPos, partyBuffs, partyHots, partyDots, floorColor, wallColor, doorObject, enemyAoePreview, enemyTargetKey, tileTargets = null, droppedItems = {}, droppedKeys = {}, droppedGold = {}, onLootClick, aims, highlightUnitId = null, fog, onReady }: Props) {
+export default function DungeonMap({ playerPos, activeMoverPos, party, moveTargets, moveApCost, onMove, onLocationChange, onDoorClick, chests, emptiedChests, onOpenChest, activeTarget, activeAbilityArea, areaTone, actionRange, onAbilityUse, onAbilityDeselect, onMemberSelect, enemies, inCombat, isPlayerTurn, activeCombatantId, floatingTexts, onFloatingTextComplete, zone, riftPos, partyBuffs, partyHots, partyDots, floorColor, wallColor, doorObject, enemyAoePreview, enemyTargetKey, tileTargets = null, droppedItems = {}, droppedKeys = {}, droppedGold = {}, droppedShards = {}, onLootClick, aims, highlightUnitId = null, fog, onReady }: Props) {
   const { width, height, floors, doors } = zone;
   const hover = useHoveredTile();
   const hoveredTile = hover.hovered;
@@ -132,8 +135,8 @@ export default function DungeonMap({ playerPos, activeMoverPos, party, moveTarge
   // Every tile of each (all 4 of a large one's): hovering, clicking and highlighting work on any of them
   const enemyByKey = useMemo(() => new Map(modelEnemies.flatMap(e => footprintKeys(bodyOf(e)).map(k => [k, e] as const))), [modelEnemies]);
   const memberByKey = useMemo(() => new Map(party.map(m => [posKey(m.pos), m])), [party]);
-  // Loot drawn as models: the top item of each pile, each rift key (the keystone, in its dungeon's color), and each
-  // pile of gold (its coins scattered by its tile: each pile looks its own)
+  // Loot drawn as models: the top item of each pile, each rift key (the keystone, in its dungeon's color), each
+  // pile of gold (its coins scattered by its tile: each pile looks its own) and each group of shards
   const modelLoot = useMemo(() => {
     const out: MapLoot[] = [];
     for (const [key, items] of Object.entries(droppedItems)) {
@@ -145,8 +148,9 @@ export default function DungeonMap({ playerPos, activeMoverPos, party, moveTarge
       out.push({ id: `key-${dungeon}`, link: RIFT_MODELS.keystone.model, pos: keyPos(key), tint: DUNGEONS[dungeon].riftColor });
     }
     for (const key of Object.keys(droppedGold)) out.push({ id: `gold-${zone.id}-${key}`, link: loot('gold').model, pos: keyPos(key) });
+    for (const key of Object.keys(droppedShards)) out.push({ id: `shards-${zone.id}-${key}`, link: loot('affix-shards').model, pos: keyPos(key) });
     return out;
-  }, [droppedItems, droppedKeys, droppedGold, zone.id]);
+  }, [droppedItems, droppedKeys, droppedGold, droppedShards, zone.id]);
   // Party members drawn as their class models, with HP/MP bars and effect markers above their heads
   const modelParty = useMemo(
     () => party.map(m => toMapMember(m, statusMarkers(partyBuffs[m.partyIndex] ?? [], partyHots[m.partyIndex] ?? [], partyDots[m.partyIndex] ?? []))),
@@ -216,7 +220,7 @@ export default function DungeonMap({ playerPos, activeMoverPos, party, moveTarge
     if (enemy) return; // can't walk onto enemies (or stop on a summoned ally)
 
     // Loot pickup: click adjacent dropped item out of combat
-    if (!inCombat && (droppedItems[key]?.length || droppedKeys[key] || droppedGold[key]) && isAdjacent(playerPos, p)) {
+    if (!inCombat && (droppedItems[key]?.length || droppedKeys[key] || droppedGold[key] || droppedShards[key]) && isAdjacent(playerPos, p)) {
       onLootClick?.(p);
       return;
     }
@@ -252,7 +256,8 @@ export default function DungeonMap({ playerPos, activeMoverPos, party, moveTarge
     const tileItems = floor && isKnown(key) ? droppedItems[key] : undefined;
     const tileKey = floor && isKnown(key) ? droppedKeys[key] : undefined;
     const tileGold = floor && isKnown(key) ? droppedGold[key] : undefined;
-    const isLootAdjacent = !inCombat && (!!tileItems?.length || !!tileKey || !!tileGold) && isAdjacent(playerPos, p);
+    const tileShards = floor && isKnown(key) ? droppedShards[key] : undefined;
+    const isLootAdjacent = !inCombat && (!!tileItems?.length || !!tileKey || !!tileGold || !!tileShards) && isAdjacent(playerPos, p);
     const unitOnTile = member ? unitKey({ side: 'party', idx: member.partyIndex }) : enemy?.id;
     const isEnemyTargeted = enemyTargetKey !== null && unitOnTile === enemyTargetKey;
     // A 'tile' ability: every tile it can be aimed at, softly; the hovered one as the target
@@ -273,12 +278,12 @@ export default function DungeonMap({ playerPos, activeMoverPos, party, moveTarge
       <FloorTile key={key} p={p} hover={hover} onClick={onTileClick}
         color={deepFog.has(key) ? 'var(--rift-fog)' : floor && !door ? floorColor : wallColor}
         brighten={floor && !door && !activeTarget && !highlight && moveTargets.has(key) && hover.isHovered(p)}>
-        {(tileItems?.[0] || tileKey || tileGold) && (
-          // The pile (rift key, gold) is drawn by ModelLayer; a glow on the floor under it shows it can be picked
-          // up, in the key's own color for a key
+        {(tileItems?.[0] || tileKey || tileGold || tileShards) && (
+          // The pile (an item, a rift key, gold, shards) is drawn by ModelLayer; a soft round glow on the floor under
+          // it, pale yellow whatever lies there, shows it can be picked up
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-            <div className={`w-8 h-8 rounded-full ${isLootAdjacent ? 'animate-pulse' : 'invisible'}`}
-              style={{ boxShadow: `0 0 10px 3px color-mix(in srgb, ${tileKey ? riftGlowCss(DUNGEONS[tileKey].riftColor) : 'var(--rift-loot)'} 60%, transparent)` }} />
+            <div className={`w-10 h-10 rounded-full ${isLootAdjacent ? 'animate-pulse' : 'invisible'}`}
+              style={{ background: 'radial-gradient(circle, color-mix(in srgb, var(--rift-loot-glow) 55%, transparent) 0%, color-mix(in srgb, var(--rift-loot-glow) 22%, transparent) 45%, transparent 70%)' }} />
           </div>
         )}
         {/* A door, the rift or a chest the leader can use now: a soft pulsing glow on its tile (stronger on hover) */}
@@ -348,6 +353,12 @@ export default function DungeonMap({ playerPos, activeMoverPos, party, moveTarge
       {hoveredTile && droppedGold[posKey(hoveredTile)] && isKnown(posKey(hoveredTile)) && (
         <ObjectTag board={board} x={hoveredTile.x} y={hoveredTile.y} height={KEY_TAG_HEIGHT}
           text={formatGold(droppedGold[posKey(hoveredTile)])} icon={<FaCoins aria-label="Gold" className="w-3 h-3 shrink-0" style={{ color: 'var(--rift-gold)' }} />} />
+      )}
+
+      {/* How many shards lie there, while they are hovered */}
+      {hoveredTile && droppedShards[posKey(hoveredTile)] && isKnown(posKey(hoveredTile)) && (
+        <ObjectTag board={board} x={hoveredTile.x} y={hoveredTile.y} height={KEY_TAG_HEIGHT}
+          text={`${totalShards(droppedShards[posKey(hoveredTile)])} Affix Shards`} />
       )}
 
       {/* A container's name (a chest, a dead adventurer) while it is hovered */}

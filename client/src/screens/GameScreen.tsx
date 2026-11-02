@@ -6,6 +6,8 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { CLASSES } from '../data/units/classes';
 import { generateLootDrops, heldWeapon, type Item } from '../data/gear';
 import { rollGold } from '../data/gear/loot';
+import { mpCostAt } from '../data/combat/abilities';
+import { mergeShards, rollShardDrop, SHARD_DROP_CHANCE, totalShards, type ShardCounts } from '../data/gear/shards';
 import { formatGold } from '../data/detailStrings';
 import { partyCanUseItem } from '../data/gear/inventory';
 import { AUTO_END_TURN_DELAY_MS, COMBAT_TEXT_COLOR, STUNNED_PAUSE_MS } from '../data/constants';
@@ -20,7 +22,7 @@ import { partyWalk, findFollowerSpawns, spreadOut, trailFollowers } from '../dat
 import { SANCTUM, SANCTUM_FLOORS, SANCTUM_RECEPTACLE, isSanctumWalkable, type NpcPlacement } from '../data/world/sanctum';
 import { npc } from '../data/world/npcs';
 import { interactiveObjectName } from '../data/world/interactiveObjects';
-import { generateDungeon, isFreeFloor, objectTilesOf, spawnDungeonEnemies, zoneRift, zoneWalkable, type DungeonData, type ZoneData } from '../data/world/dungeonGen';
+import { buildDungeon, isFreeFloor, objectTilesOf, zoneRift, zoneWalkable, type DungeonData, type ZoneData } from '../data/world/dungeonGen';
 import { DUNGEONS, type DungeonKey } from '../data/world/dungeons';
 import { INITIAL_COMBAT, aggroedBy, startCombat, joinCombat, advanceTurn, apLeft, moveBudget, moveCost, stunnedOutcome, getCurrentCombatant, deadPartyIndices, type CombatState } from '../data/combat/combat';
 import { isRooted } from '../data/units/stats';
@@ -29,8 +31,12 @@ import { useEnemyTurn, type EnemyActivity, type EnemyAoePreview } from '../hooks
 import { useFloatingText } from '../hooks/useFloatingText';
 import { useLatest } from '../hooks/useLatest';
 import { useKeyring } from '../hooks/useKeyring';
+import { useShards } from '../hooks/useShards';
+import { useEnchanter } from '../hooks/useEnchanter';
 import RifterWindow from '../components/RifterWindow';
 import VendorWindow from '../components/VendorWindow';
+import EnchanterWindow from '../components/EnchanterWindow';
+import EdgePulse from '../components/hud/EdgePulse';
 import type { UnitAim } from '../components/ModelLayer';
 import { DORMANT_RIFTER, type RifterState } from '../components/SanctumMap';
 import { RIFT_CLOSE_MS } from '../forge/designs/_rifter';
@@ -60,7 +66,7 @@ import { boardLayout } from '../viewEngine/board';
 import type { PartyTokenData } from '../components/mapParts';
 import Backdrop from '../components/ui/Backdrop';
 import RiftButton from '../components/ui/RiftButton';
-import DevKeyTool from '../components/DevKeyTool'; // TEMP (testing only)
+import DevToolsWindow from '../components/DevToolsWindow'; // TEMP (testing only)
 import ActionDock, { type SlotContent } from '../components/hud/ActionDock';
 import ActingStatus from '../components/hud/ActingStatus';
 import { apState } from '../components/hud/ApTracker';
@@ -235,7 +241,7 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
   /** Whether someone in the party can use an item (proficient): loot favours it, and windows fade what no one can use. */
   const partyCanUse = useCallback((item: Item) => partyCanUseItem(partyRef.current, item), [partyRef]);
 
-  const { inventory, setInventory, takeLoot, equipItem, unequipItem, gold, setGold, addGold } = useInventory({ party, setParty, spawnFloat });
+  const { inventory, setInventory, takeLoot, equipItem, unequipItem, swapGearSlots, moveInventoryItem, gold, setGold, addGold } = useInventory({ party, setParty, spawnFloat });
   /** Gold picked up at a tile (off the floor, out of a chest): into the party's gold, and its amount floats up with the coin. */
   const takeGold = useCallback((amount: number, at: Pos) => {
     addGold(amount);
@@ -246,6 +252,15 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
   const { endVisit, restock: restockVendor } = vendor;
   // The rift keys (shared, apart from the inventory, never lost)
   const keyring = useKeyring();
+  const { shards, addShard, gainShards, spendShard } = useShards();
+  /** Shards picked up at a tile (off the floor, out of a chest): into the party's shards, and how many floats up. */
+  const takeShards = useCallback((found: ShardCounts, at: Pos) => {
+    gainShards(found);
+    const n = totalShards(found);
+    spawnFloat(at.x, at.y, `+${n} ${n === 1 ? 'Shard' : 'Shards'}`, COMBAT_TEXT_COLOR.loot);
+  }, [gainShards, spawnFloat]);
+  // The Sanctum enchanter's services on the party's items, gold and shards (and the shards sold to her this session)
+  const enchanter = useEnchanter({ partyLevel: progress.level, inventory, setInventory, gold, addGold, shards, addShard, gainShards, spendShard });
   const { addKey } = keyring;
   // The Sanctum's Rifter: the key set in it and whether its rift is open (dormant whenever the party arrives),
   // and its window, open while the leader stands by its receptacle
@@ -265,6 +280,8 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
     reopenTimer.current = window.setTimeout(() => setRifter((r) => (r.phase === 'close' ? { ...r, rift: r.key, phase: 'reopen' } : r)), RIFT_CLOSE_MS);
   };
   useEffect(() => () => window.clearTimeout(reopenTimer.current), []);
+  // TEMP (testing only): the testing tools' window (components/DevToolsWindow.tsx)
+  const [showTesting, setShowTesting] = useState(false);
   const [showRifter, setShowRifter] = useState(false);
   useEffect(() => {
     if (showRifter && (location !== 'sanctum' || !isAdjacent(playerPos, SANCTUM_RECEPTACLE))) setShowRifter(false);
@@ -293,7 +310,7 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
     if (talkingTo && (location !== 'sanctum' || !isAdjacent(playerPos, talkingTo.pos))) endTalk();
   }, [talkingTo, location, playerPos, endTalk]);
   const keysRef = useLatest(keyring.keys);
-  const chests = useChests({ location, dungeon, currentZone, combatActive: combat.active, playerPos, partyLevel: progress.level, partyCanUse, takeLoot, takeGold });
+  const chests = useChests({ location, dungeon, currentZone, combatActive: combat.active, playerPos, partyLevel: progress.level, partyCanUse, takeLoot, takeGold, takeShards });
 
   /** Replace the current zone's data in the dungeon (e.g. its dropped items). */
   const updateCurrentZone = useCallback((fn: (z: ZoneData) => ZoneData) => {
@@ -301,9 +318,9 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
   }, [currentZoneRef]);
 
   /**
-   * Pick up what lies on `pos` (clicked from next to it): a rift key goes on the keyring and gold into the party's
-   * gold (neither needs inventory room, so a full inventory never keeps them); a loot pile goes into the inventory,
-   * as much as fits.
+   * Pick up what lies on `pos` (clicked from next to it): a rift key goes on the keyring, gold into the party's gold
+   * and shards into the party's shards (none needs inventory room, so a full inventory never keeps them); a loot pile
+   * goes into the inventory, as much as fits.
    */
   const handleLootPickup = useCallback((pos: Pos) => {
     if (!zone) return;
@@ -321,18 +338,24 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
       takeGold(coins, pos);
       updateCurrentZone(z => ({ ...z, droppedGold: cleared(z.droppedGold) }));
     }
+    const found = zone.droppedShards[key];
+    if (found) {
+      takeShards(found, pos);
+      updateCurrentZone(z => ({ ...z, droppedShards: cleared(z.droppedShards) }));
+    }
     const items = zone.droppedItems[key];
     if (!items?.length) return;
 
     const remaining = takeLoot(items, pos);
     if (!remaining) return;
     updateCurrentZone(z => ({ ...z, droppedItems: remaining.length > 0 ? { ...z.droppedItems, [key]: remaining } : cleared(z.droppedItems) }));
-  }, [zone, takeLoot, takeGold, updateCurrentZone, addKey, spawnFloat]);
+  }, [zone, takeLoot, takeGold, takeShards, updateCurrentZone, addKey, spawnFloat]);
   const lootPickupRef = useLatest(handleLootPickup);
 
   /**
-   * Loot for enemies that just died (any cause), on the tiles they fell: items favouring what the party can use, and
-   * gold (rolled apart from items: rollGold). A boss also drops a rift key the party doesn't have (and that isn't
+   * Loot for enemies that just died (any cause), on the tiles they fell: items favouring what the party can use, gold
+   * (rolled apart from items: rollGold) and, for any enemy, a chance of a group of affix shards (SHARD_DROP_CHANCE).
+   * A boss also drops a rift key the party doesn't have (and that isn't
    * already lying in this dungeon), if one is left: on its tile, or the nearest floor tile beside it with nothing
    * lying on it.
    */
@@ -341,6 +364,7 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
     if (!d) return;
     const drops: Record<string, Item[]> = {};
     const goldDrops: Record<string, number> = {};
+    const shardDrops: Record<string, ShardCounts> = {};
     const keyDrops: { at: Pos; key: DungeonKey }[] = [];
     // A boss's defeat gives the vendor fresh wares, at the party's level (only then: leaving a dungeon doesn't)
     if (dead.some(isBoss)) restockVendor(partyLevelRef.current);
@@ -349,26 +373,31 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
       if (items.length) (drops[posKey(e.pos)] ??= []).push(...items);
       const coins = rollGold(e.level, e.classData.dropsGold ?? 0, e.classData.goldBonus);
       if (coins) goldDrops[posKey(e.pos)] = (goldDrops[posKey(e.pos)] ?? 0) + coins;
+      const found = rollShardDrop(SHARD_DROP_CHANCE);
+      if (found) shardDrops[posKey(e.pos)] = mergeShards(shardDrops[posKey(e.pos)] ?? {}, found);
       if (isBoss(e)) {
         const lying = [...d.zones.flatMap(z => Object.values(z.droppedKeys)), ...keyDrops.map(k => k.key)];
         const key = bossKeyDrop(keysRef.current, lying);
         if (key) keyDrops.push({ at: e.pos, key });
       }
     }
-    if (Object.keys(drops).length === 0 && Object.keys(goldDrops).length === 0 && keyDrops.length === 0) return;
+    if ([drops, goldDrops, shardDrops].every(r => Object.keys(r).length === 0) && keyDrops.length === 0) return;
     updateCurrentZone(z => {
       const merged = { ...z.droppedItems };
       for (const [k, items] of Object.entries(drops)) merged[k] = [...(merged[k] ?? []), ...items];
       // Gold on a tile that has some already adds to its pile
       const gold = { ...z.droppedGold };
       for (const [k, coins] of Object.entries(goldDrops)) gold[k] = (gold[k] ?? 0) + coins;
+      // So do shards
+      const shardPiles = { ...z.droppedShards };
+      for (const [k, found] of Object.entries(shardDrops)) shardPiles[k] = mergeShards(shardPiles[k] ?? {}, found);
       const keys = { ...z.droppedKeys };
       for (const { at, key } of keyDrops) {
-        const free = (p: Pos) => z.floors.has(posKey(p)) && !merged[posKey(p)]?.length && !gold[posKey(p)] && !keys[posKey(p)];
+        const free = (p: Pos) => z.floors.has(posKey(p)) && !merged[posKey(p)]?.length && !gold[posKey(p)] && !shardPiles[posKey(p)] && !keys[posKey(p)];
         const spot = free(at) ? at : (findOpenTilesNear(at, free, 1, 3)[0] ?? at);
         keys[posKey(spot)] = key;
       }
-      return { ...z, droppedItems: merged, droppedGold: gold, droppedKeys: keys };
+      return { ...z, droppedItems: merged, droppedGold: gold, droppedShards: shardPiles, droppedKeys: keys };
     });
   }, [partyCanUse, updateCurrentZone, restockVendor]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -381,7 +410,7 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
     combatActive: combat.active, round: combat.round, membersRef, updateMembers, partyStatsRef, partyPosRef,
     enemiesRef, currentZoneRef, setEnemies, setCombat, spawnFloat,
   });
-  const { xpGain, addXp, awardKills } = useExperience({ progress, setProgress, party, setParty, spawnFloat, leaderPosRef });
+  const { xpGain, levelUps, addXp, awardKills } = useExperience({ progress, setProgress, party, setParty, spawnFloat, leaderPosRef });
   // Every enemy that dies, however (a hit, a DoT tick), gives its XP and drops its loot, once
   const resetDeaths = useEnemyDeaths(enemies, (dead) => { awardKills(dead); dropLoot(dead); });
   const { pendingPoints, setMemberPending, confirmPoints, anyoneLeveling } = usePendingPoints(party, setParty);
@@ -394,11 +423,19 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
       setShowCharSheet(prev => !prev);
     },
     escape: () => {
+      if (showTesting) { setShowTesting(false); return; } // TEMP (testing only)
       if (showRifter) { setShowRifter(false); return; }
       if (talkingTo) { endTalk(); return; }
       if (showCharSheet) { setShowCharSheet(false); return; }
       if (chests.openChest) { chests.closeChest(); return; }
       if (activeSlot !== null) clearActiveSlot();
+    },
+    // Out of combat, with no window open: the next party member in order (wrapping round), as a click on their panel
+    cycleMember: (back) => {
+      if (combat.active || showCharSheet || showRifter || talkingTo || chests.openChest || showTesting) return false;
+      const n = party.length;
+      setBarViewIdx(i => (i + (back ? n - 1 : 1)) % n);
+      return true;
     },
   });
 
@@ -419,11 +456,10 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
     if (next !== 'sanctum') {
       const config = DUNGEONS[next];
       setDungeonKey(next);
-      const d = generateDungeon(config, progress.level);
+      const { dungeon: d, enemies: spawned } = buildDungeon(config, progress.level);
       setDungeon(d);
       setCurrentZone(d.startZoneId);
       setPlayerPos(d.playerStart);
-      const spawned = spawnDungeonEnemies(d, config);
       setEnemies(spawned);
       // The followers take the tiles around the rift the party came through, beside the leader
       const isFree = isFreeFloor(d, d.zones[d.startZoneId], spawned);
@@ -491,11 +527,14 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
    * Aggro every unaggroed group with a member visible from `pos`, then start combat with them
    * (or add them to the combat already running).
    */
+  // How many fights have begun (each one plays the dark red pulse around the screen's edge: EdgePulse)
+  const [combatStarts, setCombatStarts] = useState(0);
   const triggerAggro = useCallback((pos: Pos, zoneEnemyList: EnemyInstance[], floors: Set<string>, inCombat: boolean) => {
     const newlyAggroed = aggroedBy(pos, zoneEnemyList, floors);
     if (newlyAggroed.length === 0) return;
     const aggroIds = new Set(newlyAggroed.map(e => e.id));
     setEnemies(prev => prev.map(e => aggroIds.has(e.id) ? { ...e, aggroed: true } : e));
+    if (!inCombat) setCombatStarts(n => n + 1);
     setCombat(prev => inCombat
       ? joinCombat(prev, newlyAggroed)
       : startCombat(party.map((m, i) => ({ stats: partyStatsRef.current[i], name: m.characterName })), newlyAggroed));
@@ -585,7 +624,7 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
     if (combat.active && !isPlayerTurn) return;
 
     const action = activeAction;
-    if (!action || activeMp < action.mpCost) return;
+    if (!action || activeMp < mpCostAt(action, progress.level)) return;
     // A summoned creature only lasts the fight: no summoning out of combat
     if (!combat.active && action.effects.some(e => e.type === 'summon')) {
       spawnFloat(activePartyPos.x, activePartyPos.y, 'Only in combat', COMBAT_TEXT_COLOR.warn);
@@ -617,7 +656,7 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
     applyActionOutcome(executeAction(caster, action, aimed.targets, targetPos, aimed.allies, actionWorld()), caster, targetPos);
     clearActiveSlot();
     if (combat.active) setCombat(prev => ({ ...prev, apSpent: prev.apSpent + action.apCost }));
-  }, [combat.active, isPlayerTurn, activeAp, activePartyIdx, activeAction, zoneEnemies, activePartyPos, activeMp, partyAllStats, partyPositions, partyHp, party, zone, zoneSummons, tileTargets, applyActionOutcome, spawnFloat]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [combat.active, isPlayerTurn, activeAp, activePartyIdx, activeAction, zoneEnemies, activePartyPos, activeMp, partyAllStats, partyPositions, partyHp, party, zone, zoneSummons, tileTargets, applyActionOutcome, spawnFloat, progress.level]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // A member's turn ends by itself once it has nothing left to spend (no AP, no paid tiles). One that starts
   // its turn with no AP (stunned) loses it, the same as an enemy (useEnemyTurn). Waits a moment first, and
@@ -762,6 +801,7 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
               droppedItems={zone?.droppedItems}
               droppedKeys={zone?.droppedKeys}
               droppedGold={zone?.droppedGold}
+              droppedShards={zone?.droppedShards}
               onLootClick={handleLootPickup}
               highlightUnitId={hoveredCombatant}
               onReady={onMapReady}
@@ -777,6 +817,10 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
 
       {/* Where the party is */}
       <div className="absolute top-5 left-6 z-30 rf-label pointer-events-none">{locationName}</div>
+
+      {/* Pulses around the screen's edge: a level-up's (yellow), and combat beginning (dark red). Each new key plays one */}
+      {levelUps > 0 && <EdgePulse key={`level-${levelUps}`} kind="levelUp" />}
+      {combatStarts > 0 && <EdgePulse key={`combat-${combatStarts}`} kind="combat" />}
 
       {/* Turn order */}
       {combat.active && (
@@ -794,12 +838,8 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
 
       {/* Menus */}
       <div className="absolute top-5 right-6 z-30 flex gap-2">
-        {/* TEMP (testing): gain exactly enough XP for the next level. Dev builds only. */}
-        {import.meta.env.DEV && (
-          <RiftButton size="sm" onClick={() => addXp(xpToNext(progress.level) - progress.xp)}>Level +1</RiftButton>
-        )}
-        {/* TEMP (testing): add any dungeon's key to the keyring (components/DevKeyTool.tsx). Dev builds only. */}
-        {import.meta.env.DEV && <DevKeyTool keys={keyring.keys} onAddKey={keyring.addKey} />}
+        {/* TEMP (testing only): the testing tools' window (components/DevToolsWindow.tsx). Dev builds only. */}
+        {import.meta.env.DEV && <RiftButton size="sm" onClick={() => setShowTesting(true)}>Testing</RiftButton>}
         <RiftButton size="sm" aria-label={anyoneLeveling ? 'Party (I), level up available' : 'Party (I)'} className={anyoneLeveling ? 'is-levelup' : ''} onClick={() => setShowCharSheet(true)}>Party</RiftButton>
       </div>
       {/* The party's XP, under the top buttons */}
@@ -853,14 +893,23 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
       {chests.openChest && (
         // On the right, clear of the map's middle (where the chest and the party are)
         <div className="absolute right-6 top-[26%] z-40">
-          <ContainerWindow name={interactiveObjectName(chests.openChest.object)} items={chests.openChestContents.items} gold={chests.openChestContents.gold} usable={partyCanUse}
-            onLoot={chests.lootChest} onLootGold={chests.lootChestGold} onClose={chests.closeChest} />
+          <ContainerWindow name={interactiveObjectName(chests.openChest.object)} items={chests.openChestContents.items} gold={chests.openChestContents.gold} shards={chests.openChestContents.shards} usable={partyCanUse}
+            onLoot={chests.lootChest} onLootGold={chests.lootChestGold} onLootShards={chests.lootChestShards} onClose={chests.closeChest} />
         </div>
       )}
 
       {talkingTo && npc(talkingTo.id).service === 'vendor' && (
         <VendorWindow vendor={npc(talkingTo.id)} party={party} partyStats={partyAllStats} state={vendor.state}
           onTradeShelf={vendor.tradeShelf} onTradeParty={vendor.tradeParty} onClose={endTalk} />
+      )}
+      {/* TEMP (testing only): the testing tools (components/DevToolsWindow.tsx). Dev builds only. */}
+      {import.meta.env.DEV && showTesting && (
+        <DevToolsWindow keys={keyring.keys} onAddKey={keyring.addKey} onAddShard={addShard} onAddGold={addGold}
+          onLevelUp={() => addXp(xpToNext(progress.level) - progress.xp)} onClose={() => setShowTesting(false)} />
+      )}
+      {talkingTo && npc(talkingTo.id).service === 'enchanting' && (
+        <EnchanterWindow enchanter={enchanter} npc={npc(talkingTo.id)} inventory={inventory} gold={gold} shards={shards}
+          canUse={partyCanUse} onClose={endTalk} />
       )}
 
       {showRifter && (
@@ -879,12 +928,15 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
           partyBuffs={partyBuffs}
           inventory={inventory}
           gold={gold}
+          shards={shards}
           keys={keyring.keys}
           hasNewKey={keyring.hasNew}
           onSeeKeys={keyring.seeKeys}
           onClose={() => setShowCharSheet(false)}
           onEquipItem={equipItem}
           onUnequipItem={unequipItem}
+          onMoveItem={moveInventoryItem}
+          onSwapGear={swapGearSlots}
           progress={progress}
           pending={pendingPoints}
           onPendingChange={setMemberPending}

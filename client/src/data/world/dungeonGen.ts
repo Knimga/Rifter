@@ -1,5 +1,6 @@
 import type { EnemyClassData, EnemyInstance } from '../units/enemies';
 import type { Item } from '../gear';
+import type { ShardCounts } from '../gear/shards';
 import type { RGB } from '../../forge/core/vec';
 import { bodySize, creatureTiles, generateEnemyInstance } from '../units/enemies';
 import { findOpenTilesNear, fits, footprint, keyPos, neighbors, posKey, reachableTiles, STEPS, type Pos } from './grid';
@@ -38,6 +39,8 @@ export interface ZoneData {
   droppedKeys: Record<string, string>;
   /** "x,y" → the gold lying on that tile (data/gear/loot.ts), dropped by enemies: one pile a tile, adding up. */
   droppedGold: Record<string, number>;
+  /** "x,y" → the affix shards lying on that tile (data/gear/shards.ts), dropped by enemies: one group a tile, adding up. */
+  droppedShards: Record<string, ShardCounts>;
 }
 
 /**
@@ -130,9 +133,9 @@ export interface ZoneConfig {
   /** Wall islands inside rooms (none if absent). */
   islands?: IslandConfig;
   /**
-   * The zone's enemy groups: ROOM_FILL_SHARE of the zone's rooms (all but the one the party enters by) get one
-   * group each, cycling through this list (reshuffled each time round) until those rooms are filled. Never two
-   * groups in one room.
+   * The zone's enemy groups: ROOM_FILL_SHARE of the zone's rooms (all but the one the party enters by), and at
+   * least MIN_ZONE_GROUPS, get one group each, cycling through this list (reshuffled each time round) until those
+   * rooms are filled. Never two groups in one room, and never two within GROUP_GAP steps of each other.
    */
   enemyGroups: EnemyClassData[][];
   /**
@@ -535,7 +538,7 @@ function generateZone(id: number, width: number, height: number, zoneConfig: Zon
     connectBSP(root, floors, zoneConfig.corridorWidth);
   }
 
-  const zone: ZoneData = { id, width, height, floors, rooms, doors: [], islands: new Set(), droppedItems: {}, droppedKeys: {}, droppedGold: {} };
+  const zone: ZoneData = { id, width, height, floors, rooms, doors: [], islands: new Set(), droppedItems: {}, droppedKeys: {}, droppedGold: {}, droppedShards: {} };
   if (zoneConfig.islands) placeIslands(zone, zoneConfig.islands);
   return zone;
 }
@@ -567,7 +570,7 @@ function generateBossZoneMain(id: number, config: BossZoneConfig): { zone: ZoneD
   if (config.layout === 'caverns') carveCavern(floors, bossRoom);
   else fillRect(floors, bossRoom);
   return {
-    zone: { id, width: zoneSize, height: zoneSize, floors, rooms: [bossRoom], doors: [], islands: new Set(), droppedItems: {}, droppedKeys: {}, droppedGold: {} },
+    zone: { id, width: zoneSize, height: zoneSize, floors, rooms: [bossRoom], doors: [], islands: new Set(), droppedItems: {}, droppedKeys: {}, droppedGold: {}, droppedShards: {} },
     bossRoom,
   };
 }
@@ -692,7 +695,7 @@ function linkDoors(zoneA: ZoneData, posA: Pos, zoneB: ZoneData, posB: Pos, nextD
 // ─── Main Generator ─────────────────────────────────────────────────────────
 
 /** A fresh dungeon from its config, its enemies' and loot's level set by the party's (`partyLevel`). */
-export function generateDungeon(config: DungeonConfig, partyLevel: number): DungeonData {
+function generateDungeon(config: DungeonConfig, partyLevel: number): DungeonData {
   const numRegularZones = config.zones.length;
   const bossZoneId = numRegularZones;
 
@@ -823,10 +826,29 @@ const ENTRY_CLEAR_STEPS = AGGRO_RANGE + 3;
 /** Share of a regular zone's rooms (not counting the one the party enters by) that get an enemy group. */
 const ROOM_FILL_SHARE = 0.75;
 
+/** Fewest enemy groups a regular zone gets (more rooms than ROOM_FILL_SHARE fill, if that leaves it short). */
+const MIN_ZONE_GROUPS = 3;
+
+/** Times a regular zone's groups are placed afresh while it has fewer than MIN_ZONE_GROUPS (spawnDungeonEnemies). */
+const ZONE_PLACE_TRIES = 12;
+
+/**
+ * Fewest walking steps between members of two groups. Beyond twice AGGRO_RANGE, so no tile pulls both at once, with
+ * room for the fight: a fight with one group, kept where it started, never pulls another the party hasn't seen.
+ * Pulling a second group stays possible, by walking toward it.
+ */
+const GROUP_GAP = 2 * AGGRO_RANGE + 4;
+
+/** How loosely a group stands around its center: random spread added to each tile's distance from it (tiles). */
+const GROUP_SPREAD = 1.5;
+
+/** Centers tried, per room, for a group that doesn't fit around the first. */
+const GROUP_CENTER_TRIES = 8;
+
 /** Fewest other places a large creature must fit within a move of where it is placed (spawnDungeonEnemies canRoamFrom). */
 const LARGE_MIN_STOPS = 8;
 
-export function spawnDungeonEnemies(dungeon: DungeonData, config: DungeonConfig): EnemyInstance[] {
+function spawnDungeonEnemies(dungeon: DungeonData, config: DungeonConfig): EnemyInstance[] {
   const instances: EnemyInstance[] = [];
   let globalIdx = 0;
   let nextGroupId = 0;
@@ -857,25 +879,45 @@ export function spawnDungeonEnemies(dungeon: DungeonData, config: DungeonConfig)
     }
   }
 
-  /** Free floor tiles inside `area`: no one on them, and away from the zone's entry unless `nearEntryOk`. */
+  // Tiles within GROUP_GAP walking steps of a group already placed: no other group's member stands on them
+  const nearGroup = new Set<string>();
+
+  /**
+   * Free floor tiles inside `area`: no one on them, not near another group (GROUP_GAP), and away from the zone's
+   * entry unless `nearEntryOk`.
+   */
   const freeTiles = (zone: ZoneData, area: Rect, nearEntryOk: boolean): Pos[] => {
     const free: Pos[] = [];
     for (let x = area.x; x < area.x + area.w; x++) {
       for (let y = area.y; y < area.y + area.h; y++) {
         const key = `${zone.id}:${posKey({ x, y })}`;
-        if (!zone.floors.has(posKey({ x, y })) || occupied.has(key) || (!nearEntryOk && nearEntry.has(key))) continue;
+        if (!zone.floors.has(posKey({ x, y })) || occupied.has(key) || nearGroup.has(key) || (!nearEntryOk && nearEntry.has(key))) continue;
         free.push({ x, y });
       }
     }
     return free;
   };
 
-  /** Place one enemy group, member i on spots[i] (a large one's top-left tile). */
+  /** Where placement stands (who is placed, and the tiles they take or keep clear), to go back to it: restore. */
+  const snapshot = () => ({ occupied: new Set(occupied), nearGroup: new Set(nearGroup), instances: instances.slice(), nextGroupId, globalIdx });
+  const restore = (s: ReturnType<typeof snapshot>) => {
+    occupied.clear(); s.occupied.forEach(k => occupied.add(k));
+    nearGroup.clear(); s.nearGroup.forEach(k => nearGroup.add(k));
+    instances.splice(0, instances.length, ...s.instances);
+    nextGroupId = s.nextGroupId;
+    globalIdx = s.globalIdx;
+  };
+
+  /** Place one enemy group, member i on spots[i] (a large one's top-left tile); the tiles near it are kept clear of other groups. */
   const placeAt = (zone: ZoneData, group: EnemyClassData[], spots: Pos[]) => {
     const groupId = nextGroupId++;
+    const onFloor = (p: Pos) => zone.floors.has(posKey(p));
     group.forEach((type, i) => {
       const pos = spots[i];
-      for (const p of footprint({ pos, size: bodySize(type) })) occupied.add(`${zone.id}:${posKey(p)}`);
+      for (const p of footprint({ pos, size: bodySize(type) })) {
+        occupied.add(`${zone.id}:${posKey(p)}`);
+        for (const key of reachableTiles(p, GROUP_GAP, onFloor).keys()) nearGroup.add(`${zone.id}:${key}`);
+      }
       const level = dungeon.level + zone.id;
       instances.push(generateEnemyInstance(type, level, `${type.id}-${globalIdx++}`, pos, zone.id, groupId));
     });
@@ -919,16 +961,21 @@ export function spawnDungeonEnemies(dungeon: DungeonData, config: DungeonConfig)
   };
 
   /**
-   * Place one enemy group on random free floor tiles inside `area` (freeTiles: away from the zone's entry). False
-   * (nothing placed) if the group doesn't fit there.
+   * Place one enemy group inside `area`, standing together: around a random free tile (freeTiles: away from the
+   * zone's entry and from other groups), each member on the free tile nearest it, loosely (GROUP_SPREAD). Other
+   * centers are tried if it doesn't fit there; false (nothing placed) if it fits around none.
    */
   const placeGroup = (zone: ZoneData, area: Rect, group: EnemyClassData[]): boolean => {
     const free = shuffle(freeTiles(zone, area, false));
-    const open = new Map(free.map(p => [posKey(p), p]));
-    const spots = spotsFor(zone, group, open, () => free);
-    if (!spots) return false;
-    placeAt(zone, group, spots);
-    return true;
+    for (const center of free.slice(0, GROUP_CENTER_TRIES)) {
+      const near = (p: Pos) => Math.max(Math.abs(p.x - center.x), Math.abs(p.y - center.y));
+      const order = free.map(p => ({ p, d: near(p) + Math.random() * GROUP_SPREAD })).sort((a, b) => a.d - b.d).map(t => t.p);
+      const spots = spotsFor(zone, group, new Map(free.map(p => [posKey(p), p])), () => order);
+      if (!spots) continue;
+      placeAt(zone, group, spots);
+      return true;
+    }
+    return false;
   };
 
   /**
@@ -980,24 +1027,58 @@ export function spawnDungeonEnemies(dungeon: DungeonData, config: DungeonConfig)
       continue;
     }
 
-    // Regular zone: ROOM_FILL_SHARE of its rooms (not the one the party enters by), random ones, get one group
-    // each, cycling through the zone's groups (reshuffled each time round). A room takes the next group in the
-    // cycle that fits it (away from the entry); a room none fits is skipped for another. Never two in one room.
+    // Regular zone: ROOM_FILL_SHARE of its rooms (not the one the party enters by), and at least MIN_ZONE_GROUPS,
+    // random ones, get one group each, cycling through the zone's groups (reshuffled each time round). A room takes
+    // the next group in the cycle that fits it (away from the entry and other groups); a room none fits is skipped
+    // for another. Never two in one room. Where the groups land decides how many fit (a group in the middle of a room
+    // can keep its neighbours' groups out: GROUP_GAP), so a zone left with fewer than MIN_ZONE_GROUPS is placed
+    // again, up to ZONE_PLACE_TRIES times, keeping the try that placed the most.
     const groups = config.zones[zone.id]?.enemyGroups ?? [];
     if (groups.length === 0) continue;
-    const rooms = shuffle(zone.rooms.filter(r => !entryRooms.has(r)));
-    const target = Math.round(rooms.length * ROOM_FILL_SHARE);
-    let cycle: EnemyClassData[][] = [];
-    let filled = 0;
-    for (const room of rooms) {
-      if (filled === target) break;
-      if (cycle.length === 0) cycle = shuffle(groups);
-      const i = cycle.findIndex(g => placeGroup(zone, room, g));
-      if (i < 0) continue;
-      cycle.splice(i, 1);
-      filled++;
+    const candidates = zone.rooms.filter(r => !entryRooms.has(r));
+    const target = Math.max(MIN_ZONE_GROUPS, Math.round(candidates.length * ROOM_FILL_SHARE));
+    const fill = (): number => {
+      let cycle: EnemyClassData[][] = [];
+      let filled = 0;
+      for (const room of shuffle(candidates)) {
+        if (filled === target) break;
+        if (cycle.length === 0) cycle = shuffle(groups);
+        const i = cycle.findIndex(g => placeGroup(zone, room, g));
+        if (i < 0) continue;
+        cycle.splice(i, 1);
+        filled++;
+      }
+      return filled;
+    };
+    const before = snapshot();
+    let best = { filled: -1, state: before };
+    for (let t = 0; t < ZONE_PLACE_TRIES && best.filled < MIN_ZONE_GROUPS; t++) {
+      restore(before);
+      const filled = fill();
+      if (filled > best.filled) best = { filled, state: snapshot() };
     }
+    restore(best.state);
   }
 
   return instances;
+}
+
+/** Layouts tried for a dungeon whose zones don't all get MIN_ZONE_GROUPS (buildDungeon). */
+const LAYOUT_TRIES = 10;
+
+/**
+ * A new dungeon and its enemies: its layout (generateDungeon) and its groups (spawnDungeonEnemies). A layout where a
+ * regular zone gets fewer than MIN_ZONE_GROUPS (rooms too close for that many groups GROUP_GAP apart) is built
+ * again, up to LAYOUT_TRIES times, keeping the one with the most groups in its emptiest zone.
+ */
+export function buildDungeon(config: DungeonConfig, partyLevel: number): { dungeon: DungeonData; enemies: EnemyInstance[] } {
+  let best: { dungeon: DungeonData; enemies: EnemyInstance[]; fewest: number } | null = null;
+  for (let t = 0; t < LAYOUT_TRIES && (best?.fewest ?? -1) < MIN_ZONE_GROUPS; t++) {
+    const dungeon = generateDungeon(config, partyLevel);
+    const enemies = spawnDungeonEnemies(dungeon, config);
+    const fewest = Math.min(...dungeon.zones.filter(z => z.id !== dungeon.endZoneId)
+      .map(z => new Set(enemies.filter(e => e.zoneId === z.id).map(e => e.groupId)).size));
+    if (!best || fewest > best.fewest) best = { dungeon, enemies, fewest };
+  }
+  return { dungeon: best!.dungeon, enemies: best!.enemies };
 }

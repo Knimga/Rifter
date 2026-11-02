@@ -36,6 +36,11 @@ export function addItem(slots: Inventory, item: Item): Inventory {
   return at < 0 ? slots : setSlot(slots, at, item);
 }
 
+/** The slots with the items in `from` and `to` trading places (moving one to an empty slot leaves its own empty). */
+export function moveItem(slots: Inventory, from: number, to: number): Inventory {
+  return setSlot(setSlot(slots, to, slots[from]), from, slots[to]);
+}
+
 /** A list of items (a chest's) without the one at `idx`: the rest close up. */
 export function removeItem(items: Item[], idx: number): Item[] {
   return items.filter((_, i) => i !== idx);
@@ -68,13 +73,17 @@ export const partyCanUseItem = (party: { selectedClass: ClassKey }[], item: Item
 // ─── Equip / unequip ──────────────────────────────────────────────────────────
 
 /**
- * The gear slot equipping `item` puts it in: its own; a ring, the first empty ring slot, else Ring 1 (the ring
- * there comes off).
+ * The gear slot equipping `item` puts it in: `slot` if given and it fits there (an item dragged onto a gear slot);
+ * else its own; a ring, the first empty ring slot, else Ring 1 (the ring there comes off).
  */
-export function equipSlotFor(gear: GearSlots, item: Item): GearSlot {
+export function equipSlotFor(gear: GearSlots, item: Item, slot?: GearSlot): GearSlot {
   const slots = gearSlotsFor(item.slot);
+  if (slot && slots.includes(slot)) return slot;
   return slots.find((s) => !gear[s]) ?? slots[0];
 }
+
+/** Whether `item` goes in gear slot `slot` at all (a ring in either ring slot). */
+export const fitsGearSlot = (item: Item, slot: GearSlot) => gearSlotsFor(item.slot).includes(slot);
 
 /**
  * Whether a mainhand and an offhand can be held together: any offhand with a one-handed weapon (or none),
@@ -95,14 +104,14 @@ function handsClash(gear: GearSlots, item: Item): GearSlot | null {
 }
 
 /**
- * True if the item at `inventoryIdx` can be equipped: the member is proficient with it, and the inventory has
- * room for what it displaces (the item in its slot trades places with it; an item in the other hand it can't
- * be held with comes off too: handsFit).
+ * True if the item at `inventoryIdx` can be equipped (in `slot`, if given: it must fit there): the member is
+ * proficient with it, and the inventory has room for what it displaces (the item in its slot trades places with it;
+ * an item in the other hand it can't be held with comes off too: handsFit).
  */
-export function canEquip(classData: ClassData, item: Item | null | undefined, inventory: Inventory, gear: GearSlots): item is Item {
-  if (!item || !isProficient(classData, item)) return false;
+export function canEquip(classData: ClassData, item: Item | null | undefined, inventory: Inventory, gear: GearSlots, slot?: GearSlot): item is Item {
+  if (!item || !isProficient(classData, item) || (slot && !fitsGearSlot(item, slot))) return false;
   const clash = handsClash(gear, item);
-  const returned = (gear[equipSlotFor(gear, item)] ? 1 : 0) + (clash && gear[clash] ? 1 : 0);
+  const returned = (gear[equipSlotFor(gear, item, slot)] ? 1 : 0) + (clash && gear[clash] ? 1 : 0);
   // The item's own slot frees up as it is equipped
   return returned <= freeSlots(inventory) + 1;
 }
@@ -112,33 +121,48 @@ export const canUnequip = (inventory: Inventory, gear: GearSlots, slot: GearSlot
   !!gear[slot] && !isFull(inventory);
 
 /**
- * Equip the inventory item at `inventoryIdx` into its slot. If the slot was occupied, the
+ * Equip the inventory item at `inventoryIdx` into its slot (`slot`, if given: equipSlotFor). If the slot was occupied, the
  * previously equipped item takes the new item's place in the inventory (the two trade places). An item in
  * the other hand that can't be held with it (handsFit: a shield with a two-hander) goes to the inventory
  * too. Caller checks canEquip first.
  */
-export function equipFromInventory(inventory: Inventory, gear: GearSlots, inventoryIdx: number): { inventory: Inventory; gear: GearSlots } {
+export function equipFromInventory(inventory: Inventory, gear: GearSlots, inventoryIdx: number, slot?: GearSlot): { inventory: Inventory; gear: GearSlots } {
   const item = inventory[inventoryIdx]!;
-  const displaced = gear[equipSlotFor(gear, item)];
+  const displaced = gear[equipSlotFor(gear, item, slot)];
   const clash = handsClash(gear, item);
   const next = setSlot(inventory, inventoryIdx, displaced);
   const clashed = clash ? gear[clash] : null;
-  return { inventory: clashed ? addItem(next, clashed) : next, gear: gearWith(gear, item) };
+  return { inventory: clashed ? addItem(next, clashed) : next, gear: gearWith(gear, item, slot) };
 }
 
 /**
  * The gear with `item` equipped (equipFromInventory's): in its slot (equipSlotFor), the other hand emptied if it
  * can't be held with it (handsClash).
  */
-export function gearWith(gear: GearSlots, item: Item): GearSlots {
+export function gearWith(gear: GearSlots, item: Item, slot?: GearSlot): GearSlots {
   const clash = handsClash(gear, item);
-  return { ...gear, [equipSlotFor(gear, item)]: item, ...(clash ? { [clash]: null } : {}) };
+  return { ...gear, [equipSlotFor(gear, item, slot)]: item, ...(clash ? { [clash]: null } : {}) };
 }
 
-/** Move the item in `slot` to the inventory's first empty slot. Caller checks canUnequip first. */
-export function unequipToInventory(inventory: Inventory, gear: GearSlots, slot: GearSlot): { inventory: Inventory; gear: GearSlots } {
+/**
+ * Move the item in `slot` to the inventory: into slot `to` if given (it must be empty: dragged there), else the first
+ * empty one. Caller checks canUnequip first.
+ */
+export function unequipToInventory(inventory: Inventory, gear: GearSlots, slot: GearSlot, to?: number): { inventory: Inventory; gear: GearSlots } {
   return {
-    inventory: addItem(inventory, gear[slot]!),
+    inventory: to === undefined ? addItem(inventory, gear[slot]!) : setSlot(inventory, to, gear[slot]),
     gear: { ...gear, [slot]: null },
   };
 }
+
+/**
+ * Whether the items in gear slots `from` and `to` can trade places (an equipped item dragged onto another of the
+ * member's slots: a ring from one ring slot to the other): each fits the other's slot (an empty one always does).
+ */
+export function canSwapGear(gear: GearSlots, from: GearSlot, to: GearSlot): boolean {
+  const a = gear[from], b = gear[to];
+  return from !== to && !!a && fitsGearSlot(a, to) && (!b || fitsGearSlot(b, from));
+}
+
+/** The gear with the items in `from` and `to` trading places (canSwapGear first). */
+export const swapGear = (gear: GearSlots, from: GearSlot, to: GearSlot): GearSlots => ({ ...gear, [from]: gear[to], [to]: gear[from] });

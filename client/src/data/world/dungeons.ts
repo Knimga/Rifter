@@ -31,8 +31,8 @@ const PaleBroodmother = BOSS_CLASSES.find(c => c.id === 'pale-broodmother')!;
 export const DUNGEONS: Record<string, DungeonConfig> = {
   crypt: {
     name: 'The Crypt',
-    width: 28,
-    height: 22, 
+    width: 36,
+    height: 29,
     floorColor: '#303030',
     wallColor: '#202020',
     doorObject: 'heavy-door',
@@ -57,9 +57,9 @@ export const DUNGEONS: Record<string, DungeonConfig> = {
         corridorWidth: 2,
         containers: ['worn-treasure-chest'],
         enemyGroups: [
-          [specter, skelly, skelly, skelly],
-          [zombie, zombie, zombie, zombie],
-          [zombie, zombie, zombie, specter],
+          [specter, skelly, skelly],
+          [zombie, zombie, zombie],
+          [zombie, zombie, specter],
         ],
       }
     ],
@@ -72,8 +72,8 @@ export const DUNGEONS: Record<string, DungeonConfig> = {
   },
   firelands: {
     name: 'The Firelands',
-    width: 34,
-    height: 30,
+    width: 44,
+    height: 39,
     floorColor: '#472424',
     wallColor: '#3d0f0f',
     doorObject: 'heavy-door',
@@ -118,8 +118,8 @@ export const DUNGEONS: Record<string, DungeonConfig> = {
   },
   fungal: {
     name: 'The Fungal Forest',
-    width: 34,
-    height: 26,
+    width: 44,
+    height: 34,
     floorColor: '#2c3022',
     wallColor: '#171a11',
     doorObject: 'heavy-door',
@@ -164,8 +164,8 @@ export const DUNGEONS: Record<string, DungeonConfig> = {
   },
   goblin: {
     name: 'The Goblin Fortress',
-    width: 30,
-    height: 28,
+    width: 39,
+    height: 36,
     floorColor: '#28331f',
     wallColor: '#0b160c',
     doorObject: 'heavy-door',
@@ -209,8 +209,8 @@ export const DUNGEONS: Record<string, DungeonConfig> = {
   },
   blind: {
     name: 'The Blind Caverns',
-    width: 48,
-    height: 18,
+    width: 62,
+    height: 23,
     floorColor: '#16171a',
     wallColor: '#060607',
     doorObject: 'heavy-door',

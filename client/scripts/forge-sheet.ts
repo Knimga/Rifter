@@ -11,7 +11,8 @@
 //   --weapon "<type>"   class designs: hold this weapon type (posed for its hold), e.g. "Crossbows";
 //                       default = the class's starting gear
 //   --anim <name>       designs with that one-time animation (PartAnimation): drawn at its end pose
-//   --tint <dungeon>    tinted models (Rifts & Keys, the active Rifter): paint them in this dungeon's riftColor (default: the first
+//   --tint <name>       tinted models (Rifts & Keys, the active Rifter, the Affix Shard): paint them in a dungeon's riftColor or a shard
+//                       category's color ('shard-offense'; default: the first dungeon),
 //                       dungeon), or a color given as #rrggbb
 import { writeFileSync } from 'node:fs';
 import { ITEM_GROUND_PITCH, SHEET_SHADING, itemRestLift, keyLightDir, layItem, lootYaw } from '../src/forge/core/stage-config';
@@ -26,7 +27,7 @@ import { encodePNG } from './png';
 import { posedHalos, posedPositions } from '../src/forge/core/animate';
 import { isTinted, tintModel } from '../src/forge/core/tint';
 import type { RGB } from '../src/forge/core/vec';
-import { DUNGEONS } from '../src/data/world/dungeons';
+import { TINT_CHOICES, tintChoice } from '../src/forge/tintChoices';
 import { designTiles } from '../src/forge/dataRefs';
 
 const args = process.argv.slice(2);
@@ -35,10 +36,10 @@ const opt = (n: string, d: string) => (args.includes(`--${n}`) ? args[args.index
 
 const only = opt('design', '');
 // Rifts & Keys are drawn in a dungeon's color (or one given as #rrggbb), as the game draws them
-const tintArg = opt('tint', Object.keys(DUNGEONS)[0]);
+const tintArg = opt('tint', TINT_CHOICES[0].key);
 const tint: RGB = tintArg.startsWith('#')
   ? ([1, 3, 5].map((i) => parseInt(tintArg.slice(i, i + 2), 16)) as RGB)
-  : (DUNGEONS[tintArg] ?? (() => { throw new Error(`--tint: no dungeon '${tintArg}' (${Object.keys(DUNGEONS).join(', ')})`); })()).riftColor;
+  : (tintChoice(tintArg) ?? (() => { throw new Error(`--tint: no such color '${tintArg}' (${TINT_CHOICES.map((t) => t.key).join(', ')})`); })()).color;
 const seedArg = opt('seeds', '6');
 const seeds = seedArg.includes(',') ? seedArg.split(',').map(Number) : Array.from({ length: Number(seedArg) }, (_, i) => i + 1);
 const yaws = opt('yaws', '0').split(',').map((d) => (Number(d) * Math.PI) / 180);

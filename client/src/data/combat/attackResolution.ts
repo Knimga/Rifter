@@ -5,8 +5,10 @@ import { randInt, rollScaled } from '../random';
 // ─── Tuning Constants ────────────────────────────────────────────────────────
 
 const BASE_HIT_CHANCE = 80;           // base % chance any attack lands
-const DR_DIVISOR = 50;                // at level 1: higher value = slower scaling of DR
-const DR_DIVISOR_PER_LEVEL = 5;       // the divisor grows with the defender's level, so a DR% takes more defense later
+// The DR divisor, per defender level (higher = slower scaling of DR). Proportional to level, as gear armor is (item
+// level × its type's base armor), so each armor type keeps about the same DR% at every level: Cloth ~18%, Light ~26%,
+// Medium ~30%, Heavy ~40% (a full set, before affixes, points and passives)
+const DR_DIVISOR_PER_LEVEL = 40;
 const MAGIC_ARMOR_SHARE = 0.25;       // how much of a unit's armor counts toward its magical defense
 const DR_CAP = 0.75;                  // lower value = more threatening endgame damage
 export const CRIT_MULTIPLIER = 2;    // damage and heals
@@ -74,11 +76,11 @@ const defenseAgainst = (target: Pick<Stats, 'armor' | 'magicResistance'>, physic
 
 /**
  * The damage reduction (0..DR_CAP, a fraction) a unit's defense gives against physical or magical hits, before
- * penetration. Diminishing returns, against a divisor that grows with the unit's level (DR_DIVISOR_PER_LEVEL).
+ * penetration. Diminishing returns, against a divisor in proportion to the unit's level (DR_DIVISOR_PER_LEVEL).
  */
 export function damageReduction(target: Pick<Stats, 'armor' | 'magicResistance' | 'level'>, physical: boolean): number {
   const defense = defenseAgainst(target, physical);
-  const divisor = DR_DIVISOR + DR_DIVISOR_PER_LEVEL * Math.max(0, target.level - 1);
+  const divisor = DR_DIVISOR_PER_LEVEL * Math.max(1, target.level);
   return (defense / (defense + divisor)) * DR_CAP;
 }
 

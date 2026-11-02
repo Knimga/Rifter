@@ -5,9 +5,9 @@
 // grids, and holding Ctrl over an item they can use shows how it changes their stats and what they wear in its slot. Every trade pulses the party's gold (red when one fails), and the line at the bottom says what happened.
 // The game around it isn't dimmed (the vendor turns to face the leader while it is open).
 import { Fragment, useState } from 'react';
-import { PiMouseRightClickFill } from 'react-icons/pi';
 import ModalWindow, { WindowCloseButton } from './ui/ModalWindow';
-import GoldAmount from './ui/GoldAmount';
+import RightClickHint from './ui/RightClickHint';
+import { PartyGold, StatusLine, useGoldPulse } from './ui/TradeStatus';
 import ItemGrid from './ItemGrid';
 import Portrait from './hud/Portrait';
 import { heldGear } from './characterModel';
@@ -18,7 +18,6 @@ import type { Stats } from '../data/units/stats';
 import { CLASSES } from '../data/units/classes';
 import { INVENTORY_COLS, INVENTORY_SIZE, isProficient } from '../data/gear/inventory';
 import { VENDOR_COLS, VENDOR_SIZE, partyItemLine, shelfItemLine, type Shelf, type TradeLine, type TradeResult, type TradeState } from '../data/gear/vendor';
-import { formatGold } from '../data/detailStrings';
 
 /** The window's design size (px). */
 const WIDTH = 672, HEIGHT = 744;
@@ -28,16 +27,6 @@ const TOOLTIP_BELOW_ROWS = 2;
 
 /** The vendor panel's tabs. */
 const SHELVES: { shelf: Shelf; name: string }[] = [{ shelf: 'stock', name: 'Wares' }, { shelf: 'buyback', name: 'Buy Back' }];
-
-/** A panel heading's hint: the mouse with its right button filled, and what right-clicking does. */
-function RightClickHint({ text, label }: { text: string; label: string }) {
-  return (
-    <span aria-label={label} className="ml-2.5 inline-flex items-center gap-1.5 font-tech text-[10px] tracking-[0.1em] uppercase text-rift-off">
-      <PiMouseRightClickFill aria-hidden="true" className="w-3.5 h-3.5 shrink-0" />
-      {text}
-    </span>
-  );
-}
 
 export default function VendorWindow({ vendor, party, partyStats, state, onTradeShelf, onTradeParty, onClose }: {
   vendor: NpcData;
@@ -56,17 +45,16 @@ export default function VendorWindow({ vendor, party, partyStats, state, onTrade
   // The vendor's shelf shown: his wares (when the window opens) or the items the party sold him
   const [shelf, setShelf] = useState<Shelf>('stock');
   const [message, setMessage] = useState<{ text: string; bad: boolean }>({ text: 'Right-click an item to buy or sell it.', bad: false });
-  // The gold readout's pulse: a count, so each trade restarts it (two copies of each animation, alternating)
-  const [pulse, setPulse] = useState<{ bad: boolean; n: number }>({ bad: false, n: 0 });
+  // The gold readout pulses on every trade (red when one fails)
+  const gold = useGoldPulse();
 
   const trade = (result: TradeResult) => {
     if (!result.message) return;
     setMessage({ text: result.message, bad: !result.ok });
-    setPulse((p) => ({ bad: !result.ok, n: p.n + 1 }));
+    gold.pulse(!result.ok);
   };
   const chosen = member !== null ? party[member] : null;
   const unusable = (item: Item) => !!chosen && !isProficient(CLASSES[chosen.selectedClass], item);
-  const goldCls = pulse.n === 0 ? '' : `${pulse.bad ? 'bad' : 'fx'}-${pulse.n % 2 ? 'a' : 'b'}`;
   const marks = (line: (item: Item) => TradeLine, dims: boolean) => (item: Item) => {
     const l = line(item);
     return { dim: dims && !l.action, isNew: !!state.trades[item.id] };
@@ -129,9 +117,7 @@ export default function VendorWindow({ vendor, party, partyStats, state, onTrade
       <section aria-label="Party inventory" className="rf-panel flex-none mt-3 p-3.5">
         <div className="flex items-baseline justify-between mb-2.5">
           <h3 className="rf-h">Inventory <RightClickHint text="Sell" label="Right-click to sell" /></h3>
-          <span role="status" aria-label={`Party gold: ${formatGold(state.gold)}`} className={`rf-gold ${goldCls}`}>
-            <GoldAmount amount={state.gold} label="Party gold" iconClassName="w-4 h-4" style={{ gap: 7 }} />
-          </span>
+          <PartyGold gold={state.gold} cls={gold.cls} />
         </div>
         <ItemGrid label="Party inventory" items={state.inventory} cols={INVENTORY_COLS} size={INVENTORY_SIZE}
           canUse={(item) => !unusable(item)} unusableNote={note} {...memberTips}
@@ -140,9 +126,7 @@ export default function VendorWindow({ vendor, party, partyStats, state, onTrade
       </section>
 
       {/* What the last trade did */}
-      <div role="status" aria-live="polite" className={`flex-none mt-2 h-[18px] text-xs leading-[18px] whitespace-nowrap overflow-hidden text-ellipsis ${message.bad ? 'text-rift-down' : 'text-rift-muted'}`}>
-        {message.text}
-      </div>
+      <StatusLine text={message.text} bad={message.bad} />
     </ModalWindow>
   );
 }

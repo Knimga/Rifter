@@ -1,11 +1,11 @@
 // NPCs: the people the party meets (in the Sanctum for now). Each stands on its tile, facing its own way, and never
 // moves. The leader beside one can always speak to it: it turns to face the leader for as long as they talk, then
-// back to its own way. Some give a service (a vendor's trade); later ones may only talk, or give quests.
+// back to its own way. Some give a service (a vendor's trade, enchanting); later ones may only talk, or give quests.
 // Each is drawn by its forge design (`model`, forge category "NPCs"); a map places it by id (SANCTUM.npcs).
 import type { ModelLink } from '../../forge/core/types';
 
 /** What an NPC does for the party when spoken to, beyond talking. */
-export type NpcService = 'vendor';
+export type NpcService = 'vendor' | 'enchanting';
 
 export interface NpcData {
   id: string;
@@ -18,8 +18,10 @@ export interface NpcData {
 }
 
 export const NPCS: NpcData[] = [
-  // The Sanctum's vendor: buys and sells gear (the trade window is still to come)
+  // The Sanctum's vendor: buys and sells gear (VendorWindow, gear/vendor.ts)
   { id: 'denisel', name: 'Denisel', title: 'Vendor', service: 'vendor', model: 'npc.denisel' },
+  // The Sanctum's enchanter: enchants, disenchants and shatters gear, and trades shards (EnchanterWindow, gear/enchanting.ts)
+  { id: 'ethela', name: 'Ethela', title: 'Enchanter', service: 'enchanting', model: 'npc.ethela' },
 ];
 
 /** An NPC by id. */

@@ -1,4 +1,5 @@
 import type { AttackCategory, DamageElement, Rarity } from './gear';
+import type { AffixGroup } from './gear/affixes';
 
 /* ----- UI CONSTANTS ----- */
 
@@ -29,6 +30,9 @@ export const RARITY_COLOR: Record<Rarity, string> = {
   Exquisite: 'var(--rarity-exquisite)',
 };
 
+/** Each affix group's color (the enchanter's bench rows, affixes in its inventory's tooltips). */
+export const AFFIX_GROUP_COLOR: Record<AffixGroup, string> = { 1: 'var(--affix-group-1)', 2: 'var(--affix-group-2)' };
+
 /** Attack category colors (the party window's offense table). */
 export const ATTACK_CATEGORY_COLOR: Record<AttackCategory, string> = {
   melee: 'var(--cat-melee)',
@@ -46,7 +50,7 @@ export const COMBAT_TEXT_COLOR = {
   stopped: 'var(--rift-bright)',  // missed, dodged, parried, blocked
   loot: 'var(--rift-loot)',
   warn: 'var(--rift-warn)',
-  levelUp: 'var(--rift-acting)',
+  levelUp: 'var(--rift-levelup)',
   gold: 'var(--rift-gold)',
 } as const;
 

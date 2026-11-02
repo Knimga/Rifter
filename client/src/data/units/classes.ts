@@ -230,7 +230,7 @@ export const CLASSES: Record<ClassKey, ClassData> = {
     attributes: { strength: 6, toughness: 6, finesse: 1, mind: 0, spirit: 0, speed: 1 },
     skills: { redoubt: 4, evasion: 6, expertise: 2 },
     passives: {
-      dodge: { name: 'Duck and Weave', flat: 5 },
+      dodge: { name: 'Duck and Weave', flat: 10 },
       hpRegen: { name: 'Bloodrush', flat: 1 },
       glancingBlow:    { name: 'Tough-skinned', flat: 10 }
     },
@@ -240,15 +240,14 @@ export const CLASSES: Record<ClassKey, ClassData> = {
     model: 'character.barbarian',
     abilities: [
       {
-        name: 'Cleave',
+        name: 'Weaving Strike', //only worth it with 2h, makes melee atk with 1 AP
         icon: GiWaveStrike,
-        mpCost: 15,
-        apCost: 3,
-        range: 0,
+        mpCost: 3,
+        apCost: 1,
+        range: 1,
         target: 'enemy',
         useWeapon: true,
         attackCategory: 'melee',
-        area: 'blast1',
         effects: [],
       },
       {
@@ -304,7 +303,7 @@ export const CLASSES: Record<ClassKey, ClassData> = {
         displayElement: 'fire',
         attackCategory: 'magic',
         effects: [
-          { type: 'damage', appliesTo: 'target', damageElement: 'fire', minDamage: 10, maxDamage: 12 }
+          { type: 'damage', appliesTo: 'target', damageElement: 'fire', minDamage: 8, maxDamage: 10 }
         ],
       },
       {
@@ -347,8 +346,8 @@ export const CLASSES: Record<ClassKey, ClassData> = {
     skills: { perception: 4, subtlety: 2, expertise: 4, evasion: 2 },
     passives: {
       rangedHit:    { name: 'Eagle Eye', flat: 5 },
-      rangedDamage: { name: 'Marksman',  flat: 3 },
-      magicResistance: { name: 'Seasoned Hunter', flat: 10 }
+      armor: { name: 'Outfitted',  flat: 10 },
+      magicResistance: { name: 'Dungeon Delver', flat: 10 }
     },
     armorProficiencies: ['Light'],
     weaponProficiencies: ['Bows', 'Crossbows', 'Quivers'],
@@ -528,7 +527,7 @@ export const CLASSES: Record<ClassKey, ClassData> = {
     passives: {
       healing: { name: 'Inner Light', flat: 3 },
       holyDamage: { name: 'Divine Vengeance', flat: 3 },
-      threatMultiplier: { name: 'Unassuming', percent: -15 }
+      threatMultiplier: { name: 'Unassuming', percent: -20 }
     },
     armorProficiencies: ['Cloth'],
     weaponProficiencies: ['Staves', 'Wands', 'Foci'],
@@ -538,7 +537,7 @@ export const CLASSES: Record<ClassKey, ClassData> = {
       {
         name: 'Flash Heal',
         icon: GiHealing,
-        mpCost: 7,
+        mpCost: 6,
         apCost: 1,
         range: 4,
         target: 'ally',
@@ -550,24 +549,25 @@ export const CLASSES: Record<ClassKey, ClassData> = {
       {
         name: 'Consecrate',
         icon: GiOrbitalRays,
-        mpCost: 10,
+        mpCost: 8,
         apCost: 2, 
         range: 4,
         target: 'enemy',
         area: 'blast1',
         displayElement: 'holy',
         effects: [
-          { type: 'damage', appliesTo: 'target', damageElement: 'holy', minDamage: 5, maxDamage: 7 },
-          { type: 'heal',   appliesTo: 'allies', damageElement: 'holy', minHeal: 4, maxHeal: 6 }
+          { type: 'dot', appliesTo: 'target', damageElement: 'holy', damagePerRound: 5, rounds: 3 },
+          { type: 'hot',   appliesTo: 'allies', damageElement: 'holy', healPerRound: 5, rounds: 3 }
         ]
       },
       {
         name: 'Ethershell',
         icon: GiHolosphere,
-        mpCost: 5,
+        mpCost: 6,
         apCost: 1,
         range: 4,
         target: 'ally',
+        area: 'blast2',
         displayElement: 'holy',
         effects: [
           { type: 'buff', appliesTo: 'target', stats: { magicResistance: 20 }, rounds: 3 }

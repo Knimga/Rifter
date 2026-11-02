@@ -25,7 +25,6 @@ export const SUMMON_CLASSES: CreatureClassData[] = [
     lowAttributes: ['strength', 'toughness'],
     baseHp: 10,
     baseArmor: 2,
-    armorPerLevel: 2,
     resistances: { shadow: 75 },
     passives: {
       dodge: { name: 'Ethereal', flat: 20 },

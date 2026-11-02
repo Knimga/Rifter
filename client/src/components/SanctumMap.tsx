@@ -1,5 +1,6 @@
 import { lazy, Suspense, useMemo, type ReactNode } from 'react';
 import { FaCoins } from 'react-icons/fa';
+import { GiMagicPalm } from 'react-icons/gi';
 import type { TargetType } from '../data/combat/abilities';
 import { isAdjacent, posKey, samePos, type Pos } from '../data/world/grid';
 import { SANCTUM_FLOOR_COLOR, SANCTUM_WALL_COLOR } from '../data/constants';
@@ -75,6 +76,7 @@ const NPC_TAG_HEIGHT = 1.35;
 /** The icon before an NPC's name in its tag, by the service it offers. */
 const SERVICE_ICON: Record<NonNullable<NpcData['service']>, ReactNode> = {
   vendor: <FaCoins aria-hidden="true" className="w-3 h-3 shrink-0" style={{ color: 'var(--rift-gold)' }} />,
+  enchanting: <GiMagicPalm aria-hidden="true" className="w-3 h-3 shrink-0" style={{ color: 'var(--rift-enchant)' }} />,
 };
 const npcIcon = (data: NpcData) => (data.service ? SERVICE_ICON[data.service] : undefined);
 

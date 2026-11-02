@@ -4,7 +4,7 @@
 // costs more MP or AP than the member has, or the member can't act now.
 import { createElement, useEffect, useRef, useState, type CSSProperties, type MouseEvent } from 'react';
 import { CLASSES } from '../../data/units/classes';
-import { type Ability } from '../../data/combat/abilities';
+import { mpCostAt, type Ability } from '../../data/combat/abilities';
 import type { PartyMemberConfig } from '../../data/units/party';
 import type { Stats } from '../../data/units/stats';
 import { heldWeapon } from '../../data/gear';
@@ -70,7 +70,7 @@ export default function ActionDock({ member, stats, mp, slots, onSlotsChange, ar
   const slotState = (i: number) => {
     const slot = slots[i];
     const ability = slot === 'weapon-attack' ? weaponAttack : slot;
-    const afford = !ability || ability.mpCost <= mp;
+    const afford = !ability || mpCostAt(ability, stats.level) <= mp;
     const affordAp = !ability || !ap || ability.apCost <= ap.available;
     return { slot, ability, afford, affordAp, usable: !!ability && afford && affordAp && canAct };
   };
@@ -108,7 +108,7 @@ export default function ActionDock({ member, stats, mp, slots, onSlotsChange, ar
   const armedCost = (armedContent === 'weapon-attack' ? weaponAttack : armedContent)?.apCost ?? 0;
   const choices: { content: SlotContent; name: string; cost: string }[] = [
     ...(weaponAttack && weapon ? [{ content: 'weapon-attack' as const, name: weapon.name, cost: `${weaponAttack.apCost} AP` }] : []),
-    ...abilities.map((a) => ({ content: a as SlotContent, name: a.name, cost: `${a.apCost} AP · ${a.mpCost} MP` })),
+    ...abilities.map((a) => ({ content: a as SlotContent, name: a.name, cost: `${a.apCost} AP · ${mpCostAt(a, stats.level)} MP` })),
   ];
 
   return (
@@ -140,7 +140,7 @@ export default function ActionDock({ member, stats, mp, slots, onSlotsChange, ar
           return (
             <span key={i} className="relative block">
               <Tooltip bare={!!card} gap={14} content={menuSlot === i ? null : card ? (
-                <AbilityCard ability={card} weapon={weapon} weaponAttack={slot === 'weapon-attack'} warning={warning} elevated className="w-[252px]" />
+                <AbilityCard ability={card} weapon={weapon} weaponAttack={slot === 'weapon-attack'} level={stats.level} warning={warning} elevated className="w-[252px]" />
               ) : (
                 <TextTip>
                   Empty slot.
@@ -151,7 +151,7 @@ export default function ActionDock({ member, stats, mp, slots, onSlotsChange, ar
                   className={`rf-aslot ${!ability ? 'is-empty' : ''} ${ability && !usable ? 'is-dim' : ''} ${armed ? 'is-armed' : ''}`}
                   style={tint ? ({ '--tint': tint } as CSSProperties) : undefined}
                   aria-pressed={armed} aria-disabled={!usable}
-                  aria-label={ability ? `${card?.name}, ${ability.apCost} AP${ability.mpCost ? `, ${ability.mpCost} MP` : ''}${warning ? `, ${warning.toLowerCase()}` : ''}` : `Empty slot ${i + 1}`}
+                  aria-label={ability ? `${card?.name}, ${ability.apCost} AP${ability.mpCost ? `, ${mpCostAt(ability, stats.level)} MP` : ''}${warning ? `, ${warning.toLowerCase()}` : ''}` : `Empty slot ${i + 1}`}
                   onClick={() => toggleSlot(i)}
                   onContextMenu={(e: MouseEvent) => { e.preventDefault(); setMenuSlot(menuSlot === i ? null : i); }}>
                   {slot === 'weapon-attack' && weapon && <ItemIcon item={weapon} className="w-10 h-10" />}

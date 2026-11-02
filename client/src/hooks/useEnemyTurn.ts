@@ -117,7 +117,7 @@ export function useEnemyTurn(
           .filter(e => (ally ? isHostile(e) && e.aggroed : isAlly(e)))
           .map(e => ({ ...creatureUnit(e), hp: e.currentHp }));
         const foeUnits = ally ? creatureFoes : [...partyUnits, ...creatureFoes];
-        const foes: Foe[] = foeUnits.map(u => ({ key: unitKey(u.ref), pos: u.pos, size: u.size, hp: u.hp }));
+        const foes: Foe[] = foeUnits.map(u => ({ key: unitKey(u.ref), pos: u.pos, size: u.size, hp: u.hp, buffs: u.buffs }));
         // Its side, for its heals and buffs (itself aside): an enemy's, the other enemies in the fight; an ally's, the
         // party and the other allies. Armed: it attacks with a physical weapon (a member's held one, a creature's
         // useWeapon ability).

@@ -52,8 +52,8 @@ Reach for these before writing vertex math by hand. All coordinates are pre-fit 
 
 **Family helpers** (`designs/_*.ts`): shared shape code for a family of designs. `_character` (bodies, holds,
 clothing and hair, e.g. `chesterfieldCoat` (an open coat, to mid-thigh or lower: `hem`, with accents in `trim`) and `capWithBangs` (fuller and longer with `volume` and `nape`); a body built with
-`restArms` holds nothing, both arms hanging at its sides, for NPCs), `_sword`, `_axe` and the other weapons (`_bow`'s `bowShape`: the D-bow alone, for a creature to hold),
-`_armor` and the materials (`_cloth`, `_leather`, `_hide`, `_plate`: each armor series' pieces), `_shield`, `_ring` (rings and amulets: `jewelryEntry`, jewelry's `BRONZE` and `SILVER`, and `bandDesign(id, metal)`: the plain band, flat inside and domed outside, its `top` anchor at the crown), `_amulet` (`amuletDesign(id, { stone, metal, glint? })`: an oval cabochon in a setting, its chain lying loose behind it; `glint` is the light its crown catches, a brighter shade of the stone's own hue (a dark stone given a warm glint turns muddy)), `_rifter` (its states), `_chest` (`treasureChestDesign(id, { wood, woodDark, lock })`: every treasure chest's shape and `open` animation, each chest its own colors), `_interactive`, `_decor` and `_loot` (an object or loot design's identity: `interactiveEntry`, `decorEntry`, `lootEntry`; `_decor` also has the
+`restArms` holds nothing, both arms hanging at its sides, for NPCs; `figure: 'female'` gives a female body (narrower shoulders, thinner arms and legs, smaller feet: `FIGURE_FRAME`; a softer jaw), dressed in `blouse` (a waist, a bosom shaped into the torso's own outline (never separate balls), optional `trim` at the neckline and cuffs) and `skirt` (to the ankles by default, `hem` for shorter; a trimmed hem); `ponytailHair`'s `tieSize` makes its tie a cuff that shows from the game's view: Ethela, and later female class variants), `_sword`, `_axe` and the other weapons (`_bow`'s `bowShape`: the D-bow alone, for a creature to hold),
+`_armor` and the materials (`_cloth`, `_leather`, `_hide`, `_plate`: each armor series' pieces), `_shield`, `_ring` (rings and amulets: `jewelryEntry`, jewelry's `BRONZE` and `SILVER`, and `bandDesign(id, metal)`: the plain band, flat inside and domed outside, its `top` anchor at the crown), `_amulet` (`amuletDesign(id, { stone, metal, glint? })`: an oval cabochon in a setting, its chain lying loose behind it; `glint` is the light its crown catches, a brighter shade of the stone's own hue (a dark stone given a warm glint turns muddy)), `_rifter` (its states), `_chest` (`treasureChestDesign(id, { wood, woodDark, lock })`: every treasure chest's shape and `open` animation, each chest its own colors), `_spider` (the pale spiders' `spiderPalette`, `spiderMouthparts` (fangs and pedipalps), `spiderEyes` and `spiderJointed` legs, drawn at the Pale Creeper's size and placed and scaled for a bigger one), `_interactive`, `_decor` and `_loot` (an object or loot design's identity: `interactiveEntry`, `decorEntry`, `lootEntry`; `_decor` also has the
 merchant things' `DARK_WOOD` / `DARK_WOOD_SHADE` and `DECOR_IRON`, and `barrel`: a hooped barrel, optionally lidded), `_glow` (`floorGlow`), `_fungal` (`cap`,
 `mush`, `shelf`, `antler`), `_goblin` (every goblin's body: `goblinBody` with its helmets, or its pieces
 `goblinLook`, `goblinLegs`, `goblinTorso`, `goblinHead` for a goblin dressed differently; `goblinArm`; a body's
@@ -66,9 +66,12 @@ brow and glowing eyes)), `_robe` (a creature's robe: `loftRobe` lofts its outlin
 knotted wooden staff). When two designs need the same shape, it goes in a
 helper, never copied.
 
-**Tinted models** (`core/tint.ts`; Rifts & Keys only): `FaceOpts.tint` (a `Tone`, `[bright, deep]`, or one per corner) paints a
+**Tinted models** (`core/tint.ts`; Rifts & Keys, and the Affix Shard): `FaceOpts.tint` (a `Tone`, `[bright, deep]`, or one per corner) paints a
 face with the color the model is drawn in, added to its own color (black for pure glow); `TINT` / `TINT_DEEP` are the
 tint and its deep shade. Shade a tinted glow by its Tone (brighter on top, deeper below), not by its color.
+`paintTint(m, from, color)` paints the tinted faces added since face `from` in a fixed color and leaves them
+untinted: a tinted design embedded in its own colors (the Affix Shards scatter embeds the Affix Shard, each in a
+category's color).
 
 ## Construction patterns
 - **Limbs:** `jointedLimb` through named joints (shoulder, elbow, wrist), `knobs` (or your own `blob`s) at the joints for bulk.

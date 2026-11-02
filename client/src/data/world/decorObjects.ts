@@ -26,6 +26,13 @@ export const DECOR_OBJECTS: DecorObjectData[] = [
   // A stand-alone dark iron weapon rack hung with swords, axes and bows (the game's own weapon models), and a small
   // barrel of arrows beside it
   { id: 'weapon-rack', name: 'Weapon Rack', model: 'decor.weapon-rack' },
+  // The enchanter's long table of dark carved stone, its back against a wall: a glowing ritual circle in the middle,
+  // books, scrolls, scattered affix shards and an open tome on its left (from its front), arcane tools, glowing jars
+  // and stacked books on its right
+  { id: 'enchanters-table', name: "Enchanter's Table", model: 'decor.enchanters-table', span: 3 },
+  // The enchanter's stores: a dark wood treasure chest, and in front of it a very small barrel heaped with affix shards
+  // to one side and a few small tied sacks to the other
+  { id: 'enchanters-supplies', name: "Enchanter's Supplies", model: 'decor.enchanters-supplies' },
 ];
 
 function decorObject(id: string): DecorObjectData {

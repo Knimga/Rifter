@@ -103,17 +103,21 @@ const MAGIC_RESISTANCE: AffixRoll = { min: 1, tierSize: 3 };       // 1-3 ... 13
 const AVOIDANCE: AffixRoll = { min: 1, tierSize: 2 };              // %: 1-2 ... 9-10 (dodge, parry, block, glancing)
 const INITIATIVE: AffixRoll = { min: 1, tierSize: 2, weight: 0.75 };             // 1-2 ... 9-10
 const CATEGORY_DAMAGE: AffixRoll = { min: 1, tierSize: 2 };        // 1-2 ... 9-10 (melee / ranged / magic damage)
-const CATEGORY_OFFENSE: AffixRoll = { min: 1, tierSize: 2 };       // %: 1-2 ... 9-10 (their hit, crit, penetration)
+const CATEGORY_OFFENSE: AffixRoll = { min: 1, tierSize: 2 };       // %: 1-2 ... 9-10 (their crit, penetration)
+// %: 1, 2 ... 5 (their hit). Small: hit has nothing opposing it, and past +20 every attack lands (80% base)
+const CATEGORY_HIT: AffixRoll = { min: 1, tierSize: 1 };
 const HEALING: AffixRoll = { min: 1, tierSize: 2 };                // 1-2 ... 9-10
 const HEALING_RECEIVED: AffixRoll = { min: 1, tierSize: 1, weight: 0.75 }; // 1 ... 5: on every heal and HoT tick the wearer gets
 const HP_REGEN: AffixRoll = { min: 1, tierSize: 1, minLevel: 5, weight: 0.75 };  // 1 ... 5; too strong this early
 const MP_REGEN: AffixRoll = { min: 1, tierSize: 1, weight: 0.75 };               // 1 ... 5
+const MAX_HP: AffixRoll = { min: 4, tierSize: 4, weight: 0.75 };   // flat: 4-7, 8-11 ... 20-23
+const MAX_MP: AffixRoll = { min: 5, tierSize: 5, weight: 0.75 };   // flat: 5-9, 10-14 ... 25-29
 
 /** Elemental affixes, the same for every element (e.g. fireResistance, shadowDamage). */
 // Weights: damage and resistance are the common elemental affixes; hit, crit and penetration are rarer
 // (with 8 elements, elemental stats would otherwise make up over half of all rolls).
 const ELEMENT_ROLLS: Record<'Hit' | 'Crit' | 'Damage' | 'Resistance' | 'Penetration', AffixRoll> = {
-  Hit:         { min: 1, tierSize: 2, weight: 0.3 },   // %: 1-2 ... 9-10
+  Hit:         { min: 1, tierSize: 1, weight: 0.3 },   // %: 1, 2 ... 5 (small, as CATEGORY_HIT)
   Crit:        { min: 1, tierSize: 2, weight: 0.3 },   // %
   Damage:      { min: 1, tierSize: 3, weight: 0.75 },  // flat: 1-3 ... 13-15
   // %: 9-12 ... 25-28 (no resistance affix below 9%). Half as likely as other affixes. Total resistance is
@@ -135,6 +139,8 @@ export const AFFIX_STATS = BUFFABLE_STATS.filter((s): s is AffixStat => !(NON_AF
 export const AFFIX_ROLLS: Record<AffixStat, AffixRoll> = {
   ...Object.fromEntries(ATTRIBUTE_KEYS.map((k) => [k, ATTRIBUTE])),
   ...Object.fromEntries(SKILL_KEYS.map((k) => [k, SKILL])),
+  hp: MAX_HP,
+  mp: MAX_MP,
   armor: ARMOR,
   magicResistance: MAGIC_RESISTANCE,
   dodge: AVOIDANCE,
@@ -145,13 +151,13 @@ export const AFFIX_ROLLS: Record<AffixStat, AffixRoll> = {
   meleeDamage: CATEGORY_DAMAGE,
   rangedDamage: CATEGORY_DAMAGE,
   magicDamage: CATEGORY_DAMAGE,
-  meleeHit: CATEGORY_OFFENSE,
+  meleeHit: CATEGORY_HIT,
   meleeCrit: CATEGORY_OFFENSE,
   meleePenetration: CATEGORY_OFFENSE,
-  rangedHit: CATEGORY_OFFENSE,
+  rangedHit: CATEGORY_HIT,
   rangedCrit: CATEGORY_OFFENSE,
   rangedPenetration: CATEGORY_OFFENSE,
-  magicHit: CATEGORY_OFFENSE,
+  magicHit: CATEGORY_HIT,
   magicCrit: CATEGORY_OFFENSE,
   magicPenetration: CATEGORY_OFFENSE,
   healing: HEALING,
@@ -183,7 +189,7 @@ const GROUP_STATS: Record<AffixGroup, AffixStat[]> = {
   ],
   2: [
     ...elementStats(['Resistance']),
-    'armor', 'dodge', 'parry', 'block', 'glancingBlow',
+    'hp', 'mp', 'armor', 'dodge', 'parry', 'block', 'glancingBlow',
     'hpRegen', 'mpRegen', 'magicResistance', 'healing', 'healingReceived', 'initiative',
     'redoubt', 'devotion', 'evasion', 'perception', 'subtlety',
   ],

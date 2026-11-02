@@ -58,6 +58,10 @@ function RoleIcons({ roles, labels = false }: { roles: Role[]; labels?: boolean 
   );
 }
 
+/** The classes that can heal (the healer role), as the no-healer message names them: 'Knight, Primalist or Acolyte'. */
+const healerNames = CLASS_KEYS.filter((k) => CLASSES[k].roles.includes('healer')).map((k) => CLASSES[k].name);
+const healers = healerNames.length > 1 ? `${healerNames.slice(0, -1).join(', ')} or ${healerNames.at(-1)}` : healerNames.join('');
+
 export default function CharacterSelectScreen({ onStart, onBack }: {
   onStart: (party: PartyPick[]) => void;
   onBack: () => void;
@@ -75,7 +79,9 @@ export default function CharacterSelectScreen({ onStart, onBack }: {
 
   const filled = slots.filter((s) => s.classKey).length;
   const named = slots.filter((s) => s.classKey && s.name.trim()).length;
-  const ready = filled === 3 && named === 3;
+  // Every party needs someone who can heal (a class with the healer role)
+  const hasHealer = slots.some((s) => s.classKey && CLASSES[s.classKey].roles.includes('healer'));
+  const ready = filled === 3 && named === 3 && hasHealer;
   const placeOf = (key: ClassKey) => slots.findIndex((s) => s.classKey === key);
   const update = (fn: (next: Slot[]) => void) => setSlots((prev) => { const next = prev.map((s) => ({ ...s })); fn(next); return next; });
 
@@ -101,9 +107,9 @@ export default function CharacterSelectScreen({ onStart, onBack }: {
   const stepText = filled === 0 ? 'Choose three heroes for your party.'
     : filled < 3 ? `Choose ${3 - filled} more.` : 'Name your heroes and set their marching order.';
   const startHint = filled < 3 ? `${3 - filled} more to choose`
-    : named < 3 ? `${3 - named} ${3 - named === 1 ? 'name' : 'names'} missing` : 'Party ready';
-  // A full party with no one who can heal: worth a warning (not a block)
-  const noHealer = filled === 3 && !slots.some((s) => s.classKey && CLASSES[s.classKey].roles.includes('healer'));
+    : named < 3 ? `${3 - named} ${3 - named === 1 ? 'name' : 'names'} missing` : hasHealer ? 'Party ready' : 'No healer';
+  // A full party with no one who can heal can't start: say so
+  const noHealer = filled === 3 && !hasHealer;
 
   const focus = focusKey ? CLASSES[focusKey] : null;
   const focusInParty = focusKey ? placeOf(focusKey) >= 0 : false;
@@ -279,7 +285,7 @@ export default function CharacterSelectScreen({ onStart, onBack }: {
             <div className="flex flex-wrap items-center justify-between gap-4">
               <span className="flex flex-col gap-1">
                 <span className="text-xs tracking-[0.04em] text-rift-muted">{startHint}</span>
-                {noHealer && <span className="text-xs tracking-[0.04em] text-rift-warn">Healing class recommended!</span>}
+                {noHealer && <span className="text-xs tracking-[0.04em] text-rift-warn">A party needs a healer: {healers} can heal.</span>}
               </span>
               <RiftButton size="lg" className="!min-h-[52px] !px-12" disabled={!ready}
                 onClick={() => fadeOut(() => onStart(slots.map((s) => ({ classKey: s.classKey!, name: s.name.trim() }))))}>

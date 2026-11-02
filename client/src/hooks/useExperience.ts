@@ -1,6 +1,7 @@
 // Experience: one pool for the whole party. Every enemy that dies (from a hit, a DoT tick, anything: useEnemyDeaths) gives
 // everyone its XP, once, whoever is alive. Each level gained gives every member points to spend. The XP strip
-// shows each award as "+N XP"; awards while the last one is still showing add up into it (and restart its fade).
+// shows each award as "+N XP"; awards while the last one is still showing add up into it (and restart its fade). A
+// level-up shows "Level N!" over the leader and pulses the screen's edge (levelUps counts them).
 import { useCallback, useRef, useState, type MutableRefObject } from 'react';
 import { COMBAT_TEXT_COLOR } from '../data/constants';
 import type { Pos } from '../data/world/grid';
@@ -24,6 +25,8 @@ export function useExperience({ progress, setProgress, party, setParty, spawnFlo
   leaderPosRef: MutableRefObject<Pos | undefined>;
 }) {
   const [xpGain, setXpGain] = useState<(XpGain & { at: number }) | null>(null);
+  // How many times the party has leveled up (each one plays the screen-edge pulse: EdgePulse)
+  const [levelUps, setLevelUps] = useState(0);
   // Updated at once by addXp, so two awards in one render add up
   const progressRef = useRef(progress);
   progressRef.current = progress;
@@ -40,8 +43,9 @@ export function useExperience({ progress, setProgress, party, setParty, spawnFlo
       : { amount, seq: (prev?.seq ?? 0) + 1, at: now });
     if (levelsGained > 0) {
       setParty(partyRef.current.map(m => withLevelUps(m, levelsGained)));
+      setLevelUps(n => n + 1);
       const at = leaderPosRef.current;
-      if (at) spawnFloat(at.x, at.y, `Level ${next.level}!`, COMBAT_TEXT_COLOR.levelUp);
+      if (at) spawnFloat(at.x, at.y, `Level ${next.level}!`, COMBAT_TEXT_COLOR.levelUp, undefined, 'levelUp');
     }
   }, [setProgress, setParty, spawnFloat, partyRef, leaderPosRef]);
 
@@ -51,5 +55,5 @@ export function useExperience({ progress, setProgress, party, setParty, spawnFlo
     if (gained > 0) addXp(gained);
   }, [addXp]);
 
-  return { xpGain, addXp, awardKills };
+  return { xpGain, levelUps, addXp, awardKills };
 }

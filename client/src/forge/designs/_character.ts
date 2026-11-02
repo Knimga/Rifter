@@ -90,9 +90,14 @@ export const SWORD_ARM_SWING = 0.3;
  * (and Rogue's) build.
  */
 export interface BodyBuild {
-  /** Half-width between the shoulder joints (default 0.225). Broader shoulders move the arms out. */
+  /**
+   * The body's figure (default 'male'). 'female': slightly narrower shoulders, thinner arms and legs, smaller feet (FIGURE_FRAME, unless
+   * `shoulderX` / `arms` say otherwise) and a softer, narrower jaw; dress it in clothing shaped for it (blouse, skirt).
+   */
+  figure?: 'male' | 'female';
+  /** Half-width between the shoulder joints (default: the figure's, 0.225 for 'male'). Broader shoulders move the arms out. */
   shoulderX?: number;
-  /** Arm thickness multiplier (default 1). */
+  /** Arm thickness multiplier (default: the figure's, 1 for 'male'). */
   arms?: number;
   /** Boot thickness multiplier (default 1); above ~1.1 the boots are thicker than the legs. */
   boots?: number;
@@ -103,6 +108,18 @@ export interface BodyBuild {
    * not swung back for a weapon. Overrides `hold`.
    */
   restArms?: boolean;
+}
+
+/** Each figure's shoulder half-width, arm thickness (BodyBuild.shoulderX / arms when a build gives none), leg thickness and foot size (its boots). */
+export const FIGURE_FRAME = {
+  male: { shoulderX: 0.225, arms: 1, legs: 1, feet: 1 },
+  female: { shoulderX: 0.205, arms: 0.86, legs: 0.86, feet: 0.8 },
+} as const;
+
+/** A build's shoulder half-width and arm thickness (its own, else its figure's), and its figure's leg thickness and foot size. */
+export function bodyFrame(build: BodyBuild): { shoulderX: number; arms: number; legs: number; feet: number } {
+  const f = FIGURE_FRAME[build.figure ?? 'male'];
+  return { shoulderX: build.shoulderX ?? f.shoulderX, arms: build.arms ?? f.arms, legs: f.legs, feet: f.feet };
 }
 
 /**
@@ -145,7 +162,7 @@ const UPPER_ARM = 0.225; // segment length used to place the elbow
 
 /** Top of the right shoulder, where a carried two-hander rests (shoulder-carry pose). */
 function carryRest(shoulder: Vec3, build: BodyBuild): Vec3 {
-  return add(shoulder, [0.01, 0.075 * (build.arms ?? 1) + 0.03, -0.02]);
+  return add(shoulder, [0.01, 0.075 * bodyFrame(build).arms + 0.03, -0.02]);
 }
 
 /** An elbow for a shoulder and wrist: halfway between them, pushed out along `dir` by as much as the arm's length needs. */
@@ -190,7 +207,7 @@ const CROSSBOW_RIGHT_ELBOW: Vec3 = [-0.95, -0.3, 0];
 
 /** Left (+1) or right (-1) arm for a build (default: the standard pose). */
 export function armJoints(sx: 1 | -1, build: BodyBuild = {}): Arm {
-  const out = (build.shoulderX ?? 0.225) - 0.225; // broader shoulders: the whole arm moves out
+  const out = bodyFrame(build).shoulderX - 0.225; // broader shoulders: the whole arm moves out (narrower: in)
   const shoulder: Vec3 = [sx * (0.225 + out), TORSO.shoulder, 0];
   const hold = build.restArms ? 'oneHand' : build.hold ?? 'oneHand';
   if (sx > 0 && hold === 'crossbow') {
@@ -269,19 +286,19 @@ function squircle(y: number, rx: number, rz: number, cz = 0, n = 12, roundness =
  */
 export function buildBody(m: Mesh, look: BodyLook, build: BodyBuild = {}): void {
   m.anchor('feet', [0, 0, 0.03]);
-  const boot = build.boots ?? 1, arm = build.arms ?? 1;
+  const { arms: arm, legs: leg, feet } = bodyFrame(build), boot = (build.boots ?? 1) * feet;
 
   // Legs: trousers from the hip to below the knee, then boots; feet turned a little outward
   for (const sx of [-1, 1] as const) {
     const { hip, knee, ankle } = legJoints(sx);
     m.part(sx > 0 ? 'leg_l' : 'leg_r', hip);
     const bootTop = lerp3(ankle, knee, 0.75);
-    frustum(m, hip, knee, 0.095, 0.078, 6, look.pants); // thigh
-    frustum(m, knee, bootTop, 0.075, 0.07, 6, look.pants); // shin
+    frustum(m, hip, knee, 0.095 * leg, 0.078 * leg, 6, look.pants); // thigh
+    frustum(m, knee, bootTop, 0.075 * leg, 0.07 * leg, 6, look.pants); // shin
     frustum(m, bootTop, [ankle[0], 0.04, ankle[2]], 0.08 * boot, 0.077 * boot, 6, look.boots); // boot shaft
     const s0 = m.faces.length;
-    box(m, [0, 0, 0.07], [0.12 * boot, 0.1, 0.26], look.boots, 0.08); // foot, built pointing forward...
-    m.xf(s0, (p) => add(rotY(p, sx * 0.28), [ankle[0], 0.05, ankle[2]])); // ...then turned out
+    box(m, [0, 0, 0.07 * feet], [0.12 * boot, 0.1 * feet, 0.26 * feet], look.boots, 0.08); // foot, built pointing forward...
+    m.xf(s0, (p) => add(rotY(p, sx * 0.28), [ankle[0], 0.05 * feet, ankle[2]])); // ...then turned out
   }
   // Hips: rounded (not a box), and kept inside the torso's lowest ring (rx 0.165, rz 0.105) so any
   // clothing or armor a class fits to TORSO.hip covers them without the trousers poking through
@@ -309,15 +326,17 @@ export function buildBody(m: Mesh, look: BodyLook, build: BodyBuild = {}): void 
   if (build.hold === 'shoulderCarry') m.anchor('shoulder_rest_r', carryRest(right.shoulder, build));
 
   // Short neck, and a human head shape: rounded-square slices from a rounded chin, out along the jaw
-  // to the cheekbones and temples, then rounding in over the crown. No face details.
+  // to the cheekbones and temples, then rounding in over the crown. No face details. A female figure's neck is
+  // slimmer and her jaw softer: narrower and rounder at the chin and jaw.
+  const female = build.figure === 'female';
   m.part('head', [0, TORSO.collar, 0]);
-  frustum(m, [0, TORSO.collar - 0.04, 0], [0, HEAD.center[1] - 0.08, 0.005], 0.058, 0.055, 6, look.skin);
+  frustum(m, [0, TORSO.collar - 0.04, 0], [0, HEAD.center[1] - 0.08, 0.005], female ? 0.05 : 0.058, female ? 0.047 : 0.055, 6, look.skin);
   const { center: h, rx, ry, rz } = HEAD;
   const slice = (dy: number, sx: number, sz: number, dz: number, round: number) =>
     squircle(h[1] + dy * ry, rx * sx, rz * sz, h[2] + dz, 12, round);
   const head = [
-    slice(-1.0, 0.45, 0.5, 0.03, 3.2), // chin
-    slice(-0.72, 0.8, 0.88, 0.02, 3.4), // jaw
+    female ? slice(-1.0, 0.36, 0.42, 0.03, 2.2) : slice(-1.0, 0.45, 0.5, 0.03, 3.2), // chin
+    female ? slice(-0.72, 0.7, 0.82, 0.02, 2.6) : slice(-0.72, 0.8, 0.88, 0.02, 3.4), // jaw
     slice(-0.3, 0.97, 1.0, 0.01, 3.0), // cheekbones
     slice(0.2, 1.0, 1.0, 0, 2.6), // temples
     slice(0.65, 0.82, 0.88, -0.005, 2.2), // upper skull
@@ -377,16 +396,17 @@ export function spikyHair(m: Mesh, color: RGB, rf: (a: number, b: number) => num
 
 /**
  * Hair pulled back into a ponytail: smooth over the crown and back of the head, gathered by a tie at
- * the back, and a tail hanging down behind the neck.
+ * the back, and a tail hanging down behind the neck. `tieSize` scales the tie (1: a small band; larger reads as a cuff
+ * from the game's zoomed-out view).
  */
-export function ponytailHair(m: Mesh, color: RGB, tie: RGB): void {
+export function ponytailHair(m: Mesh, color: RGB, tie: RGB, tieSize = 1): void {
   const { center: h, rx, ry, rz } = HEAD;
   m.part('hair', h);
   // Wide enough to cover the head's squarish temples (no skin poking through), hairline at the front
   blob(m, add(h, [0, ry * 0.28, 0.002]), [rx * 1.17, ry * 0.84, rz * 1.2], 1, 0.02, color, { floorY: h[1] + ry * 0.12 }); // crown, swept back
   blob(m, add(h, [0, ry * 0.05, -0.04]), [rx * 1.12, ry * 0.92, rz * 0.9], 1, 0.02, color, { floorY: h[1] - ry * 0.45 }); // back
   const knot: Vec3 = add(h, [0, ry * 0.05, -rz * 1.02]);
-  frustum(m, add(knot, [0, 0, 0.018]), add(knot, [0, -0.005, -0.03]), 0.034, 0.03, 6, tie); // tie
+  frustum(m, add(knot, [0, 0, 0.018]), add(knot, [0, -0.005, -0.03 * tieSize]), 0.034 * tieSize, 0.03 * tieSize, 6, tie); // tie
   // The tail: out from the tie, then hanging down the back of the neck, tapering
   const p1 = add(knot, [0, -0.02, -0.05]);
   const p2 = add(p1, [0, -0.12, -0.02]);
@@ -638,6 +658,85 @@ export function chesterfieldCoat(m: Mesh, look: CoatLook, build: BodyBuild = {})
     frustum(m, sub(a.wrist, mul(dir, 0.03)), add(a.wrist, mul(dir, 0.012)), 0.047, 0.046, 6, look.shirt);
     blob(m, [a.shoulder[0] * 0.98, a.shoulder[1] + 0.01, 0], [0.07, 0.06, 0.078], 0, 0, look.coat, { floorY: a.shoulder[1] - 0.04 });
   }
+}
+
+/**
+ * A ring of a torso (n points round, like ell) whose front swells forward by `bust`, broadly across the chest, easing back to the
+ * plain oval at its sides: a bosom shaped into the torso's own outline, one soft swell (not two balls).
+ */
+function bustRing(y: number, rx: number, rz: number, bust: number, n: number): Vec3[] {
+  return Array.from({ length: n }, (_, i) => {
+    const t = (i / n) * Math.PI * 2, front = Math.max(0, Math.sin(t));
+    return [Math.cos(t) * rx, y, Math.sin(t) * rz + bust * front ** 0.6];
+  });
+}
+
+/**
+ * A fitted blouse over a female body (BodyBuild.figure 'female'), from a little below the waist (tucked into a skirt)
+ * to the collar: narrow at the waist, its front swelling forward over the chest (a bosom in the torso's own shape:
+ * bustRing), easing in to her narrower shoulders. Shoulder caps blend the sleeves in: the body's `sleeves` should be
+ * the blouse's color. Not blocky: 14-sided rings. `build`: the body's (its shoulders and arms). With `trim`, a band of
+ * it around the neckline and at the sleeves' cuffs.
+ */
+export function blouse(m: Mesh, color: RGB, build: BodyBuild = {}, trim?: RGB): void {
+  const T = TORSO;
+  const N = 14;
+  const sh = bodyFrame(build).shoulderX - 0.015; // the shoulder ring just inside the joints, as the coat's
+  m.part('torso', [0, T.waist, 0]);
+  loft(m, [
+    ell(T.waist - 0.1, 0.142, 0.095, N), ell(T.waist - 0.05, 0.13, 0.09, N), ell(T.waist, 0.12, 0.084, N), ell(T.waist + 0.08, 0.134, 0.09, N),
+    bustRing(T.chest - 0.04, 0.152, 0.098, 0.012, N), // under the bust
+    bustRing(T.chest + 0.04, 0.172, 0.104, 0.05, N), // the bust's fullest: high on the chest
+    bustRing(T.chest + 0.1, 0.174, 0.106, 0.03, N), // easing into the upper chest
+    ell(T.shoulder + 0.01, sh, 0.11, N), ell(T.collar, 0.118, 0.084, N),
+  ], color, { bandCenters: true });
+  m.part('sleeves', [0, T.shoulder, 0]);
+  for (const sx of [-1, 1] as const) {
+    const a = armJoints(sx, build);
+    blob(m, [a.shoulder[0] * 0.98, a.shoulder[1] + 0.01, 0], [0.06, 0.052, 0.068], 0, 0, color, { floorY: a.shoulder[1] - 0.035 });
+  }
+  if (!trim) return;
+  // The trim: a band around the neckline, and one around each sleeve's end at the wrist (just over the sleeve)
+  loft(m, [ell(T.collar + 0.012, 0.124, 0.09, N), ell(T.collar - 0.035, 0.152, 0.098, N)], trim, { caps: false });
+  const arm = bodyFrame(build).arms;
+  for (const sx of [-1, 1] as const) {
+    const a = armJoints(sx, build);
+    const dir = norm(sub(a.wrist, a.elbow));
+    frustum(m, sub(a.wrist, mul(dir, 0.05)), add(a.wrist, mul(dir, 0.008)), 0.05 * arm, 0.048 * arm, 6, trim);
+  }
+}
+
+export interface SkirtLook {
+  cloth: RGB;
+  /** The band along its hem. */
+  trim: RGB;
+  /**
+   * The hem's height (local units: the ankle is at 0.1 and the knee at 0.47). The default, 0.13, falls to the ankles;
+   * about 0.4 is a little past the knee. Lower is longer, and flares wider.
+   */
+  hem?: number;
+}
+
+/**
+ * A skirt from just below the waist (over the bottom of a blouse, tucked in) flaring out over the hips and falling to its hem, clear of the
+ * legs (the tops of the thighs well inside it, the knees, shins and boots too), with a band of trim along the hem.
+ * Open below (the legs show under it only from below, which the camera never sees).
+ */
+export function skirt(m: Mesh, look: SkirtLook): void {
+  const T = TORSO;
+  const N = 14;
+  const hem = look.hem ?? 0.13;
+  // The hem's half-widths: wider the longer it falls (0.27 x 0.2 just past the knee)
+  const hx = 0.27 + (0.4 - hem) * 0.12, hz = 0.2 + (0.4 - hem) * 0.1;
+  m.part('skirt', [0, T.waist, 0]);
+  loft(m, [
+    ell(hem, hx, hz, N),
+    ...(hem < 0.42 ? [ell(0.47, 0.255, 0.185, N)] : []), // past the knee: falling straight from there
+    ell(T.hip - 0.14, 0.24, 0.17, N), ell(T.hip, 0.208, 0.14, N), ell(T.hip + 0.04, 0.182, 0.123, N), ell(T.waist - 0.04, 0.142, 0.097, N),
+  ], look.cloth, { bandCenters: true, caps: false });
+  // Closed at the waist, over the blouse
+  loft(m, [ell(T.waist - 0.04, 0.142, 0.097, N), ell(T.waist - 0.025, 0.136, 0.093, N)], look.cloth);
+  loft(m, [ell(hem + 0.04, hx - 0.004, hz - 0.004, N), ell(hem - 0.004, hx + 0.008, hz + 0.008, N)], look.trim, { caps: false }); // the hem's band
 }
 
 // ─── Outfits ──────────────────────────────────────────────────────────────────

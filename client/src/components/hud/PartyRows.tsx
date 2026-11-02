@@ -1,6 +1,6 @@
 // The party (bottom left): a row per member with portrait, name, level and class, and HP/MP.
 // The selected member (acting in combat; chosen out of combat) glows. Out of combat a click selects.
-// A member with level-up points to spend gets the pale yellow level-up treatment and a LEVEL UP tag.
+// A member with level-up points to spend gets the pale yellow level-up treatment, pulsing, and a LEVEL UP tag.
 import { CLASSES } from '../../data/units/classes';
 import type { PartyTokenData } from '../mapParts';
 import Portrait from './Portrait';
@@ -27,7 +27,7 @@ export default function PartyRows({ rows, level, selectedIdx, canSelect, onSelec
         const sel = t.partyIndex === selectedIdx;
         return (
           <button key={t.partyIndex} type="button" aria-pressed={sel}
-            className={`rf-row ${sel ? 'is-sel' : ''} ${levelUp ? 'is-levelup' : ''} relative flex items-center gap-3 w-full box-border px-3 py-2.5 text-left text-inherit`}
+            className={`rf-row ${sel ? 'is-sel' : ''} ${levelUp ? 'is-levelup is-pulse' : ''} relative flex items-center gap-3 w-full box-border px-3 py-2.5 text-left text-inherit`}
             onClick={() => canSelect && onSelect(t.partyIndex)}>
             {/* On the top edge, overlapping the border, so the panel doesn't grow */}
             {levelUp && <span className="rf-levelup-tag">Level up</span>}

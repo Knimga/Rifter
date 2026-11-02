@@ -1,6 +1,8 @@
 // Loot: things lying on the floor that the party picks up but that aren't items (they never go in the inventory).
-// For now, gold: a dead enemy may drop a pile of coins on its tile (its class's `dropsGold`, rolled apart from its
-// item drops), picked up into the party's gold. Each is drawn by its forge design (`model`, forge category "Loot").
+// Gold: a dead enemy may drop a pile of coins on its tile (its class's `dropsGold`, rolled apart from its
+// item drops), picked up into the party's gold. Affix shards: any dead enemy may drop a group of them
+// (data/gear/shards.ts SHARD_DROP_CHANCE), picked up into the party's shards. Each is drawn by its forge design
+// (`model`, forge category "Loot").
 import type { ModelLink } from '../../forge/core/types';
 import { randInt, rollCount } from '../random';
 
@@ -13,6 +15,12 @@ export interface LootData {
 export const LOOT: LootData[] = [
   // A scatter of gold coins on the floor
   { id: 'gold', name: 'Gold Coins', model: 'loot.gold-coins' },
+  // An affix shard (data/gear/shards.ts): one tinted model for every shard, painted in its category's color
+  // (SHARD_CATEGORIES tint). Drawn as the icon beside each shard in the party window's Shards tab
+  { id: 'affix-shard', name: 'Affix Shard', model: 'loot.affix-shard' },
+  // Dropped shards: a scatter of small affix shards in fixed colors on the floor (whatever shards it holds), and
+  // their icon in a container's slot
+  { id: 'affix-shards', name: 'Affix Shards', model: 'loot.affix-shards' },
 ];
 
 /** A loot entry by id. */
@@ -23,7 +31,7 @@ export function loot(id: string): LootData {
 }
 
 /** The gold one roll gives at level 1: [least, most]. A level L enemy's roll is L times as much (5L to 10L). */
-export const GOLD_PER_LEVEL: [number, number] = [5, 10];
+export const GOLD_PER_LEVEL: [number, number] = [10, 15];
 
 /**
  * The gold a dead enemy of `level` drops, by its class's `dropsGold`, read like dropChance: its whole part is that

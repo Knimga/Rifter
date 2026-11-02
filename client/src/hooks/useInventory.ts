@@ -5,7 +5,7 @@ import { CLASSES } from '../data/units/classes';
 import { COMBAT_TEXT_COLOR } from '../data/constants';
 import type { Pos } from '../data/world/grid';
 import type { GearSlot, GearSlots, Item } from '../data/gear';
-import { canEquip, canUnequip, emptyInventory, equipFromInventory, takeIntoInventory, unequipToInventory, type Inventory } from '../data/gear/inventory';
+import { canEquip, canSwapGear, canUnequip, emptyInventory, equipFromInventory, moveItem, swapGear, takeIntoInventory, unequipToInventory, type Inventory } from '../data/gear/inventory';
 import type { PartyMemberConfig } from '../data/units/party';
 import type { SpawnFloat } from './useFloatingText';
 
@@ -44,17 +44,31 @@ export function useInventory({ party, setParty, spawnFloat }: {
     setParty(party.map((m, i) => i === charIdx ? { ...m, gear: change.gear } : m));
   }, [party, setParty]);
 
-  const equipItem = useCallback((inventoryIdx: number, charIdx: number) => {
+  /** Equip the inventory item at `inventoryIdx` on a member: in its own slot, or `slot` (dropped on it) if it fits there. */
+  const equipItem = useCallback((inventoryIdx: number, charIdx: number, slot?: GearSlot) => {
     const member = party[charIdx];
-    if (!member || !canEquip(CLASSES[member.selectedClass], inventory[inventoryIdx], inventory, member.gear)) return;
-    applyGearChange(charIdx, equipFromInventory(inventory, member.gear, inventoryIdx));
+    if (!member || !canEquip(CLASSES[member.selectedClass], inventory[inventoryIdx], inventory, member.gear, slot)) return;
+    applyGearChange(charIdx, equipFromInventory(inventory, member.gear, inventoryIdx, slot));
   }, [inventory, party, applyGearChange]);
 
-  const unequipItem = useCallback((slot: GearSlot, charIdx: number) => {
+  /** Move an inventory item to another slot (dragged there): with the item there, if any, trading places. */
+  const moveInventoryItem = useCallback((from: number, to: number) => {
+    if (from !== to) setInventory(inv => moveItem(inv, from, to));
+  }, []);
+
+  /** Unequip a member's item in `slot`: into inventory slot `to` if given (an empty one: dragged there), else the first empty one. */
+  const unequipItem = useCallback((slot: GearSlot, charIdx: number, to?: number) => {
     const member = party[charIdx];
-    if (!member || !canUnequip(inventory, member.gear, slot)) return;
-    applyGearChange(charIdx, unequipToInventory(inventory, member.gear, slot));
+    if (!member || !canUnequip(inventory, member.gear, slot) || (to !== undefined && inventory[to])) return;
+    applyGearChange(charIdx, unequipToInventory(inventory, member.gear, slot, to));
   }, [inventory, party, applyGearChange]);
 
-  return { inventory, setInventory, takeLoot, equipItem, unequipItem, gold, setGold, addGold };
+  /** Swap a member's items in two gear slots (one dragged onto the other: a ring to the other ring slot). */
+  const swapGearSlots = useCallback((from: GearSlot, to: GearSlot, charIdx: number) => {
+    const member = party[charIdx];
+    if (!member || !canSwapGear(member.gear, from, to)) return;
+    setParty(party.map((m, i) => i === charIdx ? { ...m, gear: swapGear(m.gear, from, to) } : m));
+  }, [party, setParty]);
+
+  return { inventory, setInventory, takeLoot, equipItem, unequipItem, swapGearSlots, moveInventoryItem, gold, setGold, addGold };
 }

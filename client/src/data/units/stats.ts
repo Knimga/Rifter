@@ -16,7 +16,7 @@ export type DamageElement = typeof DAMAGE_ELEMENTS[number];
 export type ElementStatKey = `${DamageElement}${typeof ELEMENT_STAT_SUFFIXES[number]}`;
 
 const MISC_STATS = [
-  'hpRegen', 'mpRegen', 'initiative', 'movement', 'apMax',
+  'hp', 'mp', 'hpRegen', 'mpRegen', 'initiative', 'movement', 'apMax',
   'armor', 'dodge', 'parry', 'block', 'glancingBlow', 'magicResistance', 'healing', 'healingReceived',
   'meleeHit', 'meleeDamage', 'meleeCrit', 'meleePenetration',
   'rangedHit', 'rangedDamage', 'rangedCrit', 'rangedPenetration',
@@ -325,8 +325,8 @@ export interface EnemyClassStats {
   attributes: Partial<Record<AttributeKey, number>>;
   baseHp: number;
   skills?: Partial<Record<SkillKey, number>>;
+  /** Armor per level: its armor bonus is baseArmor × its level (as gear armor grows with item level). */
   baseArmor: number;
-  armorPerLevel: number;
   /** Inherent damage type resistances (%): flat, like a passive on `${element}Resistance`. */
   resistances?: Partial<Record<DamageElement, number>>;
   passives?: Record<string, Passive>;
@@ -398,19 +398,19 @@ function buildRawStats(
     healing:         fl((spr / 3) + (devotion / 4)),
     healingReceived: fl((spr / 6) + (devotion / 6)),
     melee: {
-      hit:         (str / 4) + (fin / 3) + (expertise / 3),
+      hit:         (str / 5) + (fin / 4) + (expertise / 4),
       damage:      fl((str / 3) + (fin / 6)),
       crit:        5 + (fin / 4) + (str / 6) + (expertise / 3) + (subtlety / 5),
       penetration: expertise / 3,
     },
     ranged: {
-      hit:         (fin / 2) + (expertise / 3),
+      hit:         (fin / 3) + (expertise / 4),
       damage:      fl(fin / 3),
       crit:        5 + (fin / 2) + (expertise / 3) + (subtlety / 5),
       penetration: expertise / 3,
     },
     magic: {
-      hit:         (mnd / 2) + (spellcraft / 3),
+      hit:         (mnd / 3) + (spellcraft / 4),
       damage:      fl(mnd / 3),
       crit:        5 + (mnd / 3) + (spellcraft / 3) + (subtlety / 5),
       penetration: spellcraft / 3,
@@ -461,7 +461,7 @@ export function calculateStats(input: PlayerStatInput | EnemyStatInput): Stats {
   // Enemies: their class, level and level-scaled armor, plus their auto-allocated attribute points.
   const classData: EnemyClassStats | ClassData = input.mode === 'player' ? CLASSES[input.classKey] : input.classData;
   const level = input.mode === 'player' ? (input.level ?? 1) : input.level;
-  const armorBonus = input.mode === 'player' ? (input.gearArmorBonus ?? 0) : input.classData.baseArmor + input.classData.armorPerLevel * level;
+  const armorBonus = input.mode === 'player' ? (input.gearArmorBonus ?? 0) : input.classData.baseArmor * level;
   const movement = BASE_MOVEMENT;
   const apMax = input.mode === 'player' ? PLAYER_AP_MAX : ENEMY_AP_MAX;
   const skillPointsSpent = input.mode === 'player' ? input.skillPointsSpent : undefined;
