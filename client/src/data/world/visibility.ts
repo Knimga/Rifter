@@ -1,6 +1,6 @@
 // What the party can see: fog of war's game rule. A tile is visible when a living party member stands on it
-// or has line of sight to it (hasLineOfSight, the rule aggro uses too), at any distance. Walls are seen when
-// they border floor a viewer can see. Pure: the view draws the fog from these sets (viewEngine/three/fog.ts).
+// or has line of sight to it (hasLineOfSight over ZoneData.sight, the rule aggro uses too), at any distance. Walls
+// (and obstacles) are seen when they border floor a viewer can see. Pure: the view draws the fog from these sets (viewEngine/three/fog.ts).
 import { hasLineOfSight, posKey, STEPS, type Pos } from './grid';
 import type { ZoneData } from './dungeonGen';
 
@@ -15,7 +15,7 @@ export function visibleTiles(zone: ZoneData, viewers: Pos[]): Set<string> {
       // A wall only matters (and is only ever seen) where it borders floor
       if (!floor && !STEPS.some(([dx, dy]) => isFloor(x + dx, y + dy))) continue;
       const p = { x, y };
-      if (viewers.some(v => (v.x === x && v.y === y) || hasLineOfSight(v, p, floors))) out.add(posKey(p));
+      if (viewers.some(v => (v.x === x && v.y === y) || hasLineOfSight(v, p, zone.sight))) out.add(posKey(p));
     }
   }
   return out;

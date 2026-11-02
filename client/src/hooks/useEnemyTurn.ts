@@ -140,7 +140,7 @@ export function useEnemyTurn(
         // Its focus for the whole turn, picked on its first step (pickFocus)
         if (apSpent === 0 && paidTiles === 0) focus = pickFocus(foes, refs.threat.current);
 
-        const action = computeEnemyTurn(enemy, foes, occupied, z.floors, refs.threat.current, refs.zoneObjects.current,
+        const action = computeEnemyTurn(enemy, foes, occupied, z, refs.threat.current, refs.zoneObjects.current,
           { ap: apLeft(enemy.stats.apMax, { apSpent }), paidTiles }, { friends, summonsOut }, focus);
         const ability = action.abilityUsed;
         // Nothing left worth doing: its turn ends
@@ -159,7 +159,7 @@ export function useEnemyTurn(
 
         // Its targets: the foes in the area (AoE), else the one it aims at (a foe, or the ally it heals)
         const aoeTiles = isArea(ability) && action.abilityTargetPos
-          ? aimedArea({ ...bodyOf(enemy), pos: finalPos }, action.abilityTargetPos, ability.area, z.floors, [...foes, ...friends])
+          ? aimedArea({ ...bodyOf(enemy), pos: finalPos }, action.abilityTargetPos, ability.area, z.sight, [...foes, ...friends])
           : null;
         const targetKeys: string[] =
           ability.target === 'ally' ? (!aoeTiles && action.targetKey !== null ? [action.targetKey] : [])

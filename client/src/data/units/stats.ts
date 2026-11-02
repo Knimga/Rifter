@@ -274,7 +274,9 @@ export const ELEMENT_RESISTANCE_FLOOR = -75;
 const scalar = (key: ScalarStatKey, opts: Partial<StatAccessor> = {}): StatAccessor =>
   ({ key, get: s => s[key], set: (s, v) => { s[key] = v; }, ...opts });
 
-const STAT_ACCESSORS: StatAccessor[] = [
+// Percent stats (PERCENT_STATS: dodge, hit, crit...) come out of their formulas fractional and show one decimal, so a
+// buff or affix on one adds to it as it is, never flooring the fraction away (a +3 Dodge affix adds exactly 3)
+const STAT_ACCESSORS: StatAccessor[] = ([
   ...(['hp', 'mp', 'hpRegen', 'mpRegen', 'initiative', 'armor', 'dodge', 'parry', 'block', 'glancingBlow', 'magicResistance', 'healing', 'healingReceived'] as const)
     .map(k => scalar(k)),
   scalar('movement', { min: 1 }),
@@ -294,7 +296,7 @@ const STAT_ACCESSORS: StatAccessor[] = [
       // Resistance may go negative (a weakness), down to the floor
       ...(f === 'resistance' ? { min: ELEMENT_RESISTANCE_FLOOR } : {}),
     }))),
-];
+] as StatAccessor[]).map((a) => (PERCENT_STATS.has(a.key) ? { ...a, noFloor: true } : a));
 
 /** Copy a Stats block deeply enough that STAT_ACCESSORS setters don't mutate the original. */
 function cloneStats(stats: Stats): Stats {

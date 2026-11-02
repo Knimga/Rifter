@@ -12,6 +12,15 @@ export function yawFromGridMove(dx: number, dy: number): number {
   return Math.atan2(dx, dy);
 }
 
+/**
+ * Yaw for a map object at `pos` to face its open side: the first walkable side tile (south, east, north, west), e.g.
+ * a door in a wall facing the floor it opens onto. 0 (south) if none is open.
+ */
+export function facingOpenSide(pos: { x: number; y: number }, isOpen: (p: { x: number; y: number }) => boolean): number {
+  for (const [dx, dy] of [[0, 1], [1, 0], [0, -1], [-1, 0]]) if (isOpen({ x: pos.x + dx, y: pos.y + dy })) return yawFromGridMove(dx, dy);
+  return 0;
+}
+
 /** Signed shortest rotation from `from` to `to`, in (-PI, PI]. */
 export function shortestAngle(from: number, to: number): number {
   let d = (to - from) % TAU;

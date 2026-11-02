@@ -1,7 +1,8 @@
 // Fog of war, drawn by the map renderer: one fog function in a shader, applied to everything 3D by where it
 // stands. Each pixel is fogged by the tile under it (its world x/z), so a model is fogged with its own tile and
-// a visible model is never cut off by fog over the tile behind it. The HTML floor under the 3D canvas is
-// covered by a ground-level fog sheet using the same function (3D floors and walls would take it directly).
+// a visible model is never cut off by fog over the tile behind it. The HTML floor under the 3D canvas (and a
+// map's 3D floor beneath it) is covered by a ground-level fog sheet using the same function; its 3D walls take
+// it directly, like the models.
 //
 // The fog state is a small texture, one texel per tile: R = unseen, G = seen before but not now (explored).
 // Read smoothly and shaped so each tile's fog starts at its edge with the visible tile (visible tiles stay
@@ -21,6 +22,8 @@ export interface FogInput {
 
 /** How much a tile seen before (but not now) is fogged: dimmed, still readable. */
 const EXPLORED_FOG = 0.55;
+/** How far a hit's flash washes a model toward white (0..1). */
+const FLASH_WHITE = 0.7;
 /** How long a tile takes to clear or fog over (ms). */
 const FADE_MS = 300;
 /** The most the clouds move between two drawn frames (ms of drift): after the map sat idle, they carry on, not jump. */
@@ -46,10 +49,8 @@ float fogClouds(vec2 p) {
   vec2 drift = fogTime * vec2(0.05, 0.03);
   return 0.65 * fogNoise(p * 0.7 + drift) + 0.35 * fogNoise(p * 1.6 - drift * 1.4);
 }
-// 0 = clear .. 1 = unseen black, at world x/z
-float fogAmount(vec2 xz) {
-  if (fogOn < 0.5) return 0.0;
-  float clouds = fogClouds(xz);
+// The fog at world x/z before its patches (fogAmount): 0 = clear .. 1 = unseen, its edge warped by the clouds
+float fogBase(vec2 xz, float clouds) {
   // Warp where the fog is read a little, so its edge is cloudy rather than following the tile grid
   vec2 uv = (xz + (clouds - 0.5) * 0.7) / fogSize;
   vec4 t = texture2D(fogTex, uv);
@@ -59,9 +60,17 @@ float fogAmount(vec2 xz) {
   float fogged = t.r + t.g;
   float coverage = smoothstep(0.5, 1.0, fogged);
   float darkness = mix(${EXPLORED_FOG.toFixed(2)}, 1.0, t.r / max(fogged, 0.001));
-  float amount = coverage * darkness;
-  // The fog itself is thicker and thinner in patches
-  return clamp(amount * (0.88 + 0.24 * clouds), 0.0, 1.0);
+  return coverage * darkness;
+}
+// 0 = clear .. 1 = unseen black, at world x/z: the fog, thicker and thinner in patches
+float fogAmount(vec2 xz) {
+  if (fogOn < 0.5) return 0.0;
+  float clouds = fogClouds(xz);
+  return clamp(fogBase(xz, clouds) * (0.88 + 0.24 * clouds), 0.0, 1.0);
+}
+// Unseen through and through (not just in a dark patch): nothing there is drawn at all
+bool fogHides(vec2 xz) {
+  return fogOn > 0.5 && fogBase(xz, fogClouds(xz)) > 0.97;
 }
 `;
 
@@ -75,7 +84,7 @@ function fogShader(shader: THREE.WebGLProgramParametersWithUniforms, uniforms: R
     .replace('#include <common>', `#include <common>\n${FOG_GLSL}`)
     .replace('#include <dithering_fragment>', `#include <dithering_fragment>
 \tfloat fogA = fogAmount(vFogWorld.xz);
-\tif (fogA > 0.985) discard; // unseen: nothing there at all (no dark silhouette over visible tiles)
+\tif (fogA > 0.985 || fogHides(vFogWorld.xz)) discard; // unseen: nothing there at all (no dark silhouette over visible tiles or past the map's edge)
 \tgl_FragColor.rgb = mix(gl_FragColor.rgb, fogColor, fogA);`);
 }
 
@@ -84,6 +93,8 @@ export class FogOfWar {
   readonly sheet: THREE.Mesh;
   /** Fogged copies of the shared model materials (toThree's sharedMaterials), for models on the map. */
   private materials: Map<THREE.Material, THREE.Material>;
+  /** Each fogged material's flash (flash): the same, washed toward white. */
+  private flashed: Map<THREE.Material, THREE.Material>;
   private uniforms: Record<string, THREE.IUniform>;
   private texture: THREE.DataTexture | null = null;
   private data = new Uint8Array(4);
@@ -112,11 +123,18 @@ export class FogOfWar {
     };
     const u = this.uniforms;
     // Each fogged material: its own shader changes (partial glow, halo), then the fog
-    const withFog = <T extends THREE.Material>(m: T, own?: (shader: THREE.WebGLProgramParametersWithUniforms) => void): T => {
+    type Own = (shader: THREE.WebGLProgramParametersWithUniforms) => void;
+    const withFog = <T extends THREE.Material>(m: T, own?: Own, key = own?.name ?? 'plain'): T => {
       m.onBeforeCompile = (shader) => { own?.(shader); fogShader(shader, u); };
       // three.js caches programs by onBeforeCompile's source, the same for every fogged material: key each by its own shader
-      m.customProgramCacheKey = () => `fog:${own?.name ?? 'plain'}`;
+      m.customProgramCacheKey = () => `fog:${key}`;
       return m;
+    };
+    // A hit's flash: the color washed toward white before the fog, so a fogged model flashes no brighter than its fog allows
+    const flash = (own?: Own): Own => (shader) => {
+      own?.(shader);
+      shader.fragmentShader = shader.fragmentShader.replace('#include <dithering_fragment>',
+        `gl_FragColor.rgb = mix(gl_FragColor.rgb, vec3(1.0), ${FLASH_WHITE.toFixed(2)});\n#include <dithering_fragment>`);
     };
     this.materials = new Map<THREE.Material, THREE.Material>([
       [sharedMaterials.lit, withFog(makeLit(), partialGlowShader)],
@@ -124,13 +142,19 @@ export class FogOfWar {
       [sharedMaterials.glass, withFog(makeGlass(), partialGlowShader)],
       [sharedMaterials.halo, withFog(makeHalo(), haloShader)],
     ]);
+    // Halos keep their glow through a flash
+    this.flashed = new Map<THREE.Material, THREE.Material>([
+      [this.materials.get(sharedMaterials.lit)!, withFog(makeLit(), flash(partialGlowShader), 'flash-lit')],
+      [this.materials.get(sharedMaterials.unlit)!, withFog(makeUnlit(), flash(), 'flash-unlit')],
+      [this.materials.get(sharedMaterials.glass)!, withFog(makeGlass(), flash(partialGlowShader), 'flash-glass')],
+    ]);
     // The sheet: fog color, its alpha the fog amount (drawn after the opaque models, so they hide it where in front)
     const sheetMat = new THREE.MeshBasicMaterial({ color, transparent: true, depthWrite: false });
     sheetMat.onBeforeCompile = (shader) => {
       fogShader(shader, u);
       // The sheet is the fog itself: alpha = amount, no discard, no tinting of its own color
       shader.fragmentShader = shader.fragmentShader
-        .replace('if (fogA > 0.985) discard;', '')
+        .replace('if (fogA > 0.985 || fogHides(vFogWorld.xz)) discard;', '')
         .replace('gl_FragColor.rgb = mix(gl_FragColor.rgb, fogColor, fogA);', 'gl_FragColor = vec4(fogColor, fogA);');
     };
     this.sheet = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), sheetMat);
@@ -143,6 +167,20 @@ export class FogOfWar {
   apply(obj: THREE.Object3D): void {
     obj.traverse((c) => {
       if (c instanceof THREE.Mesh) c.material = this.materials.get(c.material as THREE.Material) ?? c.material;
+    });
+  }
+
+  /** Wash a model (its meshes fogged by apply) toward white for a hit's flash (`on`), or back to its own colors. */
+  flash(obj: THREE.Object3D, on: boolean): void {
+    obj.traverse((c) => {
+      if (!(c instanceof THREE.Mesh)) return;
+      if (on) {
+        const f = this.flashed.get(c.material as THREE.Material);
+        if (f) { c.userData.unflashed = c.material; c.material = f; }
+      } else if (c.userData.unflashed) {
+        c.material = c.userData.unflashed;
+        delete c.userData.unflashed;
+      }
     });
   }
 
@@ -237,6 +275,6 @@ export class FogOfWar {
     this.texture?.dispose();
     this.sheet.geometry.dispose();
     (this.sheet.material as THREE.Material).dispose();
-    for (const m of this.materials.values()) m.dispose();
+    for (const m of [...this.materials.values(), ...this.flashed.values()]) m.dispose();
   }
 }

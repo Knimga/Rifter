@@ -14,7 +14,8 @@ src/forge/
                   (creature.skeleton -> creatures/skeleton.ts; core/folders.ts); shared helpers (_x.ts) at its top
     _weapon.ts    shared helpers (files starting "_" are not designs)
   drafts/         new designs and requested changes go HERE, never into designs/
-  dev/            builder page (ForgePage, forgeView) + draft registry; dev-only, lazy-loaded
+  terrain/        a map's 3D floor and walls (buildTerrain), from its tiles and its TerrainStyle; a zone's clutter (placeClutter)
+  dev/            builder page (ForgePage, forgeView, DungeonPreview, its controls in ui.tsx) + draft registry; dev-only, lazy-loaded
   registry.vite.ts   import.meta.glob of designs/*/
   dataRefs.ts     designs <-> game data entries (used by lint and the builder page)
   equip.ts        characters holding their gear
@@ -26,7 +27,7 @@ src/viewEngine/three/   drawing forge models with three.js, in the game and the 
 The forge folder holds the forge UI and the link between its models and game data; drawing models (outside the forge's own page logic) is `viewEngine`'s.
 
 ## Data flow
-`Design.build(ctx)` draws triangles into `ctx.mesh` -> `finalize()` scales to game units and writes standard anchors -> `bake()` produces `MeshData` (flat typed arrays) -> `toThree()` makes up to 3 meshes (lit, emissive unlit, translucent), plus one of camera-facing additive quads for its halos (`m.halo`). The same `MeshData` feeds the software contact-sheet renderer.
+`Design.build(ctx)` draws triangles into `ctx.mesh` -> `finalize()` scales to game units (a `placed` design keeps its true size) and writes standard anchors -> `bake()` produces `MeshData` (flat typed arrays) -> `toThree()` makes up to 3 meshes (lit, emissive unlit, translucent), plus one of camera-facing additive quads for its halos (`m.halo`). The same `MeshData` feeds the software contact-sheet renderer.
 
 ## Units, orientation, camera
 - 1 unit = 1 tile. Grid cell (gx, gy) centers at world (gx + .5, 0, gy + .5). Grid +y is world +z (down the screen, toward the camera).
@@ -39,7 +40,7 @@ The forge folder holds the forge UI and the link between its models and game dat
 - Facing and motion are view state (`viewEngine/three/mapRenderer.ts`); the game's positions change instantly. On a move, the model turns toward it (`yaw = atan2(dx, dy)`, smoothed with `smoothYaw`), then glides there in a straight line (about 0.2 s a tile, at most 1 s with the turn); DOM overlays (HP bars, the active glow) follow the drawn position. On an ability, the caster turns toward the aimed tile (`MapUnit.aim`) and the ability lands `AIM_TURN_LEAD_MS` later.
 - **Game camera: isometric orthographic view, one setting**, outside the forge because it is the whole display's: `GAME_CAMERA` in `src/viewEngine/camera.ts` (`elevationDeg`, `yawDeg`). North is up-left: the grid's top-left corner is the diamond's left point. Everything follows it: change a number, save, and the game and forge update.
   - `viewProject` (`viewEngine/camera.ts`) is the projection (world -> screen tiles); the three.js camera (`fitViewCamera` / `frameBoard` in `viewEngine/three/stage.ts`) produces exactly the same mapping.
-  - Each map is a `Board` (`components/mapParts.tsx`; `boardLayout` and `TILE_SIZE` in `viewEngine/board.ts`): the DOM tile grid stays flat and is laid on the floor by one CSS transform (`floorMatrix`), so clicks, hovers, borders, AoE highlights and the move line work unchanged. Models draw on a transparent canvas covering the board's box; upright DOM (floating text, bars over heads, door/rift markers, loot counts) is placed with `board.toScreen(x, y, height)`.
+  - Each map is a `Board` (`components/mapParts.tsx`; `boardLayout` and `TILE_SIZE` in `viewEngine/board.ts`): its DOM tiles are clear (no grid) and laid on the floor by one CSS transform (`floorMatrix`), so clicks, hovers, AoE highlights and the move line land on the right tiles. Under them, the map's 3D floor on its own canvas (the Board's `under` slot); over them, a transparent canvas covering the board's box with the models and the 3D walls (contract "Terrain"). Upright DOM (floating text, bars over heads, door/rift markers, loot counts) is placed with `board.toScreen(x, y, height)`.
   - The key light is turned with the view (`keyLightDir`), so it always comes from the screen's upper left. Icons use their own unturned camera.
   - The forge's game view and `forge:sheet` (`--elev` to try another elevation) use the same view.
 - One key light, world-fixed from the upper left, plus a hemisphere light. Values live in `stage-config.ts`.

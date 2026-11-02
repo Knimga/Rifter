@@ -19,6 +19,8 @@ export interface Cell {
   progress?: AnimationProgress;
   /** Tiles a side it stands on in game (a large creature's 2×2); the tile reference shows that square. Default 1. */
   tiles?: number;
+  /** Wall clutter: a wall stands behind it (at its tile's back edge, turning with it), as in a dungeon. */
+  wall?: boolean;
 }
 
 export interface ViewOptions {
@@ -56,6 +58,18 @@ export class ForgeView {
     this.r.setPixelRatio(window.devicePixelRatio);
     this.canvas = this.r.domElement;
     this.key = addForgeLights(this.scene);
+  }
+
+  /** The wall behind wall clutter (Cell.wall): a slab of plain stone along the tile's back edge (z = -0.5), low wall height. */
+  private wall: THREE.Group | null = null;
+  private wallFor(): THREE.Group {
+    if (this.wall) return this.wall;
+    const slab = new THREE.Mesh(new THREE.BoxGeometry(1.6, 1.5, 0.3), new THREE.MeshLambertMaterial({ color: 0x4a4756 }));
+    slab.position.set(0, 0.75, -0.65);
+    this.wall = new THREE.Group();
+    this.wall.add(slab);
+    this.scene.add(this.wall);
+    return this.wall;
   }
 
   /** The tile reference for a model standing on `n`×`n` tiles: the tiles under it, centered on its feet. */
@@ -119,6 +133,11 @@ export class ForgeView {
       const ground = this.groundFor(cell.tiles ?? 1);
       ground.visible = opts.ground && !game; // game view: the page's DOM tiles are the ground
       ground.position.y = isItem ? min[1] - 0.02 : 0;
+      const wall = cell.wall && opts.camera !== 'icon' ? this.wallFor() : this.wall;
+      if (wall) {
+        wall.visible = !!cell.wall && opts.camera !== 'icon';
+        wall.rotation.y = cell.yaw;
+      }
 
       const { x, y, w, h } = cell.rect;
       const gy = size.h - y - h; // GL origin is bottom-left

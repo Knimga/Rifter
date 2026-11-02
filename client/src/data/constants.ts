@@ -3,10 +3,6 @@ import type { AffixGroup } from './gear/affixes';
 
 /* ----- UI CONSTANTS ----- */
 
-/** Floor and wall tile colors for the Sanctum map. */
-export const SANCTUM_FLOOR_COLOR = '#1e2030';
-export const SANCTUM_WALL_COLOR = '#0d0e18';
-
 // UI colors are CSS variables of the palette in index.css (its one source); these name them for TS.
 
 /** Each damage element's color (text, floating damage, ability washes). */
@@ -47,6 +43,7 @@ export const COMBAT_TEXT_COLOR = {
   mpRestore: 'var(--rift-mp)',
   heal: 'var(--tone-heal)',
   dot: 'var(--tone-debuff)',
+  threat: 'var(--tone-threat)',
   stopped: 'var(--rift-bright)',  // missed, dodged, parried, blocked
   loot: 'var(--rift-loot)',
   warn: 'var(--rift-warn)',

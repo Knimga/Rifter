@@ -5,9 +5,11 @@ import type { DungeonConfig } from './dungeonGen';
 const skelly = ENEMY_CLASSES.find(c => c.id === 'skeleton')!;
 const zombie = ENEMY_CLASSES.find(c => c.id === 'zombie')!;
 const specter = ENEMY_CLASSES.find(c => c.id === 'specter')!;
+const wight = ENEMY_CLASSES.find(c => c.id === 'wight')!;
 const lavaSlime = ENEMY_CLASSES.find(c => c.id === 'lava-slime')!;
 const hellhound = ENEMY_CLASSES.find(c => c.id === 'hellhound')!;
 const flameGolem = ENEMY_CLASSES.find(c => c.id === 'flame-golem')!;
+const fireElemental = ENEMY_CLASSES.find(c => c.id === 'fire-elemental')!;
 const fungalSpore = ENEMY_CLASSES.find(c => c.id === 'fungal-spore')!;
 const sporetender = ENEMY_CLASSES.find(c => c.id === 'sporetender')!;
 const mirehulk = ENEMY_CLASSES.find(c => c.id === 'mirehulk')!;
@@ -33,8 +35,15 @@ export const DUNGEONS: Record<string, DungeonConfig> = {
     name: 'The Crypt',
     width: 36,
     height: 29,
-    floorColor: '#303030',
-    wallColor: '#202020',
+    terrain: {
+      // Grey laid stone: flagstones and coursed blocks
+      floor: { color: [40, 40, 60], seam: [24, 24, 28], pattern: 'flagstones', bumpiness: 0.3 },
+      walls: { color: [40, 40, 60], finish: 'cyclopean', height: 'low', bumpiness: 0.3 },
+    },
+    clutter: {
+      wall: { objects: ['cobwebs', 'blue-wall-torch'], density: 0.12 },
+      ground: { objects: ['scattered-bones', 'skull'], density: 0.05 },
+    },
     doorObject: 'heavy-door',
     riftColor: [178, 236, 192], // pale, ghostly necrotic green, washed toward white-grey
     keyName: 'Necrotic Key',
@@ -44,6 +53,7 @@ export const DUNGEONS: Record<string, DungeonConfig> = {
         maxRoomSize: 8,
         splitDepth: 3,
         corridorWidth: 2,
+        obstacles: { objects: ['sarcophagus'], roomChance: 0.4, density: 0.04 },
         enemyGroups: [
           [skelly, skelly, skelly, skelly],
           [zombie, zombie, skelly, skelly],
@@ -56,10 +66,11 @@ export const DUNGEONS: Record<string, DungeonConfig> = {
         splitDepth: 2,
         corridorWidth: 2,
         containers: ['worn-treasure-chest'],
+        obstacles: { objects: ['sarcophagus'], roomChance: 0.4, density: 0.04 },
         enemyGroups: [
           [specter, skelly, skelly],
-          [zombie, zombie, zombie],
-          [zombie, zombie, specter],
+          [wight, skelly, skelly],
+          [wight, zombie, specter],
         ],
       }
     ],
@@ -74,8 +85,15 @@ export const DUNGEONS: Record<string, DungeonConfig> = {
     name: 'The Firelands',
     width: 44,
     height: 39,
-    floorColor: '#472424',
-    wallColor: '#3d0f0f',
+    terrain: {
+      // Red-black cave rock, cracked with glowing lava
+      floor: { color: [70, 34, 30], seam: [34, 16, 15], pattern: 'rough', bumpiness: 0.7 },
+      walls: { color: [64, 28, 24], finish: 'rough', height: 'high', bumpiness: 0.7 },
+      veins: { color: [255, 112, 26], share: 0.09, pattern: 'cracks', glow: true },
+    },
+    clutter: {
+      ground: { objects: ['brown-rubble', 'smoldering-embers'], density: 0.06 },
+    },
     doorObject: 'heavy-door',
     riftColor: [255, 168, 72],  // fiery orange, deepening to ember red
     keyName: 'Fiery Key',
@@ -87,6 +105,7 @@ export const DUNGEONS: Record<string, DungeonConfig> = {
         corridorWidth: 3,
         layout: 'caverns',
         islands: { roomChance: 0.33, size: [3, 6], density: 0.1 },
+        obstacles: { objects: ['lava-plume'], roomChance: 0.5, density: 0.04 },
         enemyGroups: [
           [lavaSlime, lavaSlime, lavaSlime],
           [hellhound, hellhound, hellhound],
@@ -101,10 +120,11 @@ export const DUNGEONS: Record<string, DungeonConfig> = {
         layout: 'caverns',
         islands: { roomChance: 0.33, size: [3, 6], density: 0.1 },
         containers: ['dead-adventurer'],
+        obstacles: { objects: ['lava-plume'], roomChance: 0.5, density: 0.04 },
         enemyGroups: [
-          [flameGolem, lavaSlime, lavaSlime],
-          [hellhound, hellhound, lavaSlime],
-          [hellhound, hellhound, lavaSlime]
+          [fireElemental, lavaSlime, lavaSlime],
+          [hellhound, hellhound, flameGolem],
+          [hellhound, hellhound, fireElemental]
         ],
       }
     ],
@@ -120,8 +140,16 @@ export const DUNGEONS: Record<string, DungeonConfig> = {
     name: 'The Fungal Forest',
     width: 44,
     height: 34,
-    floorColor: '#2c3022',
-    wallColor: '#171a11',
+    terrain: {
+      // Damp olive cave rock, patched with moss
+      floor: { color: [54, 53, 40], seam: [30, 33, 22], pattern: 'rough', bumpiness: 0.5 },
+      walls: { color: [50, 54, 40], finish: 'rough', height: 'high', bumpiness: 0.6 },
+      veins: { color: [56, 84, 38], share: 0.18, pattern: 'patches' },
+    },
+    clutter: {
+      wall: { objects: ['bracket-fungus'], density: 0.12 },
+      ground: { objects: ['mushroom-cluster', 'fallen-log', 'low-shrub'], density: 0.08 },
+    },
     doorObject: 'heavy-door',
     riftColor: [218, 230, 124], // sickly spore yellow-green, deepening to moss
     keyName: 'Fetid Key',
@@ -132,7 +160,7 @@ export const DUNGEONS: Record<string, DungeonConfig> = {
         splitDepth: 3,
         corridorWidth: 2,
         layout: 'caverns',
-        islands: { roomChance: 0.5, size: [1, 1], density: 0.15 },
+        obstacles: { objects: ['tree-trunk'], roomChance: 0.5, density: 0.15 },
         enemyGroups: [
           [gloomtoad, gloomtoad, rotflySwarm, rotflySwarm, rotflySwarm],
           [mirehulk, mirehulk, rotflySwarm, rotflySwarm, rotflySwarm],
@@ -145,8 +173,8 @@ export const DUNGEONS: Record<string, DungeonConfig> = {
         splitDepth: 3,
         corridorWidth: 3,
         layout: 'caverns',
-        islands: { roomChance: 0.6, size: [3, 5], density: 0.2 },
         containers: ['dead-adventurer'],
+        obstacles: { objects: ['tree-trunk'], roomChance: 0.6, density: 0.15 },
         enemyGroups: [
           [mirehulk, mirehulk, rotflySwarm, rotflySwarm, rotflySwarm],
           [gloomtoad, gloomtoad, gloomtoad],
@@ -166,8 +194,15 @@ export const DUNGEONS: Record<string, DungeonConfig> = {
     name: 'The Goblin Fortress',
     width: 39,
     height: 36,
-    floorColor: '#28331f',
-    wallColor: '#0b160c',
+    terrain: {
+      // Rough-cut blocks on packed earth
+      floor: { color: [50, 40, 35], seam: [30, 28, 22], pattern: 'rough-fine', bumpiness: 0.4 },
+      walls: { color: [72, 64, 50], finish: 'masonry', height: 'low', bumpiness: 1 },
+    },
+    clutter: {
+      wall: { objects: ['wall-torch', 'claw-scratches'], density: 0.1 },
+      ground: { objects: ['skull', 'loose-rubble'], density: 0.05 },
+    },
     doorObject: 'heavy-door',
     riftColor: [32, 107, 35], // rich green (#206b23)
     keyName: 'Gnawed Key',
@@ -178,6 +213,7 @@ export const DUNGEONS: Record<string, DungeonConfig> = {
         maxRoomSize: 7,
         splitDepth: 4,
         corridorWidth: 1,
+        obstacles: { objects: ['crate-stack'], roomChance: 0.4, density: 0.04 },
         enemyGroups: [
           [goblinWarrior,goblinWarrior,goblinArcher,],
           [goblinWarrior,goblinWarrior,goblinWarrior,goblinShaman],
@@ -192,6 +228,7 @@ export const DUNGEONS: Record<string, DungeonConfig> = {
         splitDepth: 4,
         corridorWidth: 1,
         containers: ['worn-treasure-chest'],
+        obstacles: { objects: ['crate-stack'], roomChance: 0.4, density: 0.04 },
         enemyGroups: [
           [troll,goblinWarrior,goblinArcher],
           [goblinWarrior,goblinWarrior,goblinShaman,goblinArcher],
@@ -211,8 +248,15 @@ export const DUNGEONS: Record<string, DungeonConfig> = {
     name: 'The Blind Caverns',
     width: 62,
     height: 23,
-    floorColor: '#16171a',
-    wallColor: '#060607',
+    terrain: {
+      // Near-black, deeply uneven cave rock
+      floor: { color: [34, 35, 39], seam: [14, 14, 17], pattern: 'rough', bumpiness: 1 },
+      walls: { color: [32, 33, 37], finish: 'rough', height: 'low', bumpiness: 1 },
+    },
+    clutter: {
+      wall: { objects: ['cobwebs', 'claw-scratches'], density: 0.1 },
+      ground: { objects: ['scattered-bones', 'loose-rubble'], density: 0.06 },
+    },
     doorObject: 'heavy-door',
     riftColor: [30, 30, 70],
     keyName: 'Lightless Key',
@@ -223,6 +267,7 @@ export const DUNGEONS: Record<string, DungeonConfig> = {
         splitDepth: 3,
         corridorWidth: 1,
         layout: 'tunnels',
+        obstacles: { objects: ['stalagmite-cluster'], roomChance: 0.5, density: 0.08 },
         enemyGroups: [
           [echoBats,echoBats,echoBats,echoBats,echoBats],
           [paleCreeper,paleCreeper,paleCreeper,paleCreeper],
@@ -236,6 +281,7 @@ export const DUNGEONS: Record<string, DungeonConfig> = {
         corridorWidth: 1,
         layout: 'tunnels',
         containers: ['dead-adventurer'],
+        obstacles: { objects: ['stalagmite-cluster'], roomChance: 0.5, density: 0.08 },
         enemyGroups: [
           [eyelax,eyelax,echoBats,echoBats,echoBats],
           [blackCentipede],

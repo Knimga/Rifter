@@ -53,7 +53,7 @@ export function useReach({ zone, dungeon, fog, partyTiles, zoneEnemies, mover, m
     for (const key of zone.floors) {
       if (taken.has(key) || (fog && !fog.visible.has(key))) continue;
       const p = keyPos(key);
-      if (walkable(p) && inRangeAndSight(mover, p, tileRange, zone.floors)) out.add(key);
+      if (walkable(p) && inRangeAndSight(mover, p, tileRange, zone.sight)) out.add(key);
     }
     return out;
   }, [tileRange, combatActive, zone, dungeon, mover.x, mover.y, unitTilesKey, fog]); // eslint-disable-line react-hooks/exhaustive-deps

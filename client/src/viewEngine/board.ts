@@ -7,10 +7,10 @@ import { GAME_CAMERA, floorMatrix, rad, viewProject, type ViewAngles } from './c
 export const TILE_SIZE = 60;
 
 /**
- * How far above the floor (in world tiles) the board leaves room for: the tallest model plus the bars
- * over its head, for units standing on the board's top edge.
+ * How far above the floor (in world tiles) the board leaves room for, at its top edge: the tallest model plus the
+ * bars over its head, and the tallest wall (a dungeon's high walls: 2.25, a rough one's a little more).
  */
-const BOARD_HEADROOM = 2.2;
+const BOARD_HEADROOM = 2.5;
 
 /** A grid of cols x rows tiles as drawn on screen: its pixel box, and where world points land in it. */
 export interface BoardLayout {

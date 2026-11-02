@@ -90,7 +90,17 @@ export interface UnitChange {
   slain?: boolean;
 }
 
-export interface FloatEvent { pos: Pos; text: string; color: string }
+export interface FloatEvent {
+  pos: Pos;
+  text: string;
+  color: string;
+  /**
+   * What its unit's model shows (unitKey: the unit hit, healed or affected): a white flash for damage that landed
+   * (`hit`), a glow for a heal, buff or debuff (`glow`), in its effect's `element` color (its own, else its
+   * ability's displayElement), else the float's. None for a miss, a dodge and the like.
+   */
+  fx?: { unit: string; kind: 'hit' | 'glow'; element?: DamageElement };
+}
 
 export interface ActionOutcome {
   changes: UnitChange[];
@@ -294,8 +304,8 @@ const STOPPED_TEXT: Record<Exclude<HitOutcome, 'hit'>, string> = {
 
 /** What executeAction may need of the fight beyond the units it is given. */
 export interface ActionWorld {
-  /** The map's floor: a triggered weapon attack needs sight of its target (none: not checked). */
-  floors?: ReadonlySet<string>;
+  /** The tiles sight passes over on the map (ZoneData.sight): a triggered weapon attack needs sight of its target (none: not checked). */
+  sight?: ReadonlySet<string>;
   /** A living unit of the fight as it is now, by unitKey: a trigger's effects on 'source'. */
   unitByKey?: (key: string) => CombatUnit | undefined;
 }
@@ -331,7 +341,8 @@ export function executeAction(caster: CombatUnit, action: Ability, targets: Comb
     return t.change;
   };
   threatOf(caster);
-  const float = (u: CombatUnit, text: string, color: string) => floats.push({ pos: bodyCenter(u), text, color });
+  const float = (u: CombatUnit, text: string, color: string, fx?: 'hit' | 'glow', element?: DamageElement) =>
+    floats.push({ pos: bodyCenter(u), text, color, ...(fx && { fx: { unit: unitKey(u.ref), kind: fx, ...(element && { element }) } }) });
   // Every roll, to the browser console, in dev builds only (for balancing; players never see it)
   const log = (by: CombatUnit, target: CombatUnit, msg: string) => { if (COMBAT_LOG) console.log(`[Combat] ${by.name} → ${target.name}: ${msg}`); };
   /** Still standing, after what this action has done to it so far. */
@@ -364,10 +375,10 @@ export function executeAction(caster: CombatUnit, action: Ability, targets: Comb
         const amount = o.flat ? applyDR(rolled, eff.damageElement, recipient.stats, off?.penetration, off?.elementPenetration) : rolled;
         if (eff.damagesMP) {
           c.mpSpent += amount;
-          float(recipient, `-${amount} MP`, COMBAT_TEXT_COLOR.mpDamage);
+          float(recipient, `-${amount} MP`, COMBAT_TEXT_COLOR.mpDamage, 'hit');
         } else {
           c.damage += amount;
-          float(recipient, `-${amount}`, o.flat ? DAMAGE_ELEMENT_COLOR[eff.damageElement] : COMBAT_TEXT_COLOR.damage);
+          float(recipient, `-${amount}`, o.flat ? DAMAGE_ELEMENT_COLOR[eff.damageElement] : COMBAT_TEXT_COLOR.damage, 'hit');
         }
         if (o.flat) log(actor, recipient, `TRIGGERED ${amount}${eff.damagesMP ? ' MP' : ''} (${eff.damageElement})`);
         if (onOther) threat.gain += damageThreat(amount, eff.damagesMP);
@@ -382,7 +393,7 @@ export function executeAction(caster: CombatUnit, action: Ability, targets: Comb
         if (eff.restoresMP) c.mpRestored += amount;
         else c.heal += amount;
         log(actor, recipient, `HEAL${crit ? ' CRIT' : ''} ${amount}${eff.restoresMP ? ' MP' : ''} (${eff.damageElement})`);
-        if (amount > 0) float(recipient, `+${amount}${eff.restoresMP ? ' MP' : ''}${crit ? ' CRIT!' : ''}`, eff.restoresMP ? COMBAT_TEXT_COLOR.mpRestore : COMBAT_TEXT_COLOR.heal);
+        if (amount > 0) float(recipient, `+${amount}${eff.restoresMP ? ' MP' : ''}${crit ? ' CRIT!' : ''}`, eff.restoresMP ? COMBAT_TEXT_COLOR.mpRestore : COMBAT_TEXT_COLOR.heal, 'glow', eff.damageElement);
         threat.gain += healThreat(amount);
         if (!o.flat) {
           fireTriggers(actor, recipient, { when: 'healing' }, true);
@@ -396,21 +407,21 @@ export function executeAction(caster: CombatUnit, action: Ability, targets: Comb
           healPerRound: bonuses ? Math.floor(eff.healPerRound + actor.stats.healing / 2) : eff.healPerRound, roundsRemaining: eff.rounds,
           ...tickStack(o.ability, eff),
         });
-        float(recipient, '+HoT', COMBAT_TEXT_COLOR.heal);
+        float(recipient, '+HoT', COMBAT_TEXT_COLOR.heal, 'glow', eff.damageElement);
         break;
       case 'dot': {
         // Off an attack, a DoT scales with the attacker's offense (resolveAttack); here it is flat, unless a
         // scaled trigger result (the same way as off an attack)
         const dot = newDot(o.ability, eff, actor, off);
         c.dots.push(dot);
-        float(recipient, `${o.ability}!`, COMBAT_TEXT_COLOR.dot);
+        float(recipient, `${o.ability}!`, COMBAT_TEXT_COLOR.dot, 'glow', eff.damageElement);
         if (onOther) threat.gain += damageThreat(dot.damagePerRound, eff.damagesMP);
         break;
       }
       case 'buff':
       case 'debuff':
         c.buffs.push(...effectToBuffs(eff, prefix, o.ability, unitKey(actor.ref)));
-        float(recipient, `${o.ability}!`, eff.type === 'debuff' && onOther ? COMBAT_TEXT_COLOR.dot : COMBAT_TEXT_COLOR.heal);
+        float(recipient, `${o.ability}!`, eff.type === 'debuff' && onOther ? COMBAT_TEXT_COLOR.dot : COMBAT_TEXT_COLOR.heal, 'glow', eff.damageElement);
         threat.gain += buffMagnitude(eff);
         break;
       case 'threat': {
@@ -418,6 +429,8 @@ export function executeAction(caster: CombatUnit, action: Ability, targets: Comb
         if (amount > 0) threat.gain += amount;
         else threat.loss = (threat.loss ?? 0) - amount;
         threat.percent = (threat.percent ?? 0) + (eff.percent ?? 0);
+        // One word for it, whatever its flat and percent parts: "+Threat" (or "-Threat", shedding it)
+        if (amount || eff.percent) float(recipient, amount > 0 || (eff.percent ?? 0) > 0 ? '+Threat' : '-Threat', COMBAT_TEXT_COLOR.threat);
         break;
       }
       case 'summon':
@@ -428,7 +441,7 @@ export function executeAction(caster: CombatUnit, action: Ability, targets: Comb
         break;
       case 'root':
         c.buffs.push(rootToBuff(eff, prefix, o.ability));
-        float(recipient, 'Rooted!', COMBAT_TEXT_COLOR.dot);
+        float(recipient, 'Rooted!', COMBAT_TEXT_COLOR.dot, 'glow', eff.damageElement);
         threat.gain += ROOT_THREAT;
         break;
     }
@@ -452,7 +465,7 @@ export function executeAction(caster: CombatUnit, action: Ability, targets: Comb
       if (t.def.chance !== undefined && randInt(1, 100) > t.def.chance) continue;
       const name = b.source ?? 'Trigger';
       log(bearer, other, `TRIGGER ${name} (${ev.when}${ev.outcome ? ` ${ev.outcome}` : ''})`);
-      float(bearer, `${name}!`, t.debuff ? COMBAT_TEXT_COLOR.dot : COMBAT_TEXT_COLOR.heal);
+      float(bearer, `${name}!`, t.debuff ? COMBAT_TEXT_COLOR.dot : COMBAT_TEXT_COLOR.heal, 'glow', b.damageElement);
       for (const eff of t.def.effects) {
         if (eff.type === 'weaponAttack') {
           if (attacks) triggeredAttack(bearer, other);
@@ -473,7 +486,7 @@ export function executeAction(caster: CombatUnit, action: Ability, targets: Comb
   const triggeredAttack = (bearer: CombatUnit, target: CombatUnit) => {
     const attack = bearer.weaponAttack;
     if (!attack || !alive(target) || bodyDistance(bearer, target) > attack.range) return;
-    if (world.floors && !bodySight(bearer, target, world.floors)) return;
+    if (world.sight && !bodySight(bearer, target, world.sight)) return;
     resolveAttack(bearer, attack, target, true);
   };
 
@@ -520,7 +533,7 @@ export function executeAction(caster: CombatUnit, action: Ability, targets: Comb
       if (eff.damagesMP) dealtMp += dmg.final;
       else dealt += dmg.final;
       log(attacker, target, `${hit.crit ? 'CRIT' : 'HIT'}${hit.glancing ? ' (glancing)' : ''} ${dmg.final}${eff.damagesMP ? ' MP' : ''} (${eff.damageElement}) | roll=${dmg.roll} (+dmg=${off.damage}) raw=${dmg.raw} -DR=${dmg.raw - dmg.final}`);
-      float(target, `-${dmg.final}${eff.damagesMP ? ' MP' : ''}${suffix}`, eff.damagesMP ? COMBAT_TEXT_COLOR.mpDamage : DAMAGE_ELEMENT_COLOR[eff.damageElement]);
+      float(target, `-${dmg.final}${eff.damagesMP ? ' MP' : ''}${suffix}`, eff.damagesMP ? COMBAT_TEXT_COLOR.mpDamage : DAMAGE_ELEMENT_COLOR[eff.damageElement], 'hit');
     }
     const damaged = dealt > 0 || dealtMp > 0;
     if (damaged) {
@@ -535,7 +548,7 @@ export function executeAction(caster: CombatUnit, action: Ability, targets: Comb
       // One tick's worth of threat on application; later ticks add threat via sourceKey
       threat.gain += damageThreat(dot.damagePerRound, dotEffect.damagesMP);
     }
-    if (dotEffects.length > 0 && damageEffects.length === 0) float(target, 'Hit!', COMBAT_TEXT_COLOR.dot);
+    if (dotEffects.length > 0 && damageEffects.length === 0) float(target, 'Hit!', COMBAT_TEXT_COLOR.dot, 'hit');
     for (const debuffEffect of debuffEffects) {
       c.buffs.push(...effectToBuffs(debuffEffect, `${act.name}-${unitKey(target.ref)}`, act.name, unitKey(attacker.ref)));
       threat.gain += buffMagnitude(debuffEffect);

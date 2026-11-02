@@ -80,7 +80,7 @@ export const categoryOfShard = (stat: AffixStat): ShardCategory => shardCategory
 }
 
 /** The chance (0..1) that a dead enemy, any enemy, drops shards (a group of them: SHARD_DROP_COUNT). */
-export const SHARD_DROP_CHANCE = 0.1;
+export const SHARD_DROP_CHANCE = 0.05;
 /** How many shards one drop holds, an even pick from least to most, each of a random type. */
 export const SHARD_DROP_COUNT: [min: number, max: number] = [5, 10];
 

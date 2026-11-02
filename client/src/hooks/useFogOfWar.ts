@@ -26,7 +26,7 @@ export function useFogOfWar({ location, dungeon, currentZone, viewers }: {
   // Recomputed only when someone moves (or the zone changes), not on every render
   const visible = useMemo(
     () => (zone ? visibleTiles(zone, viewers) : null),
-    [zone?.id, zone?.floors, viewersKey], // eslint-disable-line react-hooks/exhaustive-deps
+    [zone?.id, zone?.sight, viewersKey], // eslint-disable-line react-hooks/exhaustive-deps
   );
 
   // Every tile each zone has shown, by zone id

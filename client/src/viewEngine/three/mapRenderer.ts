@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { Model } from '../../forge/core/types';
+import type { Terrain } from '../../forge/terrain/types';
 import { shortestAngle, smoothYaw, yawFromGridMove } from '../../forge/core/facing';
 import { lootYaw } from '../../forge/core/stage-config';
 import { GAME_CAMERA } from '../camera';
@@ -16,6 +17,8 @@ const HALF_TURN_MS = 170;
 const MS_PER_TILE = 200;
 /** Longest a move may take, turning included. */
 const MAX_MOVE_MS = 1000;
+/** How long a hit's flash lasts. */
+const FLASH_MS = 120;
 
 /** One model on the map. `id` is stable for the unit's lifetime (e.g. an enemy instance id). */
 export interface MapUnit {
@@ -38,8 +41,13 @@ export interface MapUnit {
   played?: string[];
   /** One the fog is seen from (a party member): the fog's clouds drift only while one of these moves. */
   viewer?: boolean;
-  /** Its square's side in tiles (a large creature's 2; default 1): `pos` is its top-left tile, the model stands at its center. */
-  size?: number;
+  /**
+   * The tiles it fills: a square's side (a large creature's 2; default 1), or [across x, across y] (a 1x2 obstacle):
+   * `pos` is its top-left tile, the model stands at its center.
+   */
+  size?: number | readonly [number, number];
+  /** A hit's flash: when it changes, the model flashes white for FLASH_MS (one already set when the unit appears doesn't). */
+  flash?: number;
 }
 
 interface Entry {
@@ -60,8 +68,11 @@ interface Entry {
   anims: Record<string, { t: number; ms: number }>;
   /** See MapUnit.viewer. */
   viewer?: boolean;
-  /** See MapUnit.size. */
-  size: number;
+  /** See MapUnit.size: [across x, across y]. */
+  size: readonly [number, number];
+  /** Its last flash (MapUnit.flash), and how much of a flash in progress is left (ms). */
+  flashSeq?: number;
+  flashMs: number;
 }
 
 /** Each played animation's progress (0..1), for animateParts. */
@@ -89,6 +100,14 @@ function makeObject(u: MapUnit, fog: FogOfWar): THREE.Group {
   return obj;
 }
 
+/** A WebGL renderer drawing on a transparent canvas at the screen's pixel ratio (the map's canvases sit over the page). */
+function transparentRenderer(): THREE.WebGLRenderer {
+  const r = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+  r.setPixelRatio(window.devicePixelRatio);
+  r.setClearColor(0x000000, 0);
+  return r;
+}
+
 const easeInOut = (t: number) => (t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2);
 
 /**
@@ -100,8 +119,13 @@ const easeInOut = (t: number) => (t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 
  * toward the move, then glides there (at most MAX_MOVE_MS in all); when it aims an ability (a new `aim`),
  * it turns toward the aimed tile. `onPlace` reports every change of a unit's drawn position, so DOM
  * overlays (HP bars, floor glow) can follow it. A unit's one-time animations (`played`, e.g. a chest
- * opening) play when its state calls for them. Rendering is on demand; the animation loop only runs while a
+ * opening) play when its state calls for them; a hit (`flash`) washes its model white for a moment. Rendering is on demand; the animation loop only runs while a
  * unit is turning, moving or animating, or while a model with spinning parts (PartSpin) is on the map.
+ *
+ * A map's terrain (forge/terrain: its 3D floor and walls) is split across two canvases, so the map's HTML
+ * floor (highlights, glows, the move line) lies between them: the walls stand with the units on this canvas
+ * (hiding what is behind them, fogged like them), and the floor is drawn on `groundCanvas`, laid under the HTML
+ * floor; the fog sheet on this canvas covers both floors.
  */
 export class MapModelRenderer {
   readonly canvas: HTMLCanvasElement;
@@ -117,14 +141,17 @@ export class MapModelRenderer {
   /** Whether it has drawn a frame yet (onFirstFrame fires once, after it). */
   private drawn = false;
 
+  /** The terrain's floor, on its own canvas (created with the first terrain), drawn only when it or the board changes. */
+  private ground: { r: THREE.WebGLRenderer; scene: THREE.Scene; floor?: THREE.Object3D; dirty: boolean } | null = null;
+  /** The terrain's walls, in this scene. */
+  private walls: THREE.Object3D | null = null;
+
   /**
    * `onPlace`: every change of a unit's drawn position (DOM overlays follow it). `onFirstFrame`: once, after the
    * first frame is drawn (models and fog on screen), so the page can stop hiding the map.
    */
   constructor(private onPlace?: (id: string, at: Pos) => void, private onFirstFrame?: () => void) {
-    this.r = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-    this.r.setPixelRatio(window.devicePixelRatio);
-    this.r.setClearColor(0x000000, 0);
+    this.r = transparentRenderer();
     this.canvas = this.r.domElement;
     addForgeLights(this.scene, GAME_CAMERA);
     // The fog's color: the palette's (index.css --rift-fog)
@@ -145,7 +172,48 @@ export class MapModelRenderer {
   /** Size the canvas and camera to a board's box. */
   setBoard(board: BoardLayout): void {
     this.r.setSize(board.width, board.height);
+    if (this.ground) {
+      this.ground.r.setSize(board.width, board.height);
+      this.ground.dirty = true;
+    }
     frameBoard(this.cam, board);
+    this.requestFrame();
+  }
+
+  /** The canvas the terrain's floor is drawn on (lay it under the map's HTML floor), once a terrain is set. */
+  get groundCanvas(): HTMLCanvasElement | null {
+    return this.ground?.r.domElement ?? null;
+  }
+
+  /** The map's terrain (null: none, e.g. a forge view): its walls here, its floor on groundCanvas. */
+  setTerrain(terrain: Terrain | null): void {
+    if (this.walls) {
+      this.scene.remove(this.walls);
+      disposeObject(this.walls);
+      this.walls = null;
+    }
+    if (this.ground?.floor) {
+      this.ground.scene.remove(this.ground.floor);
+      disposeObject(this.ground.floor);
+      this.ground.floor = undefined;
+    }
+    if (terrain) {
+      this.walls = toThree(terrain.walls);
+      this.fog.apply(this.walls);
+      this.scene.add(this.walls);
+      if (!this.ground) {
+        const r = transparentRenderer();
+        const size = this.r.getSize(new THREE.Vector2());
+        r.setSize(size.x, size.y);
+        const scene = new THREE.Scene();
+        addForgeLights(scene, GAME_CAMERA);
+        this.ground = { r, scene, dirty: true };
+      }
+      // Not fogged: the fog sheet over the HTML floor covers it
+      this.ground.floor = toThree(terrain.floor);
+      this.ground.scene.add(this.ground.floor);
+    }
+    if (this.ground) this.ground.dirty = true;
     this.requestFrame();
   }
 
@@ -177,7 +245,7 @@ export class MapModelRenderer {
       if (!e) {
         // A new unit adopts any existing aim without turning to it (a remount never replays an old attack)
         const yaw = u.lying ? lootYaw() : (u.facing ?? 0);
-        e = { model: u.model, obj: makeObject(u, this.fog), pos: u.pos, at: { ...u.pos }, yaw, targetYaw: yaw, aimSeq: u.aim?.seq, anims: {}, viewer: u.viewer, size: u.size ?? 1 };
+        e = { model: u.model, obj: makeObject(u, this.fog), pos: u.pos, at: { ...u.pos }, yaw, targetYaw: yaw, aimSeq: u.aim?.seq, anims: {}, viewer: u.viewer, size: typeof u.size === 'object' ? u.size : [u.size ?? 1, u.size ?? 1], flashSeq: u.flash, flashMs: 0 };
         this.scene.add(e.obj);
         this.entries.set(u.id, e);
         this.place(u.id, e);
@@ -196,14 +264,21 @@ export class MapModelRenderer {
         e.pos = u.pos;
         changed = true;
       }
+      // A new hit: the model flashes (starting over if it already is)
+      if (u.flash !== undefined && u.flash !== e.flashSeq) {
+        e.flashSeq = u.flash;
+        if (!e.flashMs) this.fog.flash(e.obj, true);
+        e.flashMs = FLASH_MS;
+        changed = true;
+      }
       // A newly called-for animation plays from now (a new unit has already taken its state, as done)
       if (syncAnimations(e, u.played, false)) changed = true;
       // A new ability aim: turn toward the aimed tile (from wherever the unit now stands)
       if (u.aim && u.aim.seq !== e.aimSeq) {
         e.aimSeq = u.aim.seq;
         // From its center (a large unit's lies between its tiles), so it never faces a tile of itself
-        const half = (e.size - 1) / 2, dx = u.aim.x - (u.pos.x + half), dy = u.aim.y - (u.pos.y + half);
-        if (Math.abs(dx) > half || Math.abs(dy) > half) {
+        const hx = (e.size[0] - 1) / 2, hy = (e.size[1] - 1) / 2, dx = u.aim.x - (u.pos.x + hx), dy = u.aim.y - (u.pos.y + hy);
+        if (Math.abs(dx) > hx || Math.abs(dy) > hy) {
           const yaw = yawFromGridMove(dx, dy);
           // Mid-glide: finish the glide (still facing it), then turn
           if (e.move) e.afterMoveYaw = yaw;
@@ -223,8 +298,8 @@ export class MapModelRenderer {
   }
 
   private place(id: string, e: Entry): void {
-    e.obj.position.x = e.at.x + e.size / 2;
-    e.obj.position.z = e.at.y + e.size / 2;
+    e.obj.position.x = e.at.x + e.size[0] / 2;
+    e.obj.position.z = e.at.y + e.size[1] / 2;
     this.onPlace?.(id, e.at);
   }
 
@@ -268,10 +343,19 @@ export class MapModelRenderer {
         animating = true;
       }
       e.obj.rotation.y = e.yaw;
+      if (e.flashMs > 0) {
+        e.flashMs = Math.max(0, e.flashMs - dt);
+        if (!e.flashMs) this.fog.flash(e.obj, false);
+        animating = true;
+      }
     }
     // The fog: tiles still fading in or out, and its drift (only while a party member moves)
     if (this.fog.step(now, viewerMoving)) animating = true;
     this.r.render(this.scene, this.cam);
+    if (this.ground?.dirty) {
+      this.ground.r.render(this.ground.scene, this.cam);
+      this.ground.dirty = false;
+    }
     if (!this.drawn) { this.drawn = true; this.onFirstFrame?.(); }
     if (animating) {
       this.lastFrame = now;
@@ -286,6 +370,9 @@ export class MapModelRenderer {
     this.fog.dispose();
     for (const e of this.entries.values()) disposeObject(e.obj);
     this.entries.clear();
+    if (this.walls) disposeObject(this.walls);
+    if (this.ground?.floor) disposeObject(this.ground.floor);
+    this.ground?.r.dispose();
     this.r.dispose();
   }
 }

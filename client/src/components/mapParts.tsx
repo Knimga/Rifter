@@ -1,23 +1,14 @@
 import { Children, memo, useCallback, useMemo, useState, type ReactNode } from 'react';
 import { useLatest } from '../hooks/useLatest';
 import { TILE_SIZE, boardLayout, type BoardLayout } from '../viewEngine/board';
-import { yawFromGridMove } from '../forge/core/facing';
 import type { ClassKey } from '../data/units/classes';
 import type { ModelLink } from '../forge/core/types';
 import type { HeldWeapon } from '../forge/equip';
 import type { MapPartyMember } from './ModelLayer';
-import { samePos, STEPS, type Pos } from '../data/world/grid';
+import { samePos, type Pos } from '../data/world/grid';
 import UnitStatus, { type StatusMarker } from './hud/UnitStatus';
 import MoveLine from './MoveLine';
-
-/** Scale each RGB channel of a hex color by `factor` (e.g. 1.4 to brighten). */
-function brightenHex(hex: string, factor: number): string {
-  const n = parseInt(hex.slice(1), 16);
-  const r = Math.min(255, Math.round(((n >> 16) & 0xff) * factor));
-  const g = Math.min(255, Math.round(((n >> 8) & 0xff) * factor));
-  const b = Math.min(255, Math.round((n & 0xff) * factor));
-  return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
-}
+import FloatingCombatText, { type FloatingText } from './FloatingCombatText';
 
 // ─── Shared pieces of the Sanctum and Dungeon maps ────────────────────────────
 
@@ -62,11 +53,12 @@ export function useBoard(cols: number, rows: number): BoardLayout {
  * flat tile grid and anything lying on it (highlights, the move line), in flat tile px (tile (x, y) at
  * x·TILE_SIZE, y·TILE_SIZE); it is laid on the floor by one CSS transform, so clicks and hovers land on
  * the right tiles. `children` are drawn above it, upright (models, overlays, markers), placed with
- * board.toScreen (see UprightAt).
+ * board.toScreen (see UprightAt). `under` is drawn beneath the floor, filling the box (the map's 3D floor).
  */
-export function Board({ board, floor, children }: { board: BoardLayout; floor: ReactNode; children?: ReactNode }) {
+export function Board({ board, floor, under, children }: { board: BoardLayout; floor: ReactNode; under?: ReactNode; children?: ReactNode }) {
   return (
     <div className="relative" style={{ width: board.width, height: board.height }}>
+      {under}
       <div
         className="absolute left-0 top-0"
         style={{ width: board.cols * TILE_SIZE, height: board.rows * TILE_SIZE, transform: board.floorTransform, transformOrigin: '0 0' }}
@@ -92,15 +84,6 @@ export function UprightAt({ board, x, y, height = 0, className = '', children }:
       {children}
     </div>
   );
-}
-
-/**
- * Yaw (radians) for a map object at `pos` to face its open side: the first walkable side tile (south, east,
- * north, west), e.g. a door in a wall facing the floor it opens onto. 0 (south) if none is open.
- */
-export function facingOpenSide(pos: Pos, isOpen: (p: Pos) => boolean): number {
-  for (const [dx, dy] of STEPS.slice(0, 4)) if (isOpen({ x: pos.x + dx, y: pos.y + dy })) return yawFromGridMove(dx, dy);
-  return 0;
 }
 
 /**
@@ -179,7 +162,7 @@ export function ActiveGlow() {
 
 // ─── Floor tiles ──────────────────────────────────────────────────────────────
 
-/** Border color of every floor/wall tile. A real color (not a CSS variable): the forge's snapshots draw it on a canvas. */
+/** The tile grid's line color, where the forge shows a grid (the maps have none). A real color (not a CSS variable): the forge's snapshots draw it on a canvas. */
 export const TILE_BORDER_COLOR = 'rgba(55, 65, 81, 0.3)';
 
 /** The tile under the pointer, tracked by FloorTile's hover handlers. */
@@ -203,25 +186,6 @@ export function useStableHandler<A extends unknown[]>(fn: (...args: A) => void):
   return useCallback((...args: A) => latest.current(...args), []); // eslint-disable-line react-hooks/exhaustive-deps
 }
 
-/**
- * Tiles deep in the fog: unseen, and no tile around them seen either (`known`: in sight now, or seen before). A
- * map's HTML floor draws them in the fog's color, so the layout never shows through, even before the 3D layer
- * (and its fog) has drawn. The fog is fully dark over them anyway; the tiles at its edge keep their colors, so
- * its soft edge looks as it should.
- */
-export function deepFogTiles(fog: { visible: ReadonlySet<string>; explored: ReadonlySet<string> }, cols: number, rows: number): Set<string> {
-  const deep = new Set<string>();
-  const known = (x: number, y: number) => fog.visible.has(`${x},${y}`) || fog.explored.has(`${x},${y}`);
-  for (let x = 0; x < cols; x++) {
-    for (let y = 0; y < rows; y++) {
-      let near = false;
-      for (let dx = -1; dx <= 1 && !near; dx++) for (let dy = -1; dy <= 1 && !near; dy++) near = known(x + dx, y + dy);
-      if (!near) deep.add(`${x},${y}`);
-    }
-  }
-  return deep;
-}
-
 /** A map's floor grid: `tile(p)` draws each tile (a FloorTile), row by row. */
 export function FloorGrid({ cols, rows, tile }: { cols: number; rows: number; tile: (p: Pos) => ReactNode }) {
   return (
@@ -237,9 +201,7 @@ export function FloorGrid({ cols, rows, tile }: { cols: number; rows: number; ti
 
 interface FloorTileProps {
   p: Pos;
-  /** Floor or wall color (hex). */
-  color: string;
-  /** Lit as the hovered move target. */
+  /** Lit as the hovered move target (faintly: the tile is otherwise clear, over the map's 3D floor). */
   brighten?: boolean;
   hover: HoveredTile;
   /** Stable across renders (useStableHandler), so the tile's memo holds. */
@@ -248,26 +210,26 @@ interface FloorTileProps {
 }
 
 /**
- * One floor or wall tile: its color (a move target brightens under the pointer), hover tracking and clicks.
- * Overlays (highlights, glows) go inside as children.
+ * One tile of a map's HTML floor: clear over its 3D floor (a move target lights faintly under the pointer), tracking
+ * hover and taking clicks. Overlays (highlights, glows) go inside as children.
  *
  * Memoized: a map has hundreds of tiles and re-renders on every hovered tile, but only the few tiles whose
  * look changes need to redraw. A tile with overlays always redraws (its children are new elements).
  */
-export const FloorTile = memo(function FloorTile({ p, color, brighten = false, hover, onClick, children }: FloorTileProps) {
+export const FloorTile = memo(function FloorTile({ p, brighten = false, hover, onClick, children }: FloorTileProps) {
   return (
     <div
       onClick={() => onClick(p)}
       onMouseEnter={() => hover.enter(p)}
       onMouseLeave={() => hover.leave(p)}
-      className="relative shrink-0 border"
-      style={{ width: TILE_SIZE, height: TILE_SIZE, borderColor: TILE_BORDER_COLOR, backgroundColor: brighten ? brightenHex(color, 1.5) : color }}
+      className="relative shrink-0"
+      style={{ width: TILE_SIZE, height: TILE_SIZE, backgroundColor: brighten ? 'color-mix(in srgb, var(--glow) 16%, transparent)' : undefined }}
     >
       {children}
     </div>
   );
 }, (a: FloorTileProps, b: FloorTileProps) =>
-  a.p.x === b.p.x && a.p.y === b.p.y && a.color === b.color && !!a.brighten === !!b.brighten && a.onClick === b.onClick
+  a.p.x === b.p.x && a.p.y === b.p.y && !!a.brighten === !!b.brighten && a.onClick === b.onClick
   && a.hover.enter === b.hover.enter && a.hover.leave === b.hover.leave
   && noChildren(a.children) && noChildren(b.children));
 
@@ -300,6 +262,22 @@ export const TILE_HIGHLIGHT = {
 /** One highlight overlay on a floor tile (see TILE_HIGHLIGHT). */
 export function TileHighlight({ kind, className = '' }: { kind: keyof typeof TILE_HIGHLIGHT; className?: string }) {
   return <div className={`absolute inset-0 pointer-events-none ${TILE_HIGHLIGHT[kind]} ${className}`} />;
+}
+
+// ─── Floating text ────────────────────────────────────────────────────────────
+
+/**
+ * A map's floating text (damage, heals, "Level N!", gold), rising from its tile; `shown` (optional) picks which (a
+ * dungeon's: only those over tiles the party sees). A large creature's float rises from its center (between tiles).
+ */
+export function MapFloats({ board, floats, onComplete, shown }: { board: BoardLayout; floats: FloatingText[]; onComplete: (id: number) => void; shown?: (ft: FloatingText) => boolean }) {
+  return (
+    <>
+      {floats.filter((ft) => !shown || shown(ft)).map((ft) => (
+        <FloatingCombatText key={ft.id} ft={ft} at={board.toScreen(ft.gridX + 0.5, ft.gridY + 0.5, 0.5)} onComplete={onComplete} />
+      ))}
+    </>
+  );
 }
 
 // ─── Move line ────────────────────────────────────────────────────────────────

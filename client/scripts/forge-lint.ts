@@ -2,7 +2,7 @@
 import { buildModel } from '../src/forge/core/build';
 import type { Model } from '../src/forge/core/types';
 import { loadDesigns } from './load-designs';
-import { checkDataRefs } from '../src/forge/dataRefs';
+import { checkDataRefs, dataEntry } from '../src/forge/dataRefs';
 import { CATEGORY_FOLDER } from '../src/forge/core/folders';
 
 const args = process.argv.slice(2);
@@ -42,7 +42,18 @@ for (const { stem, folder, source, design } of designs) {
     if (triCount > design.budget) fail('over-budget', seed, `${triCount} > ${design.budget}`);
 
     const eps = 1e-3;
-    if (design.fit.kind === 'standing') {
+    if (design.fit.kind === 'placed') {
+      // In place: on the floor, no taller than its height, within its footprint (span x depth tiles, centered; wall
+      // clutter in front of its wall, z >= -0.5)
+      const o = dataEntry(design.source);
+      const [halfX, halfZ] = (o?.footprint ?? [1, 1]).map((n) => n / 2);
+      if (bounds.max[1] > design.fit.height + eps) fail('too-tall', seed, `${bounds.max[1].toFixed(3)}`);
+      // Sinking a hair into the floor is hidden by it (jittered rocks and roots)
+      if (bounds.min[1] < -0.02) fail('below-floor', seed, `${bounds.min[1].toFixed(3)}`);
+      if (Math.max(-bounds.min[0], bounds.max[0]) > halfX + 0.02 || bounds.max[2] > halfZ + 0.02 || -bounds.min[2] > halfZ + (o?.wall ? 0.01 : 0.02))
+        fail('off-footprint', seed, `x ${bounds.min[0].toFixed(2)}..${bounds.max[0].toFixed(2)} z ${bounds.min[2].toFixed(2)}..${bounds.max[2].toFixed(2)}`);
+      if (!anchors.feet || !anchors.overhead) fail('missing-anchors', seed, 'feet/overhead');
+    } else if (design.fit.kind === 'standing') {
       const r = Math.max(...[0, 1].map((i) => Math.max(Math.abs(bounds.min[i * 2]), Math.abs(bounds.max[i * 2]))));
       if (bounds.max[1] > design.fit.height + eps) fail('too-tall', seed, `${bounds.max[1].toFixed(3)}`);
       // On the floor (a floating one, fit.floor 'origin': never below it)

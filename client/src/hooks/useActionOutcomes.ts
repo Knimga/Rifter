@@ -11,7 +11,8 @@ import { bodySize, isAlly, withEnemyBuffs, type EnemyInstance } from '../data/un
 import { createSummon, summonClass, summonsOf } from '../data/units/summons';
 import type { MemberState } from '../data/units/party';
 import { addBuffs, addTicking, type Stats } from '../data/units/stats';
-import type { UnitAim } from '../components/ModelLayer';
+import type { UnitAim, UnitFx } from '../components/ModelLayer';
+import { elementTint } from '../components/ui/AbilityCard';
 import type { SpawnFloat } from './useFloatingText';
 import { useLatest } from './useLatest';
 
@@ -36,6 +37,9 @@ export function useActionOutcomes({ spawnFloat, updateMembers, partyStatsRef, pa
 }) {
   // Where each unit last aimed an ability (unit id → tile + sequence): its model turns to face it
   const [unitAims, setUnitAims] = useState<Record<string, UnitAim>>({});
+  // The feedback each unit's model last showed (unit id → flash and glow, each with its sequence): a new one plays
+  const [unitFx, setUnitFx] = useState<Record<string, UnitFx>>({});
+  const fxSeq = useRef(0);
   const aimSeq = useRef(0);
   // Outcomes waiting for their caster to finish turning toward the target
   const pending = useRef(new Set<ReturnType<typeof setTimeout>>());
@@ -48,6 +52,19 @@ export function useActionOutcomes({ spawnFloat, updateMembers, partyStatsRef, pa
   /** An action's effects: floating text, HP/MP/effect changes on party and enemies, threat, summons. */
   const landOutcome = useCallback((outcome: ActionOutcome, caster: CombatUnit) => {
     for (const f of outcome.floats) spawnFloat(f.pos.x, f.pos.y, f.text, f.color);
+    // Its models' feedback: a hit flashes, a heal, buff or debuff glows in its element's color, as ability names show it
+    // (elementTint), else its float's (the last of each, per unit)
+    const fx = outcome.floats.filter((f) => f.fx);
+    if (fx.length) {
+      setUnitFx((prev) => {
+        const next = { ...prev };
+        for (const f of fx) {
+          const seq = ++fxSeq.current, { unit, kind, element } = f.fx!;
+          next[unit] = { ...next[unit], ...(kind === 'hit' ? { flash: seq } : { glow: { color: element ? elementTint(element) : f.color, seq } }) };
+        }
+        return next;
+      });
+    }
 
     const partyChanges = new Map<number, UnitChange>();
     const enemyChanges = new Map<string, UnitChange>();
@@ -165,5 +182,5 @@ export function useActionOutcomes({ spawnFloat, updateMembers, partyStatsRef, pa
   // For the enemy turn (useEnemyTurn), which reads it from a ref
   const applyOutcomeRef = useLatest(applyActionOutcome);
 
-  return { unitAims, applyActionOutcome, applyOutcomeRef, cancelPendingOutcomes };
+  return { unitAims, unitFx, applyActionOutcome, applyOutcomeRef, cancelPendingOutcomes };
 }

@@ -2,11 +2,13 @@ import type { EnemyClassData, EnemyInstance } from '../units/enemies';
 import type { Item } from '../gear';
 import type { ShardCounts } from '../gear/shards';
 import type { RGB } from '../../forge/core/vec';
+import type { TerrainStyle } from '../../forge/terrain/types';
 import { bodySize, creatureTiles, generateEnemyInstance } from '../units/enemies';
 import { findOpenTilesNear, fits, footprint, keyPos, neighbors, posKey, reachableTiles, STEPS, type Pos } from './grid';
 import { chance, pick, randFloat, randInt, shuffle } from '../random';
 import { AGGRO_RANGE } from '../constants';
 import { BASE_MOVEMENT } from '../units/stats';
+import { decorObject, hasDecorDesign, type DecorObjectData } from './decorObjects';
 
 // ─── Core Types ──────────────────────────────────────────────────────────────
 
@@ -34,6 +36,13 @@ export interface ZoneData {
   doors: Door[];
   /** Wall tiles standing in the middle of rooms (IslandConfig): never door spots. */
   islands: Set<string>;
+  /** Obstacles standing in its rooms (ObstacleConfig): their tiles aren't floor (nobody walks there), never door spots. */
+  obstacles: ZoneObstacle[];
+  /**
+   * The tiles sight passes over (line of sight, fog of war, aggro, targeting): its floor, and the tiles of obstacles
+   * that don't block sight (a sarcophagus can be seen over). Its floor itself while it has none.
+   */
+  sight: ReadonlySet<string>;
   droppedItems: Record<string, Item[]>; // "x,y" → items dropped at that tile
   /** "x,y" → the rift key lying on that tile (a dungeon key: whose key it is), dropped by a boss. One per tile. */
   droppedKeys: Record<string, string>;
@@ -41,6 +50,19 @@ export interface ZoneData {
   droppedGold: Record<string, number>;
   /** "x,y" → the affix shards lying on that tile (data/gear/shards.ts), dropped by enemies: one group a tile, adding up. */
   droppedShards: Record<string, ShardCounts>;
+}
+
+/**
+ * An obstacle in a zone (a decorative object with placement 'obstacle': data/world/decorObjects.ts): its object, the
+ * tiles it fills (`pos` their top-left, `size` [across x, across y]) and the grid direction it faces.
+ */
+export interface ZoneObstacle {
+  id: string;
+  object: string;
+  pos: Pos;
+  size: readonly [number, number];
+  facing: readonly [number, number];
+  tiles: Pos[];
 }
 
 /**
@@ -118,6 +140,20 @@ export interface IslandConfig {
   density: number;
 }
 
+/**
+ * Obstacles: decorative objects standing free in rooms (`objects`: DECOR_OBJECTS ids with placement 'obstacle'; one
+ * without a design yet is never placed), blocking the way (and sight, if theirs does). Like islands they keep a gap
+ * of at least one floor tile from the walls and each other and never cut a way off, and only in rooms, never in a
+ * corridor or in a room that has islands.
+ */
+export interface ObstacleConfig {
+  objects: string[];
+  /** Share of the zone's rooms that get obstacles (0..1). */
+  roomChance: number;
+  /** Share of such a room's floor they fill (0..1), as far as they fit with their gaps; at least one. */
+  density: number;
+}
+
 export interface ZoneConfig {
   minRoomSize: number;
   maxRoomSize: number;
@@ -132,6 +168,8 @@ export interface ZoneConfig {
   layout?: 'rooms' | 'caverns' | 'tunnels';
   /** Wall islands inside rooms (none if absent). */
   islands?: IslandConfig;
+  /** Obstacles inside rooms (none if absent), never in a room with islands. */
+  obstacles?: ObstacleConfig;
   /**
    * The zone's enemy groups: ROOM_FILL_SHARE of the zone's rooms (all but the one the party enters by), and at
    * least MIN_ZONE_GROUPS, get one group each, cycling through this list (reshuffled each time round) until those
@@ -155,6 +193,15 @@ export interface BossZoneConfig {
   bossGroup: EnemyClassData[];
   /** Containers in the boss room (as ZoneConfig.containers), against its walls, far from its door. */
   containers?: string[];
+  /** Obstacles in the boss room (as ZoneConfig.obstacles). */
+  obstacles?: ObstacleConfig;
+}
+
+/** One kind of clutter in a dungeon (DungeonConfig.clutter): which objects, and the share (0..1) of its spots that get one. */
+export interface ClutterConfig {
+  /** DECOR_OBJECTS ids with the matching placement ('wall' or 'ground'); one without a design yet is never drawn. */
+  objects: string[];
+  density: number;
 }
 
 export interface DungeonConfig {
@@ -163,8 +210,13 @@ export interface DungeonConfig {
   height: number;         // applies to all regular zones
   zones: ZoneConfig[];    // regular zones, chained linearly: 0 → 1 → … → boss
   bossZone: BossZoneConfig;
-  floorColor: string;     // hex color for walkable floor tiles
-  wallColor: string;      // hex color for wall/non-floor tiles
+  /** How its floor and walls look (forge/terrain: the 3D floor and walls drawn over its tiles). */
+  terrain: TerrainStyle;
+  /**
+   * Its clutter (decorative objects strewn by the view, forge/terrain/clutter.ts: never in the game's state): against
+   * its full walls, and on its floor. None if absent.
+   */
+  clutter?: { wall?: ClutterConfig; ground?: ClutterConfig };
   doorObject: string;     // INTERACTIVE_OBJECTS id of the doors between zones
   /**
    * The dungeon's color: the Sanctum's rift into it and its keystone are painted in it (data/world/rifts.ts; its
@@ -481,8 +533,9 @@ function allConnected(floors: Set<string>): boolean {
  * island), so islands keep a gap of at least one tile from the walls and each other; an island is kept only if
  * every floor tile of the zone can still be walked to.
  */
-function placeIslands(zone: ZoneData, cfg: IslandConfig): void {
+function placeIslands(zone: ZoneData, cfg: IslandConfig): Set<Room> {
   const { floors, islands } = zone;
+  const filled = new Set<Room>();
   for (const room of zone.rooms) {
     if (!chance(cfg.roomChance)) continue;
     const roomTiles = roomFloor(zone, room);
@@ -511,14 +564,72 @@ function placeIslands(zone: ZoneData, cfg: IslandConfig): void {
         continue;
       }
       for (const k of own) islands.add(k);
+      filled.add(room);
       left -= own.size;
+    }
+  }
+  return filled;
+}
+
+// ─── Obstacles ───────────────────────────────────────────────────────────────
+
+/** The four grid directions an obstacle can face. */
+const FACINGS: readonly (readonly [number, number])[] = [[0, 1], [1, 0], [0, -1], [-1, 0]];
+
+/**
+ * Obstacles in a share of `rooms` (ObstacleConfig), skipping `skip` (rooms with islands): in each, objects picked at
+ * random, each turned a random way, until about `density` of its floor is filled (at least one). Like an island, every
+ * tile of an obstacle needs all 8 tiles around it to be floor (or its own), so obstacles keep a gap from the walls and
+ * each other; one is kept only if every floor tile of the zone can still be walked to. Their tiles leave the floor.
+ */
+function placeObstacles(zone: ZoneData, cfg: ObstacleConfig, rooms: Room[], skip: ReadonlySet<Room>, gen: GenOptions): void {
+  const objects = cfg.objects.map(decorObject).filter(gen.placeable);
+  if (!objects.length) return;
+  const { floors } = zone;
+  for (const room of rooms) {
+    if (skip.has(room) || !chance(cfg.roomChance)) continue;
+    const roomTiles = roomFloor(zone, room);
+    let left = Math.max(1, Math.round(roomTiles.length * cfg.density));
+    for (let tries = 0; left > 0 && tries < 40; tries++) {
+      const object = pick(objects), facing = pick(FACINGS);
+      const across = object.span ?? 1, deep = object.depth ?? 1;
+      // Facing north or south, it is `across` wide along x; facing east or west, along y
+      const size: [number, number] = facing[0] === 0 ? [across, deep] : [deep, across];
+      const tilesAt = (o: Pos): Pos[] => {
+        const out: Pos[] = [];
+        for (let dx = 0; dx < size[0]; dx++) for (let dy = 0; dy < size[1]; dy++) out.push({ x: o.x + dx, y: o.y + dy });
+        return out;
+      };
+      const fitsAt = (o: Pos) => {
+        const own = new Set(tilesAt(o).map(posKey));
+        return tilesAt(o).every(t => floors.has(posKey(t)) && neighbors(t).every(q => floors.has(posKey(q)) || own.has(posKey(q))));
+      };
+      const spots = roomTiles.filter(fitsAt);
+      if (!spots.length) continue;
+      const pos = pick(spots), tiles = tilesAt(pos);
+      for (const t of tiles) floors.delete(posKey(t));
+      if (!allConnected(floors)) {
+        for (const t of tiles) floors.add(posKey(t));
+        continue;
+      }
+      zone.obstacles.push({ id: `obstacle-${zone.id}-${zone.obstacles.length}`, object: object.id, pos, size, facing, tiles });
+      left -= tiles.length;
     }
   }
 }
 
+/**
+ * The tiles sight passes over in a zone: its floor, with the tiles of its obstacles that don't block sight. Set once
+ * the zone is built (generateDungeon); its floor itself while it has none.
+ */
+function sightOf(zone: ZoneData): ReadonlySet<string> {
+  const seeThrough = zone.obstacles.filter(o => !decorObject(o.object).blocksSight).flatMap(o => o.tiles.map(posKey));
+  return seeThrough.length ? new Set([...zone.floors, ...seeThrough]) : zone.floors;
+}
+
 // ─── Regular Zone Generator ──────────────────────────────────────────────────
 
-function generateZone(id: number, width: number, height: number, zoneConfig: ZoneConfig): ZoneData {
+function generateZone(id: number, width: number, height: number, zoneConfig: ZoneConfig, gen: GenOptions): ZoneData {
   const nextId = { value: 0 };
   const root: BSPNode = { x: 1, y: 1, w: width - 2, h: height - 2 };
 
@@ -538,8 +649,9 @@ function generateZone(id: number, width: number, height: number, zoneConfig: Zon
     connectBSP(root, floors, zoneConfig.corridorWidth);
   }
 
-  const zone: ZoneData = { id, width, height, floors, rooms, doors: [], islands: new Set(), droppedItems: {}, droppedKeys: {}, droppedGold: {}, droppedShards: {} };
-  if (zoneConfig.islands) placeIslands(zone, zoneConfig.islands);
+  const zone: ZoneData = { id, width, height, floors, rooms, doors: [], islands: new Set(), obstacles: [], sight: floors, droppedItems: {}, droppedKeys: {}, droppedGold: {}, droppedShards: {} };
+  const islandRooms = zoneConfig.islands ? placeIslands(zone, zoneConfig.islands) : new Set<Room>();
+  if (zoneConfig.obstacles) placeObstacles(zone, zoneConfig.obstacles, rooms, islandRooms, gen);
   return zone;
 }
 
@@ -562,17 +674,16 @@ function getEntryDirection(doorPos: Pos, bossRoom: Room): CardinalDir {
 }
 
 /** Generates just the main boss room. Antechamber is added after door placement. */
-function generateBossZoneMain(id: number, config: BossZoneConfig): { zone: ZoneData; bossRoom: Room } {
+function generateBossZoneMain(id: number, config: BossZoneConfig, gen: GenOptions): { zone: ZoneData; bossRoom: Room } {
   const zoneSize = config.roomSize + BOSS_ZONE_PADDING * 2;
   const half = Math.floor((zoneSize - config.roomSize) / 2);
   const bossRoom: Room = { id: 0, x: half, y: half, w: config.roomSize, h: config.roomSize };
   const floors = new Set<string>();
   if (config.layout === 'caverns') carveCavern(floors, bossRoom);
   else fillRect(floors, bossRoom);
-  return {
-    zone: { id, width: zoneSize, height: zoneSize, floors, rooms: [bossRoom], doors: [], islands: new Set(), droppedItems: {}, droppedKeys: {}, droppedGold: {}, droppedShards: {} },
-    bossRoom,
-  };
+  const zone: ZoneData = { id, width: zoneSize, height: zoneSize, floors, rooms: [bossRoom], doors: [], islands: new Set(), obstacles: [], sight: floors, droppedItems: {}, droppedKeys: {}, droppedGold: {}, droppedShards: {} };
+  if (config.obstacles) placeObstacles(zone, config.obstacles, [bossRoom], new Set(), gen);
+  return { zone, bossRoom };
 }
 
 /**
@@ -615,7 +726,7 @@ function addBossAntechamber(
 // ─── Door Placement ─────────────────────────────────────────────────────────
 
 /**
- * Where a door can go: a wall tile set into the edge of a room's floor (deduplicated), never an island. Along a
+ * Where a door can go: a wall tile set into the edge of a room's floor (deduplicated), never an island or obstacle. Along a
  * rectangular room's sides; around a round room, any wall tile with exactly one floor tile beside it (not
  * diagonally) and wall behind it, so the door is set into the wall, facing into the room.
  */
@@ -623,7 +734,7 @@ function findDoorCandidates(zone: ZoneData): Pos[] {
   const candidates = new Map<string, Pos>();
   const isFloor = (p: Pos) => zone.floors.has(posKey(p));
   const consider = (p: Pos) => {
-    if (p.x >= 0 && p.y >= 0 && p.x < zone.width && p.y < zone.height && !isFloor(p) && !zone.islands.has(posKey(p))) {
+    if (p.x >= 0 && p.y >= 0 && p.x < zone.width && p.y < zone.height && !isFloor(p) && !zone.islands.has(posKey(p)) && !zone.obstacles.some(o => o.tiles.some(t => t.x === p.x && t.y === p.y))) {
       candidates.set(posKey(p), p);
     }
   };
@@ -695,14 +806,14 @@ function linkDoors(zoneA: ZoneData, posA: Pos, zoneB: ZoneData, posB: Pos, nextD
 // ─── Main Generator ─────────────────────────────────────────────────────────
 
 /** A fresh dungeon from its config, its enemies' and loot's level set by the party's (`partyLevel`). */
-function generateDungeon(config: DungeonConfig, partyLevel: number): DungeonData {
+function generateDungeon(config: DungeonConfig, partyLevel: number, gen: GenOptions): DungeonData {
   const numRegularZones = config.zones.length;
   const bossZoneId = numRegularZones;
 
-  const zones: ZoneData[] = config.zones.map((zoneConfig, i) => generateZone(i, config.width, config.height, zoneConfig));
+  const zones: ZoneData[] = config.zones.map((zoneConfig, i) => generateZone(i, config.width, config.height, zoneConfig, gen));
 
   // Generate boss zone (main room only — antechamber added after door placement)
-  const { zone: bossZone, bossRoom } = generateBossZoneMain(bossZoneId, config.bossZone);
+  const { zone: bossZone, bossRoom } = generateBossZoneMain(bossZoneId, config.bossZone, gen);
   zones.push(bossZone);
 
   // The party arrives in the first zone at one end of it, around a rift back to the Sanctum: the rift stands at
@@ -750,6 +861,9 @@ function generateDungeon(config: DungeonConfig, partyLevel: number): DungeonData
     const rooms = boss ? [bossRoom] : others.length ? others : zone.rooms;
     return placeContainers(zone, objects, rooms, entry, rifts.filter(r => r.zoneId === zone.id).map(r => r.pos), zone.id === 0 ? [playerStart] : []);
   });
+
+  // Every zone's floor is final: what sight passes over (its see-through obstacles' tiles added)
+  for (const zone of zones) zone.sight = sightOf(zone);
 
   return { zones, startZoneId: 0, endZoneId: bossZoneId, playerStart, rifts, chests, level: partyLevel };
 }
@@ -1067,14 +1181,22 @@ function spawnDungeonEnemies(dungeon: DungeonData, config: DungeonConfig): Enemy
 const LAYOUT_TRIES = 10;
 
 /**
+ * Options for generating a dungeon: which decorative objects may be placed (default: those with a design,
+ * hasDecorDesign); the forge's Dungeons view also places ones whose design is still a draft.
+ */
+export interface GenOptions {
+  placeable: (o: DecorObjectData) => boolean;
+}
+
+/**
  * A new dungeon and its enemies: its layout (generateDungeon) and its groups (spawnDungeonEnemies). A layout where a
  * regular zone gets fewer than MIN_ZONE_GROUPS (rooms too close for that many groups GROUP_GAP apart) is built
  * again, up to LAYOUT_TRIES times, keeping the one with the most groups in its emptiest zone.
  */
-export function buildDungeon(config: DungeonConfig, partyLevel: number): { dungeon: DungeonData; enemies: EnemyInstance[] } {
+export function buildDungeon(config: DungeonConfig, partyLevel: number, gen: GenOptions = { placeable: hasDecorDesign }): { dungeon: DungeonData; enemies: EnemyInstance[] } {
   let best: { dungeon: DungeonData; enemies: EnemyInstance[]; fewest: number } | null = null;
   for (let t = 0; t < LAYOUT_TRIES && (best?.fewest ?? -1) < MIN_ZONE_GROUPS; t++) {
-    const dungeon = generateDungeon(config, partyLevel);
+    const dungeon = generateDungeon(config, partyLevel, gen);
     const enemies = spawnDungeonEnemies(dungeon, config);
     const fewest = Math.min(...dungeon.zones.filter(z => z.id !== dungeon.endZoneId)
       .map(z => new Set(enemies.filter(e => e.zoneId === z.id).map(e => e.groupId)).size));

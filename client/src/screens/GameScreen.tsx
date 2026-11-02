@@ -94,7 +94,7 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
   const { floatingTexts, spawnFloat, removeFloat, clearFloats } = useFloatingText();
   const [showCharSheet, setShowCharSheet] = useState(false);
   const [dungeon, setDungeon] = useState<DungeonData | null>(null);
-  // Which dungeon the party is in (or last entered): its preset gives the map's colors and doors
+  // Which dungeon the party is in (or last entered): its preset gives the map's look and doors
   const [dungeonKey, setDungeonKey] = useState<DungeonKey>('crypt');
   const preset = DUNGEONS[dungeonKey];
   const [enemyAoePreview, setEnemyAoePreview] = useState<EnemyAoePreview | null>(null);
@@ -217,9 +217,9 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
     return memberUnit(i, m?.characterName, partyStatsRef.current[i], pos,
       { hp: partyHpRef.current[i] ?? 0, buffs: membersRef.current[i]?.buffs ?? [], weapon, passiveTriggers: m && CLASSES[m.selectedClass].passiveTriggers });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
-  /** What executeAction needs of the fight: the map's floor, and a living unit by unitKey. */
+  /** What executeAction needs of the fight: what sight passes over on the map, and a living unit by unitKey. */
   const actionWorld = useCallback((): ActionWorld => ({
-    floors: zoneRef.current?.floors ?? SANCTUM_FLOORS,
+    sight: zoneRef.current?.sight ?? SANCTUM_FLOORS,
     unitByKey: (key) => {
       const i = partyRef.current.findIndex((_, j) => unitKey({ side: 'party', idx: j }) === key);
       if (i >= 0) return (partyHpRef.current[i] ?? 0) > 0 ? partyUnit(i) : undefined;
@@ -403,7 +403,7 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
 
   // ─── Actions, ticks, experience, keys ────────────────────────────────────
 
-  const { unitAims, applyActionOutcome, applyOutcomeRef, cancelPendingOutcomes } = useActionOutcomes({
+  const { unitAims, unitFx, applyActionOutcome, applyOutcomeRef, cancelPendingOutcomes } = useActionOutcomes({
     spawnFloat, updateMembers, partyStatsRef, partyPosRef, partyLevelRef, enemiesRef, dungeonRef, currentZoneRef, setEnemies, setCombat,
   });
   useRoundTick({
@@ -529,8 +529,8 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
    */
   // How many fights have begun (each one plays the dark red pulse around the screen's edge: EdgePulse)
   const [combatStarts, setCombatStarts] = useState(0);
-  const triggerAggro = useCallback((pos: Pos, zoneEnemyList: EnemyInstance[], floors: Set<string>, inCombat: boolean) => {
-    const newlyAggroed = aggroedBy(pos, zoneEnemyList, floors);
+  const triggerAggro = useCallback((pos: Pos, zoneEnemyList: EnemyInstance[], sight: ReadonlySet<string>, inCombat: boolean) => {
+    const newlyAggroed = aggroedBy(pos, zoneEnemyList, sight);
     if (newlyAggroed.length === 0) return;
     const aggroIds = new Set(newlyAggroed.map(e => e.id));
     setEnemies(prev => prev.map(e => aggroIds.has(e.id) ? { ...e, aggroed: true } : e));
@@ -562,7 +562,7 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
     setFollowerPositions(findFollowerSpawns(spawnPos, isFree, 2));
     clearFloats();
 
-    triggerAggro(spawnPos, enemies.filter(e => e.zoneId === door.targetZoneId), targetZone.floors, false);
+    triggerAggro(spawnPos, enemies.filter(e => e.zoneId === door.targetZoneId), targetZone.sight, false);
   }, [zone, dungeon, combat.active, enemies, triggerAggro, clearFloats]);
 
   // ─── Fading between maps ──────────────────────────────────────────────
@@ -607,7 +607,7 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
       lootPickupRef.current(newPos);
     }
 
-    if (zone) triggerAggro(newPos, zoneEnemies, zone.floors, combat.active);
+    if (zone) triggerAggro(newPos, zoneEnemies, zone.sight, combat.active);
   }, [combat.active, moveTargets, isPlayerTurn, activePartyIdx, activeStats.movement, playerPos, zoneEnemies, zone, dungeon, triggerAggro]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ─── End turn ────────────────────────────────────────────────────────────
@@ -641,7 +641,7 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
     // Who it lands on (aimPartyAction); used where it can't be, it is just put away
     const caster = partyUnit(activePartyIdx);
     const aimed = aimPartyAction(action, {
-      casterPos: activePartyPos, at: targetPos, floors: zone?.floors ?? SANCTUM_FLOORS, inCombat: combat.active,
+      casterPos: activePartyPos, at: targetPos, sight: zone?.sight ?? SANCTUM_FLOORS, inCombat: combat.active,
       partySide: () => [...party.flatMap((_, i) => (partyHp[i] ?? 0) > 0 ? [partyUnit(i)] : []), ...zoneSummons.map(creatureUnit)],
       allyAt: (p) => {
         const i = partyPositions.findIndex(q => samePos(q, p));
@@ -745,6 +745,9 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
               activeMoverPos={playerPos}
               party={partyTokens}
               aims={unitAims}
+              fx={unitFx}
+              floatingTexts={floatingTexts}
+              onFloatingTextComplete={removeFloat}
               moveTargets={moveTargets}
               onMove={handleMove}
               rifter={rifter}
@@ -765,6 +768,7 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
               activeMoverPos={combat.active ? activePartyPos : playerPos}
               party={partyTokens}
               aims={unitAims}
+              fx={unitFx}
               moveTargets={moveTargets}
               moveApCost={moveApCost}
               onMove={handleMove}
@@ -792,8 +796,8 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
               partyBuffs={partyBuffs}
               partyHots={partyHots}
               partyDots={partyDots}
-              floorColor={preset.floorColor}
-              wallColor={preset.wallColor}
+              terrain={preset.terrain}
+              clutter={preset.clutter}
               doorObject={preset.doorObject}
               enemyAoePreview={enemyAoePreview}
               enemyTargetKey={enemyTargetKey}

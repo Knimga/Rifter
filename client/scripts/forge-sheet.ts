@@ -12,8 +12,11 @@
 //                       default = the class's starting gear
 //   --anim <name>       designs with that one-time animation (PartAnimation): drawn at its end pose
 //   --tint <name>       tinted models (Rifts & Keys, the active Rifter, the Affix Shard): paint them in a dungeon's riftColor or a shard
-//                       category's color ('shard-offense'; default: the first dungeon),
+//                       category's color ('shard-offense'; default: the first
 //                       dungeon), or a color given as #rrggbb
+//   --terrain <dungeon> a generated zone's floor, walls, doors and scenery instead (a DUNGEONS key: crypt, firelands...);
+//                       --zone <n> (default 0), --seed <n> the layout (default 1), --tile <px> (default 28),
+//                       --crop x0,y0,x1,y1 only those tiles, close up (with a bigger --tile)
 import { writeFileSync } from 'node:fs';
 import { ITEM_GROUND_PITCH, SHEET_SHADING, itemRestLift, keyLightDir, layItem, lootYaw } from '../src/forge/core/stage-config';
 import { GAME_CAMERA, viewProject, type ViewAngles } from '../src/viewEngine/camera';
@@ -28,7 +31,17 @@ import { posedHalos, posedPositions } from '../src/forge/core/animate';
 import { isTinted, tintModel } from '../src/forge/core/tint';
 import type { RGB } from '../src/forge/core/vec';
 import { TINT_CHOICES, tintChoice } from '../src/forge/tintChoices';
-import { designTiles } from '../src/forge/dataRefs';
+import { dataEntry, designTiles } from '../src/forge/dataRefs';
+import { Mesh, bake } from '../src/forge/core/mesh';
+import { box } from '../src/forge/core/primitives';
+import { buildTerrain } from '../src/forge/terrain/build';
+import { mulberry32 } from '../src/forge/core/rng';
+import { facingOpenSide } from '../src/forge/core/facing';
+import { buildInstance } from '../src/forge/core/link';
+import { sceneryObjects, zoneGround } from '../src/components/zoneScenery';
+import { DUNGEONS } from '../src/data/world/dungeons';
+import { buildDungeon } from '../src/data/world/dungeonGen';
+import { interactiveObjectModel } from '../src/data/world/interactiveObjects';
 
 const args = process.argv.slice(2);
 const flag = (n: string) => args.includes(`--${n}`);
@@ -53,43 +66,16 @@ const out = opt('out', 'forge-sheet.png');
 const SS = 2; // supersampling
 const BG = [30, 28, 40], GROUND = [58, 56, 70], GROUND_EDGE = [110, 108, 128];
 
-function renderCell(model: Model, design: Design, yaw: number): Uint8Array {
-  const S = CELL * SS;
-  const color = new Uint8Array(S * S * 3);
-  const zbuf = new Float32Array(S * S).fill(-Infinity);
-  for (let i = 0; i < S * S; i++) color.set(BG, i * 3);
-
-  const ce = Math.cos(elev), se = Math.sin(elev), cy = Math.cos(yaw), sy = Math.sin(yaw);
-  // world-ish space: rotate model by yaw about Y (matches rotY in vec.ts)
-  // Items lie on the floor as loot (flat and face up unless the design sets its own pitch, turned like
-  // loot in the game: lootYaw), then everything turns by yaw.
-  const isItem = design.fit.kind === 'item';
-  const pitch = model.groundPitch ?? ITEM_GROUND_PITCH;
-  const roll = model.groundRoll ?? 0;
-  const lift = isItem ? itemRestLift(model.mesh.positions, pitch, roll) : 0;
-  const place = (p: number[]): number[] => (isItem ? rotY(layItem([p[0], p[1], p[2]], pitch, lift, roll), lootYaw(VIEW)) : p);
-  const rot = (q: number[]): [number, number, number] => { const p = place(q); return [p[0] * cy + p[2] * sy, p[1], -p[0] * sy + p[2] * cy]; };
-  // The game's projection (viewProject). Returns [x, up, depth].
-  const view = (p: number[]): [number, number, number] => {
-    const [x, down, depth] = viewProject([p[0], p[1], p[2]], VIEW);
-    return [x, -down, depth];
-  };
-
-  const standing = design.fit.kind === 'standing';
-  // The square it stands on in game: 1 tile, or a large creature's 2×2 (designTiles)
-  const square = designTiles(design);
-  const tilesAcross = standing ? 2.5 * square : 1.7; // how many tiles fit across one cell
-  const k = S / tilesAcross;
-  const cxp = S / 2;
-  const cyp = standing ? S * 0.68 : S * 0.5;
-  const toScreen = (v: [number, number, number]) => [cxp + v[0] * k, cyp - v[1] * k, v[2]] as const;
-  const groundY = 0; // standing models' feet and flat-laid items both rest on y = 0
-
+/** A W x H image (BG) with a depth buffer, and a triangle filler for it (screen px, larger depth = nearer). */
+function raster(W: number, H: number) {
+  const color = new Uint8Array(W * H * 3);
+  const zbuf = new Float32Array(W * H).fill(-Infinity);
+  for (let i = 0; i < W * H; i++) color.set(BG, i * 3);
   /** `rgb`: one color, or one per corner (a, b, c) blended across the triangle. */
   const fillTri = (a: readonly number[], b: readonly number[], c: readonly number[], rgb: number[] | number[][], alpha: number, writeZ: boolean) => {
     const corners = Array.isArray(rgb[0]) ? (rgb as number[][]) : null;
-    const minX = Math.max(0, Math.floor(Math.min(a[0], b[0], c[0]))), maxX = Math.min(S - 1, Math.ceil(Math.max(a[0], b[0], c[0])));
-    const minY = Math.max(0, Math.floor(Math.min(a[1], b[1], c[1]))), maxY = Math.min(S - 1, Math.ceil(Math.max(a[1], b[1], c[1])));
+    const minX = Math.max(0, Math.floor(Math.min(a[0], b[0], c[0]))), maxX = Math.min(W - 1, Math.ceil(Math.max(a[0], b[0], c[0])));
+    const minY = Math.max(0, Math.floor(Math.min(a[1], b[1], c[1]))), maxY = Math.min(H - 1, Math.ceil(Math.max(a[1], b[1], c[1])));
     const d = (b[1] - c[1]) * (a[0] - c[0]) + (c[0] - b[0]) * (a[1] - c[1]);
     if (Math.abs(d) < 1e-9) return;
     for (let y = minY; y <= maxY; y++)
@@ -100,7 +86,7 @@ function renderCell(model: Model, design: Design, yaw: number): Uint8Array {
         const w2 = 1 - w0 - w1;
         if (w0 < 0 || w1 < 0 || w2 < 0) continue;
         const z = w0 * a[2] + w1 * b[2] + w2 * c[2];
-        const i = y * S + x;
+        const i = y * W + x;
         if (z <= zbuf[i]) continue;
         if (writeZ) zbuf[i] = z;
         for (let ch = 0; ch < 3; ch++) {
@@ -109,6 +95,65 @@ function renderCell(model: Model, design: Design, yaw: number): Uint8Array {
         }
       }
   };
+
+  return { color, zbuf, fillTri };
+}
+
+/**
+ * Triangle `t` of a mesh, lit like the game (flat, the key light plus ambient; emissive faces unlit): each corner's
+ * color, given its corners `P` placed in the world. Null when it faces away from the camera (opaque faces only).
+ */
+function shadeTri(mesh: Model['mesh'], t: number, P: number[][]): number[][] | null {
+  const { colors, emissive, alpha } = mesh;
+  const e1 = [P[1][0] - P[0][0], P[1][1] - P[0][1], P[1][2] - P[0][2]];
+  const e2 = [P[2][0] - P[0][0], P[2][1] - P[0][1], P[2][2] - P[0][2]];
+  let n = [e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]];
+  const nl = Math.hypot(n[0], n[1], n[2]) || 1;
+  n = n.map((v) => v / nl);
+  // back-face cull (view direction toward camera in world space)
+  const toCam = [-Math.sin(viewYaw) * Math.cos(elev), Math.sin(elev), Math.cos(viewYaw) * Math.cos(elev)];
+  if (n[0] * toCam[0] + n[1] * toCam[1] + n[2] * toCam[2] <= 0 && alpha[t] >= 0.99) return null;
+  const L = keyLightDir(VIEW);
+  const diff = Math.max(0, (n[0] * L[0] + n[1] * L[1] + n[2] * L[2]) / Math.hypot(...L));
+  const sh = SHEET_SHADING.ambient + SHEET_SHADING.key * diff;
+  const e = emissive[t];
+  // Each corner's color, shaded (usually all three are the same; a blended face differs per corner)
+  return [0, 1, 2].map((v) => [0, 1, 2].map((ch) => {
+    const base = colors[t * 9 + v * 3 + ch] * 255;
+    return Math.min(255, base * sh * (1 - e) + Math.min(255, base * 1.12) * e);
+  }));
+}
+
+/** The game's projection (viewProject), as [x, up, depth]. */
+const view = (p: number[]): [number, number, number] => {
+  const [x, down, depth] = viewProject([p[0], p[1], p[2]], VIEW);
+  return [x, -down, depth];
+};
+
+function renderCell(model: Model, design: Design, yaw: number): Uint8Array {
+  const S = CELL * SS;
+  const { color, zbuf, fillTri } = raster(S, S);
+
+  const cy = Math.cos(yaw), sy = Math.sin(yaw);
+  // world-ish space: rotate model by yaw about Y (matches rotY in vec.ts)
+  // Items lie on the floor as loot (flat and face up unless the design sets its own pitch, turned like
+  // loot in the game: lootYaw), then everything turns by yaw.
+  const isItem = design.fit.kind === 'item';
+  const pitch = model.groundPitch ?? ITEM_GROUND_PITCH;
+  const roll = model.groundRoll ?? 0;
+  const lift = isItem ? itemRestLift(model.mesh.positions, pitch, roll) : 0;
+  const place = (p: number[]): number[] => (isItem ? rotY(layItem([p[0], p[1], p[2]], pitch, lift, roll), lootYaw(VIEW)) : p);
+  const rot = (q: number[]): [number, number, number] => { const p = place(q); return [p[0] * cy + p[2] * sy, p[1], -p[0] * sy + p[2] * cy]; };
+
+  const standing = design.fit.kind !== 'item'; // standing and placed models: framed upright, on their tile
+  // The square it stands on in game: 1 tile, or a large creature's 2×2 (designTiles)
+  const square = designTiles(design);
+  const tilesAcross = standing ? 2.5 * square : 1.7; // how many tiles fit across one cell
+  const k = S / tilesAcross;
+  const cxp = S / 2;
+  const cyp = standing ? S * 0.68 : S * 0.5;
+  const toScreen = (v: [number, number, number]) => [cxp + v[0] * k, cyp - v[1] * k, v[2]] as const;
+  const groundY = 0; // standing models' feet and flat-laid items both rest on y = 0
 
   // The ground tiles it stands on (1x1, or a large creature's 2x2) as a scale reference (and a hint of where the
   // shadow/footprint sits), centered on its feet
@@ -128,9 +173,20 @@ function renderCell(model: Model, design: Design, yaw: number): Uint8Array {
     }
   }
 
-  const L = keyLightDir(VIEW);
-  const Ln = Math.hypot(...L);
-  const { colors, emissive, alpha, triCount } = model.mesh;
+  // Wall clutter: the wall behind it (its tile's back edge, low wall height), as the forge page shows it
+  if (dataEntry(design.source)?.wall) {
+    const wall = new Mesh(mulberry32(1));
+    box(wall, [0, 0.75, -0.65], [1.6, 1.5, 0.3], [74, 71, 86], 0, { j: 0 });
+    const w = bake(wall);
+    for (let t = 0; t < w.triCount; t++) {
+      const P = [0, 1, 2].map((v) => rot([w.positions[t * 9 + v * 3], w.positions[t * 9 + v * 3 + 1], w.positions[t * 9 + v * 3 + 2]]));
+      const rgb = shadeTri(w, t, P);
+      const [a, b, c] = P.map((q) => toScreen(view(q)));
+      if (rgb) fillTri(a, b, c, rgb, 1, true);
+    }
+  }
+
+  const { alpha, triCount } = model.mesh;
   // --anim: its animated parts at the end pose
   const anim = opt('anim', '');
   const positions = anim ? posedPositions(model, { [anim]: 1 }) : model.mesh.positions;
@@ -142,22 +198,8 @@ function renderCell(model: Model, design: Design, yaw: number): Uint8Array {
       const o = t * 9 + v * 3;
       return rot([positions[o], positions[o + 1], positions[o + 2]]);
     });
-    const e1 = [P[1][0] - P[0][0], P[1][1] - P[0][1], P[1][2] - P[0][2]];
-    const e2 = [P[2][0] - P[0][0], P[2][1] - P[0][1], P[2][2] - P[0][2]];
-    let n = [e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]];
-    const nl = Math.hypot(n[0], n[1], n[2]) || 1;
-    n = n.map((v) => v / nl);
-    // back-face cull (view direction toward camera in world space)
-    const toCam = [-Math.sin(viewYaw) * ce, se, Math.cos(viewYaw) * ce];
-    if (n[0] * toCam[0] + n[1] * toCam[1] + n[2] * toCam[2] <= 0 && alpha[t] >= 0.99) return;
-    const diff = Math.max(0, (n[0] * L[0] + n[1] * L[1] + n[2] * L[2]) / Ln);
-    const sh = SHEET_SHADING.ambient + SHEET_SHADING.key * diff;
-    const e = emissive[t];
-    // Each corner's color, shaded (usually all three are the same; a blended face differs per corner)
-    const rgb = [0, 1, 2].map((v) => [0, 1, 2].map((ch) => {
-      const base = colors[t * 9 + v * 3 + ch] * 255;
-      return Math.min(255, base * sh * (1 - e) + Math.min(255, base * 1.12) * e);
-    }));
+    const rgb = shadeTri(model.mesh, t, P);
+    if (!rgb) return;
     const [a, b, c] = P.map((p) => toScreen(view(p)));
     fillTri(a, b, c, rgb, alpha[t], writeZ);
   };
@@ -178,16 +220,72 @@ function renderCell(model: Model, design: Design, yaw: number): Uint8Array {
       }
   }
 
-  // downsample
-  const outc = new Uint8Array(CELL * CELL * 3);
-  for (let y = 0; y < CELL; y++)
-    for (let x = 0; x < CELL; x++)
+  return downsample(color, CELL, CELL);
+}
+
+/** A supersampled image (SS times w x h) brought down to w x h. */
+function downsample(color: Uint8Array, w: number, h: number): Uint8Array {
+  const out = new Uint8Array(w * h * 3), W = w * SS;
+  for (let y = 0; y < h; y++)
+    for (let x = 0; x < w; x++)
       for (let ch = 0; ch < 3; ch++) {
         let s = 0;
-        for (let dy = 0; dy < SS; dy++) for (let dx = 0; dx < SS; dx++) s += color[((y * SS + dy) * S + x * SS + dx) * 3 + ch];
-        outc[(y * CELL + x) * 3 + ch] = s / (SS * SS);
+        for (let dy = 0; dy < SS; dy++) for (let dx = 0; dx < SS; dx++) s += color[((y * SS + dy) * W + x * SS + dx) * 3 + ch];
+        out[(y * w + x) * 3 + ch] = s / (SS * SS);
       }
-  return outc;
+  return out;
+}
+
+// --terrain <dungeon>: one generated zone of a dungeon (a DUNGEONS key) as the game draws it: its 3D floor and walls
+// (forge/terrain) with its doors, obstacles and clutter (approved designs), the whole zone in one image
+const terrainKey = opt('terrain', '');
+if (terrainKey) {
+  const config = DUNGEONS[terrainKey];
+  if (!config) {
+    console.error(`no dungeon '${terrainKey}' (one of: ${Object.keys(DUNGEONS).join(', ')})`);
+    process.exit(1);
+  }
+  // Generation draws on Math.random: seeded, so a --seed always gives the same zone
+  Math.random = mulberry32(Number(opt('seed', '1')));
+  const { dungeon } = buildDungeon(config, 1);
+  const zone = dungeon.zones[Math.min(Number(opt('zone', '0')), dungeon.zones.length - 1)];
+  const terrain = buildTerrain({ cols: zone.width, rows: zone.height, floors: zoneGround(zone), doors: zone.doors.map((d) => d.pos), style: config.terrain, seed: zone.id });
+  const approved = Object.fromEntries((await loadDesigns()).map((l) => [l.design.id, l.design]));
+  // Its doors (each facing the floor it opens onto, as on the map), then its obstacles and clutter (zoneScenery)
+  const isFloor = (p: { x: number; y: number }) => zone.floors.has(`${p.x},${p.y}`);
+  const objects = [
+    ...zone.doors.map((d) => ({ id: d.id, link: interactiveObjectModel(config.doorObject), pos: d.pos, facing: facingOpenSide(d.pos, isFloor), size: undefined, look: undefined })),
+    ...sceneryObjects(zone, config.clutter, [...dungeon.rifts, ...dungeon.chests].filter((o) => o.zoneId === zone.id).map((o) => o.pos)),
+  ].flatMap((o) => {
+    const design = approved[o.link];
+    if (!design) return [];
+    const [w, h] = o.size ?? [1, 1];
+    return [{ center: [o.pos.x + w / 2, o.pos.y + h / 2], yaw: o.facing, model: buildInstance(design, o.look ?? o.id) }];
+  });
+
+  const T = Number(opt('tile', '28')) * SS;
+  // The whole zone, or (--crop x0,y0,x1,y1, in tiles) a part of it close up
+  const [cx0, cy0, cx1, cy1] = opt('crop', '') ? opt('crop', '').split(',').map(Number) : [0, 0, zone.width, zone.height];
+  const corners = [[cx0, 0, cy0], [cx1, 0, cy0], [cx0, 0, cy1], [cx1, 0, cy1], [cx1, 2.5, cy0]].map((c) => view(c));
+  const minX = Math.min(...corners.map((c) => c[0])), maxX = Math.max(...corners.map((c) => c[0]));
+  const minY = Math.min(...corners.map((c) => c[1])), maxY = Math.max(...corners.map((c) => c[1]));
+  const w = Math.ceil(((maxX - minX) * T) / SS), h = Math.ceil(((maxY - minY) * T) / SS);
+  const { color, fillTri } = raster(w * SS, h * SS);
+  const toScreen = (v: [number, number, number]) => [(v[0] - minX) * T, (maxY - v[1]) * T, v[2]];
+  const drawModel = (model: Model, place: (p: number[]) => number[] = (p) => p) => {
+    const { positions, alpha, triCount } = model.mesh;
+    for (let t = 0; t < triCount; t++) {
+      const P = [0, 1, 2].map((v) => place([positions[t * 9 + v * 3], positions[t * 9 + v * 3 + 1], positions[t * 9 + v * 3 + 2]]));
+      const rgb = shadeTri(model.mesh, t, P);
+      if (rgb) fillTri(...(P.map((q) => toScreen(view(q))) as [number[], number[], number[]]), rgb, alpha[t], true);
+    }
+  };
+  drawModel(terrain.floor);
+  drawModel(terrain.walls);
+  for (const o of objects) drawModel(o.model, (q) => { const r = rotY([q[0], q[1], q[2]], o.yaw); return [r[0] + o.center[0], r[1], r[2] + o.center[1]]; });
+  writeFileSync(out, encodePNG(w, h, downsample(color, w, h)));
+  console.log(`wrote ${out} (${w}x${h}): ${config.name}, zone ${zone.id} (${zone.width}x${zone.height}), floor ${terrain.floor.mesh.triCount} tris, walls ${terrain.walls.mesh.triCount} tris`);
+  process.exit(0);
 }
 
 const loaded = (await loadDesigns({ drafts: flag('drafts') || flag('only-drafts') })).filter(

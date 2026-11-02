@@ -34,7 +34,7 @@ export interface Shift {
   pending: boolean;
 }
 
-export type StatShift = (stat: BuffableStat | null, get: (s: Stats) => number) => Shift;
+export type StatShift = (stat: BuffableStat, get: (s: Stats) => number) => Shift;
 
 /**
  * Who is shown and what they wear (CharacterSheet): a value that changes when the same member's gear does pulses
@@ -180,9 +180,9 @@ export default function StatsPanel({ stats, hp, mp, shift }: { stats: Stats; hp:
         {/* Vitals */}
         <div className="rf-stcard flex-auto flex items-center gap-4">
           <Vital label="HP" cur={hp} max={stats.hp} fill="var(--rift-hp-bar)" regen={stats.hpRegen}
-            maxShift={shift(null, s => s.hp)} regenShift={shift('hpRegen', s => s.hpRegen)} />
+            maxShift={shift('hp', s => s.hp)} regenShift={shift('hpRegen', s => s.hpRegen)} />
           <Vital label="MP" cur={mp} max={stats.mp} fill="var(--rift-mp-bar)" regen={stats.mpRegen}
-            maxShift={shift(null, s => s.mp)} regenShift={shift('mpRegen', s => s.mpRegen)} />
+            maxShift={shift('mp', s => s.mp)} regenShift={shift('mpRegen', s => s.mpRegen)} />
         </div>
 
         {/* Defense, Avoidance */}

@@ -235,7 +235,7 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
     highAttributes: ['strength', 'finesse'],
     lowAttributes: ['mind', 'spirit'],
     baseHp: 15,
-    baseArmor: 14,
+    baseArmor: 15,
     resistances: { shadow: 20 },
     passives: {
       glancingBlow: { name: 'Boney', flat: 10 }
@@ -263,7 +263,7 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
     highAttributes: ['toughness', 'strength'],
     lowAttributes: ['finesse', 'mind'],
     baseHp: 20,
-    baseArmor: 10,
+    baseArmor: 12,
     passives: {
       hpRegen: { name: 'Regeneration', flat: 1 }
     },
@@ -302,8 +302,8 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
     attributes: { mind: 4, spirit: 4 },
     highAttributes: ['mind', 'spirit'],
     lowAttributes: ['strength', 'toughness'],
-    baseHp: 15,
-    baseArmor: 9,
+    baseHp: 20,
+    baseArmor: 10,
     resistances: { shadow: 20, ice: 20 },
     passives: {
       dodge: { name: 'Ethereal', flat: 10 },
@@ -346,11 +346,11 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
   {
     id: 'wight',
     name: 'Wight',
-    attributes: { mind: 4, strength: 4 },
+    attributes: { mind: 4, strength: 4, toughness: 2 },
     highAttributes: ['mind', 'strength'],
     lowAttributes: ['spirit', 'finesse'],
-    baseHp: 25,
-    baseArmor: 19,
+    baseHp: 30,
+    baseArmor: 25,
     resistances: { shadow: 20, ice: 20 },
     passives: {
       glancingBlow: { name: 'Armored', flat: 10 },

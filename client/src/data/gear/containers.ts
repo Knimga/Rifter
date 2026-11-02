@@ -36,19 +36,22 @@ export const CONTAINER_LOOT: Record<string, ContainerLoot> = {
     items: [3, 5],
     // Every rarity, most of it Quality and Superior: 1 in 10 items Common, 1 in 10 Exquisite
     rarityWeights: { Common: 10, Quality: 30, Superior: 30, Rare: 20, Exquisite: 10 },
-    dropsGold: 2
+    dropsGold: 2,
+    shardChance: 0.5
   },
   'solid-treasure-chest': {
     items: [4, 6],
     // Skewed well toward the rare end: never Common, about 1 in 7 items Quality, 1 in 7 Exquisite
     rarityWeights: { Common: 0, Quality: 15, Superior: 35, Rare: 35, Exquisite: 15 },
     dropsGold: 2,
-    goldBonus: 50
+    goldBonus: 50,
+    shardChance: 1
   },
   'dead-adventurer': {
     items: [2, 4],
     rarityWeights: { Common: 20, Quality: 30, Superior: 30, Rare: 15, Exquisite: 5 },
-    dropsGold: 1
+    dropsGold: 1,
+    shardChance: 0.2
   }
 };
 

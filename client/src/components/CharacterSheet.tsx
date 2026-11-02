@@ -223,23 +223,28 @@ export default function CharacterSheet({ party, partyHp, partyMp, partyStats, pa
   // them. Green: raised above the base by an affix, implicit or effect on that stat itself (not through another:
   // Subtlety on gear raises crit too, but only Subtlety is green); red: an effect is lowering it now, even if it is
   // still above its base.
-  // The gear's share is what it adds over the base, the effects' what they add over that. Yellow: the placed,
-  // unconfirmed points change it (from the member's confirmed stats).
-  const baseStats = recomputeStats(memberStatInput(shown, stats.level), []);
-  const geared = memberStats(shown, stats.level, []);
+  // The tooltip's shares count only bonuses on the stat itself: the gear's, its affixes and implicits on that stat (whole
+  // numbers: +Block counts toward Block, Evasion or Finesse on gear doesn't, though they raise it through their formulas);
+  // the effects', the buffs and debuffs on that stat over that. Yellow: the placed, unconfirmed points change it (from
+  // the member's confirmed stats).
+  const statInput = memberStatInput(shown, stats.level);
+  const baseStats = recomputeStats(statInput, []);
   const unlowered = memberStats(shown, stats.level, buffs.filter(b => b.amount >= 0 && (b.percent ?? 0) >= 0));
-  const raised = new Set([...getGearBuffs(gear), ...buffs].filter(b => b.amount > 0 || (b.percent ?? 0) > 0).map(b => b.stat));
+  const gearBuffs = getGearBuffs(gear);
+  const raised = new Set([...gearBuffs, ...buffs].filter(b => b.amount > 0 || (b.percent ?? 0) > 0).map(b => b.stat));
   /**
-   * How a stat stands: `dir` −1 an effect lowers it, 1 gear or an effect on it (`stat`; none for HP and MP, which
-   * only attributes raise) raises it above its base, 0 neither (Val's colors).
+   * How a stat stands: `dir` −1 an effect lowers it, 1 gear or an effect on it (`stat`) raises it above its base, 0
+   * neither (Val's colors); and what the gear and the effects on it add (its tooltip).
    */
   const shift: StatShift = (stat, get) => {
     const value = get(stats);
+    const gearOnly = get(recomputeStats(statInput, gearBuffs.filter(b => b.stat === stat)));
+    const withEffects = get(recomputeStats(statInput, [...gearBuffs, ...buffs].filter(b => b.stat === stat)));
     return {
       value,
-      dir: value < get(unlowered) ? -1 : stat && raised.has(stat) && value > get(baseStats) ? 1 : 0,
-      gear: get(geared) - get(baseStats),
-      effects: value - get(geared),
+      dir: value < get(unlowered) ? -1 : raised.has(stat) && value > get(baseStats) ? 1 : 0,
+      gear: gearOnly - get(baseStats),
+      effects: withEffects - gearOnly,
       pending: placed && value !== get(partyStats[selectedIdx]),
     };
   };

@@ -20,7 +20,7 @@ const design: Design = {
   source: { table: 'enemies', key: 'skeleton' },   // the one data entry this is the model for
   category: 'creature',          // creature | summon | character | weapon | armor | offhand | jewelry | interactive | decor | loot | rift | npc
   label: 'Skeleton',             // the entry's display name exactly
-  fit: { kind: 'standing', height: 1.12, maxRadius: 0.54 },   // or { kind: 'item', size: 0.8 }
+  fit: { kind: 'standing', height: 1.12, maxRadius: 0.54 },   // or { kind: 'item', size: 0.8 }, or { kind: 'placed', height } (dungeon scenery)
   budget: 900,                   // max triangles
   build(c) { /* draw into c.mesh */ return 'Frost-Eyed Skeleton'; },
 };
@@ -77,6 +77,29 @@ Interactable things on the map that aren't units or loot: doors, chests, the Rif
 ## Decorative objects (category `decor`, forge section "Decorative Objects")
 Static things that fill tiles on the map: furniture, shelves, crates, statues. Nobody walks onto or through them, nobody uses them, and they never move or animate (no `motion`, no `animations`). Their data entries are `DECOR_OBJECTS` in `data/world/decorObjects.ts` (`source: { table: 'decorObjects', key }`; identity from `decorEntry` in `designs/_decor.ts`). A map places them by id, each on its middle tile facing its own way (`SANCTUM.decor`: `{ id, pos, facing }`). They stand on a tile (`fit.kind: 'standing'`), built facing +z (their front). One spanning several tiles side by side (`span` on its entry, default 1; its tiles are `spanTiles`) is built like the Rifter: in tile units along x, its `feet` anchor at the middle tile's center. With an even span the placed tile is the one right of the middle, so its other tiles run to the model's left (+x): a 2-tile object stands on x = 0 and x = 1 (the Merchant's Cart). Build it at its true size (a `fit.maxRadius` equal to its reach from the feet, a `fit.height` that never binds). Gear shown on one is never redrawn: `embed` the item's own design at the size a character holds it (`HELD_LENGTH` × `CHARACTER_HEIGHT`, measured along its length with `extentAlong`), as the Weapon Rack does with its swords, axes and bows. Things the party can use are interactive objects instead.
 
+### Dungeon scenery (decorative objects a dungeon places)
+A decorative object with a `placement` on its entry is placed by the dungeon itself, in three kinds:
+- **`wall`** (wall clutter: cobwebs, torches, scratches): against a *full* wall, north or east of a floor tile (never on a
+  cut-down stub, a door, the rift or a container); the tile stays walkable. Purely visual.
+- **`ground`** (ground clutter: bones, rubble, mushrooms): lying on a floor tile; never blocks movement or sight. Purely visual.
+- **`obstacle`**: fills `span` x `depth` tiles, standing free in a room (a tile's gap from walls, doors and other
+  obstacles, never cutting a way off, never in a corridor or a room with islands); blocks movement, and sight if
+  `blocksSight` (`ZoneData.sight`: the tiles sight passes over, used by every line-of-sight rule).
+
+Which ones, and how many: `DungeonConfig.clutter` (`wall`, `ground`: objects and a density) and `ZoneConfig.obstacles` /
+`BossZoneConfig.obstacles` (objects, `roomChance`, `density`). Obstacles are game state, placed by generation
+(`placeObstacles`, their tiles leaving the floor); clutter is the view's, strewn at draw time (`forge/terrain/clutter.ts`,
+seeded by the zone, `components/zoneScenery.ts`), never in the game's state. Clutter shares a few looks per design
+(`MapObject.look`, `CLUTTER_LOOKS`), so a seed varies the look as for creatures.
+- **Built in place** (`fit: { kind: 'placed', height }`): at true size in tiles, never scaled or moved. Its tile's center
+  at x = z = 0, the floor at y = 0. Wall clutter stands against the wall plane **z = -0.5** (the tile's back edge), facing
+  +z, within the low wall's 1.5 tiles; it may lie on the wall itself (stains, scratches a hair off it). An obstacle fills
+  its footprint centered on the origin, `span` along x, `depth` along z (its front toward +z). `forge:lint` checks it
+  stays on its footprint and on the floor (a hair into the floor, or into the wall, is allowed).
+- **Blank until approved:** a new entry's `model` stays `''` until its design is approved (as jewelry): it is never placed
+  (a draft obstacle can't block the way unseen), and starts appearing once its `model` is set. The forge's Dungeons
+  view places drafts too (its **Drafts** toggle).
+
 ## Loot (category `loot`, forge section "Loot")
 Things lying on the floor that the party picks up but that aren't items (they never go in the inventory): for now, the gold enemies drop. Their data entries are `LOOT` in `data/gear/loot.ts` (`source: { table: 'loot', key }`; identity from `lootEntry` in `designs/_loot.ts`). Each lies on its tile (`fit.kind: 'standing'`, built at its true size) and never moves; it is seeded by the pile it draws (`gold-<zone>-<tile>`), so each pile looks its own (the Gold Coins' scatter). Keep it low and spread toward the tile's edges: an item dropped on the same tile lies over it. No rarity glow, and no `motion` or `animations` (loot never animates). In a slot (a chest's gold, `GoldCell`) its icon is the same model seen from above at an angle (`LOOT_ICON_CAMERA`, chosen by `iconCameraFor` for every `loot.` design, in the game and the forge's icon view alike), built with `ITEM_SEED`.
 
@@ -89,6 +112,14 @@ Two **tinted models**: the Rift and the Keystone (`data/world/rifts.ts`, `source
 - A tinted design marks what takes the tint with a `Tone` (`[bright, deep]`: how much of the tint and of its deep shade, `tintDeep` in `core/tint.ts`): faces with `FaceOpts.tint` (one Tone, or one per corner to blend like `vc`), halos with `m.halo(p, r, color, tone)`, a floor pool with `floorGlow(..., segments, tone)`. The Tone is added to the face's own color (usually black; the rift's void keeps its own). `TINT` = [1, 0], `TINT_DEEP` = [0, 1].
 - The model never depends on the color: it builds, caches and lints like any other. The color is applied when it is drawn, `tintModel(model, color, parts?)` (`parts`: only those parts, so one model can hold two tinted things in two colors: the active Rifter's keystone and its rift, `MapObject.partTints`) (the game: `MapObject.tint` in `ModelLayer`; the forge page and `forge:sheet --tint <dungeon|#rrggbb>`). Drawn without it, its tinted parts stay black.
 - In `/dev/forge` the section has a dungeon menu (every dungeon's `riftColor`, live from `dungeons.ts`) and a custom color picker that prints the `riftColor` line to paste into a new dungeon.
+
+## Terrain (a map's floor and walls, forge section "Dungeons")
+Not designs: one builder, `buildTerrain` (`forge/terrain/build.ts`), draws every map's 3D floor and walls from its tiles and its look (`TerrainStyle`, `forge/terrain/types.ts`): a dungeon zone's from `DungeonConfig.terrain` (`data/world/dungeons.ts`), the Sanctum's from `SANCTUM_TERRAIN` (`data/world/sanctum.ts`). A new dungeon needs only its style, never code.
+- **Style:** `floor` (`color`, `seam`, `pattern`: `'flagstones'` 1 to 4 laid stones a tile, `'cyclopean'` great fitted stones like a cyclopean wall's (laid across the tiles), `'rough'` uneven cave facets (4×4 a tile), or `'rough-fine'` the same in smaller facets (8×8); `bumpiness` 0..1, always small: units stand on it), `walls` (`color`: its top is derived from it, almost black in the same hue, never veined; `height`: `'low'` or `'high'` full walls; `finish`: `'masonry'` coursed blocks, `'cyclopean'` huge irregular stones of many sizes fitted together (laid along the wall, not in tiles, so a stone carries on past a tile's edge), or `'rough'` bulging rock whose height varies tile to tile; `bumpiness` 0..1), optional `veins` (`color`, `share` of the surface, `pattern`: `'cracks'` thin winding lines or `'patches'`; `glow` lights them from within, like lava). Flagstones show veins in their joints.
+- **Walls:** every non-floor tile with a floor tile among its 8 neighbours. **Cutaway:** a wall with a floor tile north, east or north-east of it (between the camera and that floor: a room's south and west walls, walls between rooms, islands) is a stub, `STUB_HEIGHT` (0.2); the rest rise to their full height, `walls.height` (`WALL_HEIGHTS`: `'low'` 1.5, above the 1.4-tall doors, or `'high'` 2.25). Corners need no special case: neighbouring tiles meet and turn.
+- **Doors** are openings: the door model (with its own frame) stands in the tile, thin jambs close its sides, and a lintel fills above it in a full wall.
+- **Seams:** only faces bordering a lower neighbour are built, and every shape comes from world-position noise, so tiles join without seams. Seeded by the zone's id: a zone always looks the same.
+- **Drawn:** the walls with the units (`MapModelRenderer.setTerrain`: they hide what stands behind them and take the fog shader); the floor on its own canvas under the map's HTML floor (`Board`'s `under` slot), so highlights, glows and the move line lie on it, fogged by the fog sheet.
 
 ## Names
 `build` returns a display name (the forge shows it on hover): normally the label, or a variant name for a creature ("Frost-Eyed Skeleton").

@@ -14,7 +14,6 @@ export interface FloatingText {
   gridY: number;
   text: string;
   color: string;
-  offsetX: number;
   icon?: FloatIcon;
   look?: FloatLook;
 }
@@ -37,7 +36,7 @@ export default function FloatingCombatText({ ft, at, onComplete }: Props) {
   return (
     <div
       className="absolute z-30 pointer-events-none flex items-center justify-center"
-      style={{ left: at.left - TILE_SIZE / 2 + ft.offsetX, top: at.top - TILE_SIZE / 2, width: TILE_SIZE, height: TILE_SIZE }}
+      style={{ left: at.left - TILE_SIZE / 2, top: at.top - TILE_SIZE / 2, width: TILE_SIZE, height: TILE_SIZE }}
     >
       <span
         className={`font-bold drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)] ${ft.look === 'levelUp' ? 'rf-float-levelup' : 'text-sm'} ${ft.icon ? 'inline-flex items-center gap-1 whitespace-nowrap' : ''}`}

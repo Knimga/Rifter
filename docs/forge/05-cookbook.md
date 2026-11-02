@@ -54,7 +54,7 @@ Reach for these before writing vertex math by hand. All coordinates are pre-fit 
 clothing and hair, e.g. `chesterfieldCoat` (an open coat, to mid-thigh or lower: `hem`, with accents in `trim`) and `capWithBangs` (fuller and longer with `volume` and `nape`); a body built with
 `restArms` holds nothing, both arms hanging at its sides, for NPCs; `figure: 'female'` gives a female body (narrower shoulders, thinner arms and legs, smaller feet: `FIGURE_FRAME`; a softer jaw), dressed in `blouse` (a waist, a bosom shaped into the torso's own outline (never separate balls), optional `trim` at the neckline and cuffs) and `skirt` (to the ankles by default, `hem` for shorter; a trimmed hem); `ponytailHair`'s `tieSize` makes its tie a cuff that shows from the game's view: Ethela, and later female class variants), `_sword`, `_axe` and the other weapons (`_bow`'s `bowShape`: the D-bow alone, for a creature to hold),
 `_armor` and the materials (`_cloth`, `_leather`, `_hide`, `_plate`: each armor series' pieces), `_shield`, `_ring` (rings and amulets: `jewelryEntry`, jewelry's `BRONZE` and `SILVER`, and `bandDesign(id, metal)`: the plain band, flat inside and domed outside, its `top` anchor at the crown), `_amulet` (`amuletDesign(id, { stone, metal, glint? })`: an oval cabochon in a setting, its chain lying loose behind it; `glint` is the light its crown catches, a brighter shade of the stone's own hue (a dark stone given a warm glint turns muddy)), `_rifter` (its states), `_chest` (`treasureChestDesign(id, { wood, woodDark, lock })`: every treasure chest's shape and `open` animation, each chest its own colors), `_spider` (the pale spiders' `spiderPalette`, `spiderMouthparts` (fangs and pedipalps), `spiderEyes` and `spiderJointed` legs, drawn at the Pale Creeper's size and placed and scaled for a bigger one), `_interactive`, `_decor` and `_loot` (an object or loot design's identity: `interactiveEntry`, `decorEntry`, `lootEntry`; `_decor` also has the
-merchant things' `DARK_WOOD` / `DARK_WOOD_SHADE` and `DECOR_IRON`, and `barrel`: a hooped barrel, optionally lidded), `_glow` (`floorGlow`), `_fungal` (`cap`,
+merchant things' `DARK_WOOD` / `DARK_WOOD_SHADE` and `DECOR_IRON`, and `barrel`: a hooped barrel, optionally lidded), `_rubble` (`rubbleDesign(id, stone)`: every loose rubble's scatter of stones, each in its own stone: gray Loose Rubble, the Firelands' Brown Rubble), `_torch` (`wallTorchDesign(id, flame)`: every wall torch's sconce and torch, each its own flame colors: the Wall Torch, the Crypt's Blue Wall Torch), `_glow` (`floorGlow`), `_fungal` (`cap`,
 `mush`, `shelf`, `antler`), `_goblin` (every goblin's body: `goblinBody` with its helmets, or its pieces
 `goblinLook`, `goblinLegs`, `goblinTorso`, `goblinHead` for a goblin dressed differently; `goblinArm`; a body's
 `eye` for eyes other than the yellow ones, e.g. the Troll Tamer's glowing white, and `pauldronSize` for larger
@@ -112,6 +112,9 @@ category's color).
 - Mark `m.anchor('feet', ...)` at the middle of the stance (between the feet, or under a floating body): that
   point goes to the tile center.
 - Regular enemies are about 1.0–1.45 tall, bosses up to about 1.7 (see the existing designs' `fit`).
+- Dungeon scenery is built in place (`fit: { kind: 'placed', height }`, contract "Dungeon scenery"): true size, nothing
+  scaled or moved, so build it in tiles from the start (wall clutter against z = -0.5). Keep jittered shapes on the
+  floor with `blob`'s `floorY: 0`.
 
 ## Glow and translucency
 - `e` (emissive) below 0.5 is a partial glow on a lit face; **0.5 and up is drawn unlit and opaque**: its alpha
@@ -153,6 +156,12 @@ category's color).
 - **Overview:** `npm run forge:sheet -- --only-drafts --seeds 12 --yaws 0,180 --out forge-sheet.png`.
 - **Detail:** fewer seeds, bigger cells: `--seeds 1,2,3 --cols 3 --cell 400` (or 520 for one or two).
 - **Rifts & Keys:** `--tint <dungeon>` (default: the first) or `--tint #rrggbb` paints them; check a few dungeons' colors.
+- **Dungeon terrain:** `npm run forge:sheet -- --terrain <dungeon> [--zone n] [--seed n] [--tile px]` draws one
+  generated zone (its floor, walls, doors, obstacles and clutter (approved designs)) in one image; try a few layouts (`--seed`), and look close up with
+  `--crop x0,y0,x1,y1 --tile 90` (those tiles only). In the browser,
+  `/dev/forge?dungeon=<key>` shows it as the game does, with toggles for the grid, the fog and sample highlights.
+- **Dungeon scenery:** `forge:sheet` and the forge page draw a wall behind wall clutter; judge it placed in real zones
+  in `/dev/forge?dungeon=<key>` with **Drafts** on (it places objects whose design is still a draft).
 - **True side profile** (backs, hunches, how far things stick out): `--yaws 90 --elev 5`.
 - **Close three-quarter views:** `--yaws 30,330`.
 - Look at several seeds: a seed-dependent problem (a part buried on some seeds, a color that loses the floor)

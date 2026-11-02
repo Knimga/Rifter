@@ -3,6 +3,7 @@ import { mpCostAt, type Ability, type Effect } from './abilities';
 import { aimedArea, isArea, isSelfBurst, unitsInArea } from './areas';
 import { bodyDistance, bodySight, covers, fits, footprint, footprintKeys, inRangeAndSight, posKey, reachableTiles, samePos, type Body, type Pos } from '../world/grid';
 import { shuffle } from '../random';
+import type { ZoneData } from '../world/dungeonGen';
 import { moveBudget, moveCost } from './combat';
 import { isRooted, stackCap, stackCount, stackKey, type ActiveBuff } from '../units/stats';
 
@@ -138,7 +139,8 @@ export function computeEnemyTurn(
    * (`passable`).
    */
   occupied: (Body & { passable: boolean })[],
-  floors: Set<string>,
+  /** The zone: its floor (where it can stand) and the tiles sight passes over (what it can see and hit across). */
+  { floors, sight }: Pick<ZoneData, 'floors' | 'sight'>,
   /** Foes' threat, by key (CombatState.threat); none = 0. Enemies hold none, so a summon picks the closest. */
   threat: Record<string, number> = {},
   /** Floor tiles a map object stands on (the rift): it can't walk onto or through them (sight isn't blocked). */
@@ -192,14 +194,14 @@ export function computeEnemyTurn(
   const canUse = (a: Ability) => enemy.currentMp >= mpCostAt(a, enemy.level) && a.apCost <= ap;
   const selfAction = (a: Ability): EnemyAction => act(null, a, enemy.id, { ...enemy.pos });
   // Is `to` (a unit or a tile) within `range` of it standing at `from`, and in sight?
-  const inReach = (from: Pos, to: Pos | Body, range: number) => inRangeAndSight(me(from), to, range, floors);
+  const inReach = (from: Pos, to: Pos | Body, range: number) => inRangeAndSight(me(from), to, range, sight);
   // Itself, as a unit of its side
   const self: Friend = {
     key: enemy.id, pos: enemy.pos, size, hp: enemy.currentHp, maxHp: enemy.stats.hp, buffs: enemy.buffs,
     armed: isArmed(enemy.classData),
   };
   // The tiles an area ability it uses standing at `pos`, aimed at `aim`, takes in (aimedArea, with everyone else in place)
-  const areaFrom = (a: Ability, pos: Pos, aim: Pos) => aimedArea(me(pos), aim, a.area, floors, [...targets, ...side.friends]);
+  const areaFrom = (a: Ability, pos: Pos, aim: Pos) => aimedArea(me(pos), aim, a.area, sight, [...targets, ...side.friends]);
 
   // 3. Close in on the highest-priority target it can get nearer to (distance over floor, ignoring units,
   //    so enemies queue up behind each other in a corridor rather than wander off)
@@ -255,7 +257,7 @@ export function computeEnemyTurn(
     for (let dx = -a.range; dx < size + a.range; dx++) {
       for (let dy = -a.range; dy < size + a.range; dy++) {
         const p = { x: enemy.pos.x + dx, y: enemy.pos.y + dy };
-        if (covers(body, p) || !isFloor(p) || units.has(posKey(p)) || !bodySight(body, p, floors)) continue;
+        if (covers(body, p) || !isFloor(p) || units.has(posKey(p)) || !bodySight(body, p, sight)) continue;
         const d = bodyDistance(p, targets[0]);
         if (d < bestDist) { best = p; bestDist = d; }
       }

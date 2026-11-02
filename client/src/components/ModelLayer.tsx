@@ -9,9 +9,10 @@ import { tintModel } from '../forge/core/tint';
 import type { RGB } from '../forge/core/vec';
 import { TILE_SIZE, type BoardLayout } from '../viewEngine/board';
 import { buildCharacter, classInstanceId, type HeldWeapon } from '../forge/equip';
-import { designs } from '../forge/registry.vite';
+import { designs as approvedDesigns } from '../forge/registry.vite';
 import { MapModelRenderer, type MapUnit } from '../viewEngine/three/mapRenderer';
 import type { FogInput } from '../viewEngine/three/fog';
+import type { Terrain } from '../forge/terrain/types';
 import { useLatest } from '../hooks/useLatest';
 import { ActiveGlow } from './mapParts';
 import { characterLookKey } from './characterModel';
@@ -31,11 +32,19 @@ export interface MapLoot {
  * moves (an NPC may turn: `aim`).
  */
 export interface MapObject {
-  /** Stable for the map's lifetime (e.g. the door's id); also seeds its look. */
+  /** Stable for the map's lifetime (e.g. the door's id); also seeds its look, unless it has a `look`. */
   id: string;
   link: ModelLink;
+  /** Its tile; a multi-tile one's top-left (see `size`). */
   pos: Pos;
   facing: number;
+  /** The tiles it fills, [across x, across y] (an obstacle's footprint, turned with it); default one. */
+  size?: readonly [number, number];
+  /**
+   * Seeds its look instead of its id, shared by every object with the same one, built once (clutter: a few looks per
+   * design, placeClutter).
+   */
+  look?: string;
   /** Its model's animations its state calls for, e.g. ['open'] for a looted chest (see MapUnit.played). */
   played?: string[];
   /** The color a tinted model (a rift) is drawn in: the color of where it leads (core/tint.ts). */
@@ -77,11 +86,33 @@ interface Props {
   renderEnemyOverlay?: (enemy: EnemyInstance) => ReactNode;
   /** Unit id ('party-0', an enemy id) → the tile it last aimed an ability at; a new `seq` turns it to face it. */
   aims?: Record<string, UnitAim>;
+  /** Unit id → the feedback its model last showed (UnitFx); a new `seq` plays it. */
+  fx?: Record<string, UnitFx>;
   /** Fog of war over the map (null or omitted: none). Drawn by the renderer over the floor and every model. */
   fog?: FogInput | null;
   /** Its first frame is drawn (models, fog): the map behind it can be shown. Once per mount. */
   onReady?: () => void;
+  /**
+   * The map's 3D floor and walls (forge/terrain), if it has them: the walls are drawn with the models,
+   * the floor on a canvas put in `terrainHost` (the Board's `under` slot, beneath the HTML floor).
+   */
+  terrain?: Terrain | null;
+  terrainHost?: HTMLElement | null;
+  /** The designs models are built from: the approved ones (default), or the forge's with its drafts. Fixed per mount. */
+  designs?: Record<string, Design>;
 }
+
+/**
+ * The feedback a unit's model last showed, each with a sequence that increases with every new one: a hit's white
+ * `flash` (the renderer's), and a `glow` pulsing behind it in a color (any CSS color) when healed, buffed or debuffed.
+ */
+export interface UnitFx {
+  flash?: number;
+  glow?: { color: string; seq: number };
+}
+
+/** A unit's square side in tiles (party members and creatures fill squares: a large one 2). */
+const squareOf = (u: MapUnit): number => (typeof u.size === 'number' ? u.size : 1);
 
 /** The tile a unit last aimed an ability at; `seq` increases with every new aim. */
 export interface UnitAim {
@@ -90,7 +121,7 @@ export interface UnitAim {
   seq: number;
 }
 
-export default function ModelLayer({ board, party = [], enemies = [], loot = [], objects = [], renderEnemyOverlay, aims = {}, fog = null, onReady }: Props) {
+export default function ModelLayer({ board, party = [], enemies = [], loot = [], objects = [], renderEnemyOverlay, aims = {}, fx = {}, fog = null, onReady, terrain = null, terrainHost = null, designs = approvedDesigns }: Props) {
   const onReadyRef = useLatest(onReady);
   const hostRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<MapModelRenderer | null>(null);
@@ -140,17 +171,18 @@ export default function ModelLayer({ board, party = [], enemies = [], loot = [],
   const tintKey = (o: MapObject) => `${o.tint?.join(',') ?? ''}${o.partTints?.map((t) => `${t.parts.join('+')}=${t.color.join(',')}`).join(';') ?? ''}`;
   const objectKey = objects.map((o) => `${o.id}:${o.link}:${o.pos.x},${o.pos.y}:${o.facing}:${o.played?.join('+') ?? ''}:${tintKey(o)}:${o.aim?.seq ?? ''}`).join('|');
   const aimKey = Object.entries(aims).map(([id, a]) => `${id}:${a.seq}`).join('|');
+  const flashKey = Object.entries(fx).map(([id, f]) => `${id}:${f.flash ?? ''}`).join('|');
   const units: MapUnit[] = useMemo(() => {
-    const out = [...partyUnits, ...enemyUnits].map((u) => (aims[u.id] ? { ...u, aim: aims[u.id] } : u));
+    const out: MapUnit[] = [...partyUnits, ...enemyUnits].map((u) => ({ ...u, ...(aims[u.id] && { aim: aims[u.id] }), ...(fx[u.id]?.flash !== undefined && { flash: fx[u.id].flash }) }));
     for (const o of objects) {
       const design = linkedDesign(designs, o.link);
       if (!design) continue;
-      const model = cached(o.id, `${o.link}:${tintKey(o)}`, [design], () => {
-        const built = buildInstance(design, o.id);
+      const model = cached(o.look ?? o.id, `${o.link}:${tintKey(o)}`, [design], () => {
+        const built = buildInstance(design, o.look ?? o.id);
         if (o.partTints) return o.partTints.reduce((m, t) => tintModel(m, t.color, t.parts), built);
         return o.tint ? tintModel(built, o.tint) : built;
       });
-      out.push({ id: o.id, model, pos: o.pos, facing: o.facing, played: o.played, ...(o.aim ? { aim: o.aim } : {}) });
+      out.push({ id: o.id, model, pos: o.pos, facing: o.facing, played: o.played, ...(o.aim ? { aim: o.aim } : {}), ...(o.size ? { size: o.size } : {}) });
     }
     for (const l of loot) {
       const design = linkedDesign(designs, l.link);
@@ -162,18 +194,18 @@ export default function ModelLayer({ board, party = [], enemies = [], loot = [],
       out.push({ id: l.id, model, pos: l.pos, lying: true });
     }
     // Forget models no longer on the map (dead enemies, picked-up loot)
-    const live = new Set([...partyUnits, ...enemyUnits, ...objects].map((u) => u.id).concat(loot.map(lootCacheId)));
+    const live = new Set([...partyUnits, ...enemyUnits].map((u) => u.id).concat(objects.map((o) => o.look ?? o.id), loot.map(lootCacheId)));
     for (const id of cache.current.keys()) if (!live.has(id)) cache.current.delete(id);
     return out;
-  }, [partyUnits, enemyUnits, lootKey, objectKey, aimKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [partyUnits, enemyUnits, lootKey, objectKey, aimKey, flashKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // DOM that follows each unit's drawn position (models glide between tiles): the overlay above its head
-  // and the active member's floor glow. The renderer reports every change (onPlace); a newly mounted
+  // DOM that follows each unit's drawn position (models glide between tiles): the overlay above its head,
+  // the active member's floor glow and a glow pulse behind its model. The renderer reports every change (onPlace); a newly mounted
   // element is placed where the model is drawn now.
-  const overlayEls = useRef(new Map<string, { head?: HTMLDivElement | null; glow?: HTMLDivElement | null }>());
+  const overlayEls = useRef(new Map<string, { head?: HTMLDivElement | null; glow?: HTMLDivElement | null; pulse?: HTMLDivElement | null }>());
   // Each unit's overhead anchor height (world tiles), and its size (a large creature's 2 tiles)
   const headHeight = useRef(new Map<string, { height: number; size: number }>());
-  for (const u of [...partyUnits, ...enemyUnits]) headHeight.current.set(u.id, { height: u.model.mesh.anchors.overhead[1], size: u.size ?? 1 });
+  for (const u of [...partyUnits, ...enemyUnits]) headHeight.current.set(u.id, { height: u.model.mesh.anchors.overhead[1], size: squareOf(u) });
   const boardRef = useRef(board);
   boardRef.current = board;
   const placeOverlays = (id: string, at: Pos) => {
@@ -190,10 +222,17 @@ export default function ModelLayer({ board, party = [], enemies = [], loot = [],
       els.glow.style.left = `${at.x * TILE_SIZE}px`;
       els.glow.style.top = `${at.y * TILE_SIZE}px`;
     }
+    if (els?.pulse) {
+      // Centered on the model's middle (half its overhead anchor's height), upright
+      const { height = 0, size = 1 } = headHeight.current.get(id) ?? {};
+      const p = boardRef.current.toScreen(at.x + size / 2, at.y + size / 2, height / 2);
+      els.pulse.style.left = `${p.left - els.pulse.offsetWidth / 2}px`;
+      els.pulse.style.top = `${p.top - els.pulse.offsetHeight / 2}px`;
+    }
   };
   const placeRef = useRef(placeOverlays);
   placeRef.current = placeOverlays;
-  const overlayRef = (u: MapUnit, kind: 'head' | 'glow') => (el: HTMLDivElement | null) => {
+  const overlayRef = (u: MapUnit, kind: 'head' | 'glow' | 'pulse') => (el: HTMLDivElement | null) => {
     const els = overlayEls.current.get(u.id) ?? {};
     els[kind] = el;
     overlayEls.current.set(u.id, els);
@@ -214,6 +253,32 @@ export default function ModelLayer({ board, party = [], enemies = [], loot = [],
   useEffect(() => rendererRef.current?.setBoard(board), [board]);
   useEffect(() => rendererRef.current?.setUnits(units), [units]);
   useEffect(() => rendererRef.current?.setFog(fog), [fog]);
+  useEffect(() => {
+    const r = rendererRef.current;
+    if (!r) return;
+    r.setTerrain(terrain);
+    const canvas = r.groundCanvas;
+    if (canvas && terrainHost) terrainHost.appendChild(canvas);
+    return () => canvas?.remove();
+  }, [terrain, terrainHost]);
+
+  // Glows already shown when the layer mounted (a new zone) don't play again
+  const mountFx = useRef(fx);
+  /**
+   * A glow pulsing behind a unit's model (UnitFx.glow): beneath the model canvas, so it shows around the model's
+   * outline (and walls in front hide it). Sized to the model; keyed by its sequence, so a new one plays from the start.
+   */
+  const pulse = (u: MapUnit) => {
+    const g = fx[u.id]?.glow;
+    if (!g || g.seq === mountFx.current[u.id]?.glow?.seq) return null;
+    const size = squareOf(u), w = TILE_SIZE * 1.5 * size, h = Math.max(w, u.model.mesh.anchors.overhead[1] * TILE_SIZE * 1.1);
+    return (
+      <div key={`pulse-${u.id}-${g.seq}`} ref={overlayRef(u, 'pulse')} className="absolute rf-unit-glow" style={{
+        width: w, height: h,
+        background: `radial-gradient(ellipse closest-side, color-mix(in srgb, ${g.color} 65%, transparent) 0%, color-mix(in srgb, ${g.color} 30%, transparent) 50%, transparent 100%)`,
+      }} />
+    );
+  };
 
   /** DOM placed just above a model's head (its projected overhead anchor). Positioned by placeOverlays. */
   const overHead = (u: MapUnit, node: ReactNode) => (
@@ -237,6 +302,7 @@ export default function ModelLayer({ board, party = [], enemies = [], loot = [],
           </div>
         ))}
       </div>
+      {[...partyUnits, ...enemyUnits].map(pulse)}
       <div ref={hostRef} className="absolute left-0 top-0" />
       {partyUnits.map((u) => overHead(u, party.find((m) => m.id === u.id)!.overlay))}
       {renderEnemyOverlay && enemyUnits.map((u) => overHead(u, renderEnemyOverlay(enemies.find((e) => e.id === u.id)!)))}

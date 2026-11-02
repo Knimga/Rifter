@@ -38,6 +38,28 @@ dungeon's family is rare and deliberate.
 Items are not tied to a dungeon: their materials read by value and hue (iron grey-blue, leather brown, gold), and
 their rarity glow is the renderer's, never the design's.
 
+### Dungeon terrain
+Each dungeon's floor and walls (`DungeonConfig.terrain`, contract "Terrain") stay dark and low in saturation, so
+units, highlights and glows read over them; walls a touch lighter than the floor. Wall tops are almost black, faintly tinted
+with the wall's own hue (derived from its color, never set), and veins never run over them: solid rock running into the dark. Bright tops turned
+into a heavy grid of outlines around every room. Glowing veins are the one bright note, and only in
+dungeons whose creatures share that glow. First looks (judge them in `/dev/forge` → Dungeons):
+- **The Crypt:** grey flagstones and coursed masonry.
+- **The Firelands:** red-black rough cave rock, cracked with glowing lava.
+- **The Fungal Forest:** damp olive rough rock, with dark moss in patches (not a bright green: it read as grass).
+- **The Goblin Fortress:** rough-cut masonry (bumpy blocks) on packed earth.
+- **The Blind Caverns:** near-black, deeply uneven rock.
+- **The Sanctum:** dark blue-violet stone: finely carved walls (rough, barely uneven) over a floor of great fitted
+  (cyclopean) stones, darker than the walls.
+
+### Dungeon scenery
+Clutter dresses a dungeon, it never competes with what moves in it: small, dark and low in saturation, in the
+dungeon's own hues (bones a yellowed ivory, rubble its rock, moss its greens), sparse enough that floors stay
+readable (densities around 0.05 on the floor, 0.1 on the walls). Light from it is rare and small: a wall torch is the
+one bright note, embers and spores a speck. Obstacles are bolder (they shape the room) but still dark, and tall
+sight-blocking ones read as solid masses (a trunk, a spire), see-through ones stay low (a sarcophagus, a lava spout's
+glow you can see past).
+
 ## Rules
 
 - **Faceted and flat-shaded.** Few triangles, hard edges, per-face brightness jitter (default 0.16). No smoothing, no textures.

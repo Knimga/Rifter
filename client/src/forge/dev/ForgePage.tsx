@@ -12,13 +12,15 @@ import { HOLD_LABEL } from '../designs/_character';
 import { CATEGORY_FOLDER } from '../core/folders';
 import type { WeaponType } from '../../data/gear/types';
 import { TINT_CHOICES, tintChoice } from '../tintChoices';
-import { DUNGEONS } from '../../data/world/dungeons';
+import { DUNGEONS, type DungeonKey } from '../../data/world/dungeons';
 import { isTinted, tintModel } from '../core/tint';
 import type { RGB } from '../core/vec';
 import { TILE_BORDER_COLOR } from '../../components/mapParts';
 import { ForgeView, GAME_VIEW_ANCHOR, type CameraPreset, type Cell } from './forgeView';
 import { floorMatrix } from '../../viewEngine/camera';
 import { TILE_SIZE } from '../../viewEngine/board';
+import DungeonPreview from './DungeonPreview';
+import { BTN, INPUT, Toggle } from './ui';
 
 // Cell size follows the game's tile size (TILE_SIZE, the one constant the maps use), so the game view
 // always frames the same 3x3 tiles: if tiles get bigger, models and cells grow with them.
@@ -52,6 +54,8 @@ function readUrl() {
     count: Number(q.get('count') ?? 12),
     camera: (q.get('cam') as CameraPreset) ?? 'game',
     tint: q.get('tint') ?? TINT_KEYS[0],
+    /** Open on a dungeon's look (the Dungeons view), e.g. ?dungeon=crypt. */
+    dungeon: (q.get('dungeon') ?? '') in DUNGEONS ? (q.get('dungeon') as DungeonKey) : null,
   };
 }
 
@@ -78,6 +82,8 @@ export default function ForgePage() {
   }, [registry]);
 
   const [selectedId, setSelectedId] = useState(initial.design || entries[0]?.id || '');
+  /** A dungeon whose look is shown (the Dungeons view) instead of the selected design. */
+  const [dungeonKey, setDungeonKey] = useState<DungeonKey | null>(initial.dungeon);
   const [seedStart, setSeedStart] = useState(initial.seed);
   const [count, setCount] = useState(initial.count);
   const [camera, setCamera] = useState<CameraPreset>(initial.camera);
@@ -202,7 +208,7 @@ export default function ForgePage() {
           // The chosen animation plays on a loop: rest, play, hold the end pose, back to rest
           const anim = playing ? model.animations?.find((a) => a.name === playing) : undefined;
           const progress = anim ? { [anim.name]: animationLoop(now - loopStart, anim.ms) } : undefined;
-          cells.push({ model, yaw, rect: rectOf(b, i), progress, tiles });
+          cells.push({ model, yaw, rect: rectOf(b, i), progress, tiles, wall: source?.wall });
         }),
       );
       view.render(cells, { camera, wireframe, ground }, { w: width, h: height }, now / 1000);
@@ -290,8 +296,8 @@ export default function ForgePage() {
                 <button
                   key={e.id}
                   title={dataEntry((e.approved ?? e.draft)!.source)?.path}
-                  onClick={() => { setSelectedId(e.id); setFocusSeed(null); }}
-                  className={`w-full text-left px-2 py-1.5 rounded flex items-center justify-between gap-2 ${e.id === entry?.id ? 'bg-gray-700' : 'hover:bg-gray-700/50'}`}
+                  onClick={() => { setSelectedId(e.id); setFocusSeed(null); setDungeonKey(null); }}
+                  className={`w-full text-left px-2 py-1.5 rounded flex items-center justify-between gap-2 ${!dungeonKey && e.id === entry?.id ? 'bg-gray-700' : 'hover:bg-gray-700/50'}`}
                 >
                   <span className="truncate">{(e.draft ?? e.approved)!.label}</span>
                   <span className="flex gap-1 shrink-0">
@@ -304,10 +310,22 @@ export default function ForgePage() {
             </div>
           );
         })}
+        <div>
+          <h2 className="text-xs font-bold uppercase tracking-widest text-gray-500 mb-1">Dungeons</h2>
+          {(Object.keys(DUNGEONS) as DungeonKey[]).map((k) => (
+            <button key={k} onClick={() => setDungeonKey(k)}
+              className={`w-full text-left px-2 py-1.5 rounded ${dungeonKey === k ? 'bg-gray-700' : 'hover:bg-gray-700/50'}`}>
+              {DUNGEONS[k].name}
+            </button>
+          ))}
+        </div>
       </aside>
 
-      {/* ── Center: seed grid ── */}
+      {/* ── Center: seed grid (or a dungeon's look) ── */}
       <main className="flex-1 overflow-auto p-4">
+        {dungeonKey && <DungeonPreview dungeonKey={dungeonKey} />}
+        {/* Kept mounted while a dungeon is shown: its 3D view lives in it */}
+        <div className={dungeonKey ? 'hidden' : ''}>
         {entry && (
           <div className="mb-3">
             <h1 className="text-lg font-bold">{(entry.approved ?? entry.draft)!.label}</h1>
@@ -396,6 +414,7 @@ export default function ForgePage() {
             </div>
           ))}
         </div>
+        </div>
       </main>
 
       {/* ── Right: approve / discard, selected model ── */}
@@ -437,20 +456,19 @@ function animationLoop(t: number, ms: number): number {
 
 // ─── Pieces ───────────────────────────────────────────────────────────────────
 
-const INPUT = 'bg-gray-900 border border-gray-700 rounded px-1.5 py-0.5 w-16';
-const BTN = 'px-2.5 py-1 rounded bg-gray-700 hover:bg-gray-600 text-gray-100';
 
 // ─── Game-view floor ──────────────────────────────────────────────────────────
-// In the game, models draw on a transparent canvas over the DOM tile grid. The game view does the
-// same: real floor tiles (same size, color and border as DungeonMap) behind the transparent canvas.
+// In the game, models draw on a transparent canvas over the map's clear DOM tiles and its 3D floor. The
+// game view does the same over plain tiles of the game's size, in the Crypt's floor color, with the grid's border
+// as a scale reference (the Dungeons view shows the real terrain).
 
-const FLOOR = DUNGEONS.crypt.floorColor;
+const FLOOR = `rgb(${DUNGEONS.crypt.terrain.floor.color.join(', ')})`;
 const PAGE_BG = '#111827'; // Tailwind gray-900, the page background
 
 type Rect = { x: number; y: number; w: number; h: number };
 
 /**
- * The floor around the model's square, as the game draws it: flat tiles in floor px (a 1-tile model's tile
+ * The floor around the model's square, a stand-in for the game's (see above): flat tiles in floor px (a 1-tile model's tile
  * spans -TILE_SIZE/2..+TILE_SIZE/2 around its center; a large creature's 2×2 square meets at its center),
  * laid on the floor by the game view's transform (floorMatrix) with the model's center at GAME_VIEW_ANCHOR.
  * Enough tiles to cover the cell (it clips them); a block per cell, so neighbouring cells' grids never meet out
@@ -524,15 +542,6 @@ function Badge({ color, title, children }: { color: string; title?: string; chil
   return <span title={title} className={`${color} text-[10px] leading-none px-1.5 py-0.5 rounded`}>{children}</span>;
 }
 
-/** Large-hit-area on/off button (used instead of native checkboxes). */
-function Toggle({ on, onClick, children }: { on: boolean; onClick: () => void; children: string }) {
-  const active = on ? 'bg-blue-700 text-white' : 'bg-gray-900 text-gray-400 hover:bg-gray-700';
-  return (
-    <button type="button" onClick={onClick} className={`px-2.5 py-1 rounded border border-gray-700 text-xs ${active}`}>
-      {children}
-    </button>
-  );
-}
 
 interface SeedCell {
   seed: number;

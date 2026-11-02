@@ -65,6 +65,10 @@ export interface PartAnimation {
  * standing: origin at the feet center, y up, scaled so height <= height and footprint radius <= maxRadius.
  *           floor: 'lowest' (default) sets its lowest point on the floor; 'origin' keeps its own y = 0 as the
  *           floor (it floats: nothing need touch y = 0), and its height counts from there.
+ * placed:   built at its true size in tiles, never scaled or moved: its tile's center at x = z = 0, the floor at
+ *           y = 0, no taller than height (dungeon scenery: clutter and obstacles, data/world/decorObjects.ts). Wall
+ *           clutter stands against the wall at z = -0.5 (its tile's back edge), facing +z; an obstacle fills its
+ *           footprint (span x depth tiles) centered on the origin.
  * item:     origin at the bbox center, scaled so the longest dimension == size.
  *           groundRollDeg: as loot, first turned this far about its front axis (z), e.g. 90 to rest on its
  *           side (default 0); then
@@ -73,6 +77,7 @@ export interface PartAnimation {
  */
 export type FitSpec =
   | { kind: 'standing'; height: number; maxRadius: number; floor?: 'lowest' | 'origin' }
+  | { kind: 'placed'; height: number }
   | { kind: 'item'; size: number; groundPitchDeg?: number; groundRollDeg?: number };
 
 /**

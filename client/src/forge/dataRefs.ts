@@ -28,6 +28,10 @@ export interface DataEntry {
   link: ModelLink;
   /** A large creature's square, in tiles a side (2: it stands on 2×2 in game); absent: one tile. */
   tiles?: number;
+  /** Wall clutter (a decorative object placed against a wall): the forge shows it in front of a wall. */
+  wall?: boolean;
+  /** A decorative object's tiles: [across its front (span), deep (depth)]; a 'placed' design keeps within them. */
+  footprint?: readonly [number, number];
 }
 
 export const refKey = (r: DataRef) => `${r.table}:${r.key}`;
@@ -103,6 +107,10 @@ export function allDataEntries(): DataEntry[] {
     name: o.name,
     path: `data/world/decorObjects.ts › ${o.id}`,
     link: o.model,
+    // A square obstacle (the stalagmite cluster's 2×2) shows its square; wall clutter, its wall
+    ...((o.span ?? 1) > 1 && o.span === o.depth && { tiles: o.span }),
+    ...(o.placement === 'wall' && { wall: true }),
+    footprint: [o.span ?? 1, o.depth ?? 1] as const,
   }));
   const loot: DataEntry[] = LOOT.map((l) => ({
     ref: { table: 'loot', key: l.id },

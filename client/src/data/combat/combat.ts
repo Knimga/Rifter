@@ -59,11 +59,11 @@ const byInitiative = (a: Combatant, b: Combatant) =>
 
 /**
  * The enemies a party member at `pos` stirs: every unaggroed group with a living member within AGGRO_RANGE of it
- * and in sight, whole (`zoneEnemies`: the creatures of its zone; `floors`: the zone's floor, for sight).
+ * and in sight, whole (`zoneEnemies`: the creatures of its zone; `sight`: the tiles sight passes over, ZoneData.sight).
  */
-export function aggroedBy(pos: Pos, zoneEnemies: EnemyInstance[], floors: ReadonlySet<string>): EnemyInstance[] {
+export function aggroedBy(pos: Pos, zoneEnemies: EnemyInstance[], sight: ReadonlySet<string>): EnemyInstance[] {
   const spotted = new Set(zoneEnemies
-    .filter(e => e.currentHp > 0 && !e.aggroed && inRangeAndSight(pos, bodyOf(e), AGGRO_RANGE, floors))
+    .filter(e => e.currentHp > 0 && !e.aggroed && inRangeAndSight(pos, bodyOf(e), AGGRO_RANGE, sight))
     .map(e => e.groupId));
   return spotted.size ? zoneEnemies.filter(e => e.currentHp > 0 && !e.aggroed && spotted.has(e.groupId)) : [];
 }

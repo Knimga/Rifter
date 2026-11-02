@@ -22,8 +22,8 @@ export interface AimedAction {
 export function aimPartyAction(action: Ability, o: {
   casterPos: Pos;
   at: Pos;
-  /** The map's floor, for range areas and sight. */
-  floors: ReadonlySet<string>;
+  /** The tiles sight passes over on the map (ZoneData.sight), for sight and areas. */
+  sight: ReadonlySet<string>;
   inCombat: boolean;
   /** The party's side: its living members and summoned allies. */
   partySide: () => CombatUnit[];
@@ -41,8 +41,8 @@ export function aimPartyAction(action: Ability, o: {
   // Aimed at any tile of a large creature, it is aimed at all of it: in range and sight of any of its tiles, and an
   // area centered on its whole square (areaCenter)
   const center = areaCenter(o.at, [...o.partySide(), ...o.hostiles]);
-  if (!inRangeAndSight(o.casterPos, center, action.range, o.floors)) return null;
-  const areaOf = (area: AreaType | undefined) => affectedKeys(o.casterPos, center, area, o.floors);
+  if (!inRangeAndSight(o.casterPos, center, action.range, o.sight)) return null;
+  const areaOf = (area: AreaType | undefined) => affectedKeys(o.casterPos, center, area, o.sight);
   if (action.target === 'ally') {
     const ally = isArea(action) ? null : o.allyAt(o.at);
     const targets = isArea(action) ? unitsInArea(areaOf(action.area), o.partySide()) : ally ? [ally] : [];

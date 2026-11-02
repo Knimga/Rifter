@@ -1,20 +1,21 @@
-import { lazy, Suspense, useMemo, type ReactNode } from 'react';
+import { lazy, Suspense, useMemo, useState, type ReactNode } from 'react';
 import { FaCoins } from 'react-icons/fa';
 import { GiMagicPalm } from 'react-icons/gi';
 import type { TargetType } from '../data/combat/abilities';
 import { isAdjacent, posKey, samePos, type Pos } from '../data/world/grid';
-import { SANCTUM_FLOOR_COLOR, SANCTUM_WALL_COLOR } from '../data/constants';
-import { SANCTUM, SANCTUM_RECEPTACLE, SANCTUM_SHOWN, isSanctumWall, sanctumNpcAt } from '../data/world/sanctum';
+import { SANCTUM, SANCTUM_FLOORS, SANCTUM_RECEPTACLE, SANCTUM_SHOWN, SANCTUM_TERRAIN, isSanctumWall, sanctumNpcAt } from '../data/world/sanctum';
 import { npc, type NpcData } from '../data/world/npcs';
 import { decorObjectModel } from '../data/world/decorObjects';
 import { interactiveObjectGlow, interactiveObjectModel } from '../data/world/interactiveObjects';
 import { DUNGEONS, type DungeonKey } from '../data/world/dungeons';
 import { riftGlowCss } from '../data/world/rifts';
 import { yawFromGridMove } from '../forge/core/facing';
+import { buildTerrain } from '../forge/terrain/build';
 import { RIFTER_TINT_PARTS } from '../forge/designs/_rifter';
-import { Board, FloorGrid, FloorTile, deepFogTiles, HoverEdgeGlow, MoveLineOverlay, ObjectTag, RIFT_TAG_HEIGHT, TileHighlight, UsableGlow, riftTag, toMapMember, useBoard, useHoveredTile, useStableHandler, type PartyTokenData } from './mapParts';
-import type { MapObject, UnitAim } from './ModelLayer';
+import { Board, FloorGrid, FloorTile, HoverEdgeGlow, MapFloats, MoveLineOverlay, ObjectTag, RIFT_TAG_HEIGHT, TileHighlight, UsableGlow, riftTag, toMapMember, useBoard, useHoveredTile, useStableHandler, type PartyTokenData } from './mapParts';
+import type { MapObject, UnitAim, UnitFx } from './ModelLayer';
 import type { FogInput } from '../viewEngine/three/fog';
+import type { FloatingText } from './FloatingCombatText';
 
 // 3D party models over the tile grid. Lazy: it pulls in three.js (GameScreen preloads it on mount).
 const ModelLayer = lazy(() => import('./ModelLayer'));
@@ -26,7 +27,9 @@ const ModelLayer = lazy(() => import('./ModelLayer'));
  * the renderer takes it once.
  */
 const SANCTUM_FOG: FogInput = { cols: SANCTUM.width, rows: SANCTUM.height, visible: SANCTUM_SHOWN, explored: SANCTUM_SHOWN, still: true };
-const SANCTUM_DEEP_FOG = deepFogTiles(SANCTUM_FOG, SANCTUM.width, SANCTUM.height);
+
+/** The Sanctum's 3D floor and walls (forge/terrain): it never changes, so it is built once. */
+const SANCTUM_3D = buildTerrain({ cols: SANCTUM.width, rows: SANCTUM.height, floors: SANCTUM_FLOORS, doors: [], style: SANCTUM_TERRAIN, seed: 0 });
 
 /**
  * What the Rifter is doing: the key set in it (shown in its socket), the key whose rift it shows (null: dormant, no
@@ -112,16 +115,22 @@ interface Props {
   onMemberSelect: (partyIndex: number) => void;
   /** Where each unit last aimed an ability; its model turns to face it. */
   aims?: Record<string, UnitAim>;
+  /** The feedback each unit's model last showed (a hit's flash, a heal's or effect's glow): a new one plays. */
+  fx?: Record<string, UnitFx>;
+  /** Floating text over the map ("Level N!", gold from a sale, a heal). */
+  floatingTexts: FloatingText[];
+  onFloatingTextComplete: (id: number) => void;
   /** The 3D layer has drawn its first frame (ModelLayer onReady): the page stops hiding the map. */
   onReady?: () => void;
 }
 
-export default function SanctumMap({ playerPos, activeMoverPos, party, moveTargets, onMove, rifter, onUseRifter, onTalkTo, npcAims, onEnterRift, activeTarget, onAbilityUse, onAbilityDeselect, onMemberSelect, aims, onReady }: Props) {
+export default function SanctumMap({ playerPos, activeMoverPos, party, moveTargets, onMove, rifter, onUseRifter, onTalkTo, npcAims, onEnterRift, activeTarget, onAbilityUse, onAbilityDeselect, onMemberSelect, aims, fx, floatingTexts, onFloatingTextComplete, onReady }: Props) {
   const hover = useHoveredTile();
   // The rift open in the Rifter (on its middle tile), if one can be entered: not while a swap's old rift closes
   const openRift = rifter.rift && rifter.phase !== 'close' ? rifter.rift : null;
   const isRiftTile = (p: Pos) => !!openRift && samePos(p, SANCTUM.rifter.pos);
   const board = useBoard(SANCTUM.width, SANCTUM.height);
+  const [terrainHost, setTerrainHost] = useState<HTMLDivElement | null>(null);
 
   const memberByKey = useMemo(() => new Map(party.map(m => [posKey(m.pos), m])), [party]);
   // Party members drawn as their class models (HP/MP bars above their heads)
@@ -172,7 +181,6 @@ export default function SanctumMap({ playerPos, activeMoverPos, party, moveTarge
     const allyTarget = !isWall && activeTarget === 'ally' && memberByKey.has(posKey(p));
     return (
       <FloorTile key={posKey(p)} p={p} hover={hover} onClick={onTileClick}
-        color={SANCTUM_DEEP_FOG.has(posKey(p)) ? 'var(--rift-fog)' : isWall ? SANCTUM_WALL_COLOR : SANCTUM_FLOOR_COLOR}
         brighten={!isWall && !activeTarget && canMoveTo(p) && hover.isHovered(p)}>
         {allyTarget && <TileHighlight kind="ally" />}
         {isNpcNear && <UsableGlow color="var(--glow)" hovered={hover.isHovered(p)} />}
@@ -199,9 +207,9 @@ export default function SanctumMap({ playerPos, activeMoverPos, party, moveTarge
 
   // No frame: the board floats on the game screen's background
   return (
-    <Board board={board} floor={floor}>
+    <Board board={board} floor={floor} under={<div ref={setTerrainHost} className="absolute inset-0 pointer-events-none" />}>
       <Suspense fallback={null}>
-        <ModelLayer board={board} party={modelParty} objects={objects} aims={aims} fog={SANCTUM_FOG} onReady={onReady} />
+        <ModelLayer board={board} party={modelParty} objects={objects} aims={aims} fx={fx} fog={SANCTUM_FOG} onReady={onReady} terrain={SANCTUM_3D} terrainHost={terrainHost} />
       </Suspense>
       {/* An NPC's name over its head while it is hovered, like an enemy's */}
       {hoveredNpc && (
@@ -211,6 +219,7 @@ export default function SanctumMap({ playerPos, activeMoverPos, party, moveTarge
       {openRift && hover.hovered && isRiftTile(hover.hovered) && (
         <ObjectTag board={board} x={SANCTUM.rifter.pos.x} y={SANCTUM.rifter.pos.y} height={RIFT_TAG_HEIGHT} text={riftTag(DUNGEONS[openRift].name)} />
       )}
+      <MapFloats board={board} floats={floatingTexts} onComplete={onFloatingTextComplete} />
     </Board>
   );
 }

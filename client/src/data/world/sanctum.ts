@@ -1,5 +1,6 @@
 import { keyPos, neighbors, posKey, type Pos } from './grid';
 import { decorObjectSpan } from './decorObjects';
+import type { TerrainStyle } from '../../forge/terrain/types';
 
 // ─── The Sanctum: fixed, hand-authored hub map (never procedurally generated) ──
 // On screen north is up-left (-y) and east up-right (+x). The main room (9 x 9), a hallway 3 wide and 3 long
@@ -64,6 +65,15 @@ export const SANCTUM = {
     { id: 'enchanters-supplies', pos: at(8, 9), facing: [0, -1] as const },
   ] as readonly DecorPlacement[],
 } as const;
+
+/**
+ * The Sanctum's look (forge/terrain, as a dungeon's DungeonConfig.terrain): dark blue-violet stone, its walls finely
+ * carved (rough, barely uneven), its floor of great fitted stones, darker than the walls.
+ */
+export const SANCTUM_TERRAIN: TerrainStyle = {
+  floor: { color: [25, 25, 35], seam: [14, 14, 24], pattern: 'cyclopean', bumpiness: 0.4 },
+  walls: { color: [40, 40, 70], finish: 'rough', height: 'high', bumpiness: 0.12 },
+};
 
 /** Where a map places a decorative object (DECOR_OBJECTS id): its middle tile, and the grid direction its front faces. */
 export interface DecorPlacement {

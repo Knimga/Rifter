@@ -58,9 +58,6 @@ function RoleIcons({ roles, labels = false }: { roles: Role[]; labels?: boolean 
   );
 }
 
-/** The classes that can heal (the healer role), as the no-healer message names them: 'Knight, Primalist or Acolyte'. */
-const healerNames = CLASS_KEYS.filter((k) => CLASSES[k].roles.includes('healer')).map((k) => CLASSES[k].name);
-const healers = healerNames.length > 1 ? `${healerNames.slice(0, -1).join(', ')} or ${healerNames.at(-1)}` : healerNames.join('');
 
 export default function CharacterSelectScreen({ onStart, onBack }: {
   onStart: (party: PartyPick[]) => void;
@@ -107,8 +104,8 @@ export default function CharacterSelectScreen({ onStart, onBack }: {
   const stepText = filled === 0 ? 'Choose three heroes for your party.'
     : filled < 3 ? `Choose ${3 - filled} more.` : 'Name your heroes and set their marching order.';
   const startHint = filled < 3 ? `${3 - filled} more to choose`
-    : named < 3 ? `${3 - named} ${3 - named === 1 ? 'name' : 'names'} missing` : hasHealer ? 'Party ready' : 'No healer';
-  // A full party with no one who can heal can't start: say so
+    : named < 3 ? `${3 - named} ${3 - named === 1 ? 'name' : 'names'} missing` : 'Party ready';
+  // A full party with no one who can heal can't start: say so (instead of the hint)
   const noHealer = filled === 3 && !hasHealer;
 
   const focus = focusKey ? CLASSES[focusKey] : null;
@@ -284,8 +281,9 @@ export default function CharacterSelectScreen({ onStart, onBack }: {
             </div>
             <div className="flex flex-wrap items-center justify-between gap-4">
               <span className="flex flex-col gap-1">
-                <span className="text-xs tracking-[0.04em] text-rift-muted">{startHint}</span>
-                {noHealer && <span className="text-xs tracking-[0.04em] text-rift-warn">A party needs a healer: {healers} can heal.</span>}
+                {noHealer
+                  ? <span className="rf-alert">HEALER REQUIRED</span>
+                  : <span className="text-xs tracking-[0.04em] text-rift-muted">{startHint}</span>}
               </span>
               <RiftButton size="lg" className="!min-h-[52px] !px-12" disabled={!ready}
                 onClick={() => fadeOut(() => onStart(slots.map((s) => ({ classKey: s.classKey!, name: s.name.trim() }))))}>

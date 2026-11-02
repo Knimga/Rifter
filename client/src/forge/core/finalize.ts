@@ -13,6 +13,8 @@ export function fitScale(m: Mesh, fit: FitSpec): number {
 function measure(m: Mesh, fit: FitSpec) {
   const { min, max } = m.bounds();
   if (!Number.isFinite(min[0])) throw new Error('empty mesh');
+  // Built in place, at its true size: nothing moves
+  if (fit.kind === 'placed') return { kind: 'standing' as const, c: [0, 0, 0] as const, s: 1, h: max[1] };
 
   if (fit.kind === 'standing') {
     // The stand point goes to the tile center. A design should mark it with m.anchor('feet', ...) (the
