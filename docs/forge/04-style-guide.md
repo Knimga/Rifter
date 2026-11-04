@@ -49,6 +49,7 @@ dungeons whose creatures share that glow. First looks (judge them in `/dev/forge
 - **The Crypt:** grey flagstones and coursed masonry.
 - **The Firelands:** red-black rough cave rock, cracked with glowing lava.
 - **The Fungal Forest:** damp olive rough rock, with dark moss in patches (not a bright green: it read as grass).
+- **The Dark Tunnel** (the opening passage): near-black violet rock in small rough facets, cracked with thin glowing veins of void, a deep blue-leaning purple (not pink), like the Firelands' lava; ultra-rough craggy walls (`bumpiness` 1.8).
 - **The Goblin Fortress:** rough-cut masonry (bumpy blocks) on packed earth.
 - **The Blind Caverns:** near-black, deeply uneven rock.
 - **The Sanctum:** dark blue-violet stone: finely carved walls (rough, barely uneven) over a floor of great fitted

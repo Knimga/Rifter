@@ -1,4 +1,4 @@
-// Model for Ethela (data/world/npcs.ts › ethela), the Sanctum's enchanter. The class characters' body (buildBody) in
+// Model for Lynn (data/world/npcs.ts › lynn), the Sanctum's enchanter. The class characters' body (buildBody) in
 // its female figure (narrower shoulders, thinner arms, a softer jaw), standing as Denisel does, holding nothing: both
 // arms hang loosely at her sides. A near-black blouse with a waist and a bosom, trimmed in ice blue at the neck and cuffs, a
 // dark teal skirt to her ankles with an ice blue band along its hem, and small black boots (a female figure's, as are
@@ -17,10 +17,10 @@ const BOOTS: RGB = [24, 22, 26]; // black
 const HAIR: RGB = [40, 25, 16]; // very dark brown
 
 const design: Design = {
-  id: 'npc.ethela',
-  source: { table: 'npcs', key: 'ethela' }, // data/world/npcs.ts › ethela
+  id: 'npc.lynn',
+  source: { table: 'npcs', key: 'lynn' }, // data/world/npcs.ts › lynn
   category: 'npc',
-  label: 'Ethela',
+  label: 'Lynn',
   fit: { kind: 'standing', height: CHARACTER_HEIGHT, maxRadius: 0.54 },
   budget: 1500,
   build(c) {
@@ -31,7 +31,7 @@ const design: Design = {
     blouse(m, SHIRT, build, ICE);
     skirt(m, { cloth: SKIRT, trim: ICE });
     ponytailHair(m, HAIR, ICE, 1.6); // a large cuff, so it shows from the game's view
-    return 'Ethela';
+    return 'Lynn';
   },
 };
 

@@ -11,7 +11,7 @@
 // ───────────────────────────────────────────────────────────────────────────────────────────────────────────────
 import { SHARDS } from '../data/gear/shards';
 import type { AffixStat } from '../data/gear/affixes';
-import { DUNGEONS, type DungeonKey } from '../data/world/dungeons';
+import { DUNGEONS, PASSAGES, type DungeonKey, type PassageKey } from '../data/world/dungeons';
 import { pick } from '../data/random';
 import ModalWindow, { WindowCloseButton } from './ui/ModalWindow';
 import RiftButton from './ui/RiftButton';
@@ -19,10 +19,12 @@ import RiftButton from './ui/RiftButton';
 /** How many random shards Shards + gives, and how much gold Gold + gives. */
 const SHARD_BULK = 20, GOLD_BULK = 1000;
 
-export default function DevToolsWindow({ keys, onLevelUp, onAddKey, onAddShard, onAddGold, onClose }: {
+export default function DevToolsWindow({ keys, onLevelUp, onAddKey, onEnterPassage, onAddShard, onAddGold, onClose }: {
   keys: readonly DungeonKey[];
   onLevelUp: () => void;
   onAddKey: (key: DungeonKey) => void;
+  /** Go into a passage (none has a way in yet: the game's opening will lead into the first). */
+  onEnterPassage: (key: PassageKey) => void;
   onAddShard: (stat: AffixStat) => void;
   onAddGold: (amount: number) => void;
   onClose: () => void;
@@ -42,6 +44,7 @@ export default function DevToolsWindow({ keys, onLevelUp, onAddKey, onAddShard, 
           <option value="">{missing.length ? 'Add key…' : 'All keys owned'}</option>
           {missing.map((k) => <option key={k} value={k}>{DUNGEONS[k].keyName} ({DUNGEONS[k].name})</option>)}
         </select>
+        {Object.entries(PASSAGES).map(([k, p]) => <RiftButton key={k} size="sm" onClick={() => onEnterPassage(k)}>Enter {p.name}</RiftButton>)}
         {/* Each add is its own functional state update, so all of them land though they happen in one click */}
         <RiftButton size="sm" onClick={() => { for (let i = 0; i < SHARD_BULK; i++) onAddShard(pick(SHARDS).stat); }}>Shards +{SHARD_BULK}</RiftButton>
         <RiftButton size="sm" onClick={() => onAddGold(GOLD_BULK)}>Gold +{GOLD_BULK}</RiftButton>

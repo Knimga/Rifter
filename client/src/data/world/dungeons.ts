@@ -1,6 +1,6 @@
 import { ENEMY_CLASSES } from '../units/enemies';
 import { BOSS_CLASSES } from '../units/bosses';
-import type { DungeonConfig } from './dungeonGen';
+import { buildDungeon, buildPassage, type DungeonConfig, type DungeonLook, type GenOptions, type PassageConfig } from './dungeonGen';
 
 const skelly = ENEMY_CLASSES.find(c => c.id === 'skeleton')!;
 const zombie = ENEMY_CLASSES.find(c => c.id === 'zombie')!;
@@ -23,6 +23,7 @@ const echoBats = ENEMY_CLASSES.find(c => c.id === 'echo-bat-swarm')!;
 const blackCentipede = ENEMY_CLASSES.find(c => c.id === 'black-centipede')!;
 const paleCreeper = ENEMY_CLASSES.find(c => c.id === 'pale-creeper')!;
 const eyelax = ENEMY_CLASSES.find(c => c.id === 'eyelax')!;
+const voidling = ENEMY_CLASSES.find(c => c.id === 'voidling')!;
 
 const Necromancer = BOSS_CLASSES.find(c => c.id === 'necromancer')!;
 const BurningSpirit = BOSS_CLASSES.find(c => c.id === 'burning-spirit')!;
@@ -301,3 +302,65 @@ export const DUNGEONS: Record<string, DungeonConfig> = {
 
 /** A dungeon, by its DUNGEONS key. */
 export type DungeonKey = keyof typeof DUNGEONS;
+
+/** Passages: dungeons of one winding tunnel, no rift, key or boss, whose far door leads to the Sanctum (PassageConfig). */
+export const PASSAGES: Record<string, PassageConfig> = {
+  // The first dungeon of the game: a void-corrupted cave the party wakes in, its far door the way into the Sanctum
+  darkTunnel: {
+    name: 'The Dark Tunnel',
+    width: 72,
+    height: 30,
+    terrain: {
+      // Near-black violet cave rock, cracked with glowing void
+      floor: { color: [30, 27, 40], seam: [15, 13, 22], pattern: 'rough-fine', bumpiness: 0.6 },
+      walls: { color: [34, 30, 44], finish: 'rough', height: 'high', bumpiness: 1.8 },
+      veins: { color: [60, 24, 150], share: 0.055, pattern: 'cracks', glow: true, halos: 0.65 },
+    },
+    clutter: {
+      wall: { objects: ['claw-scratches'], density: 0.1 },
+      ground: { objects: ['loose-rubble'], density: 0.14 },
+    },
+    doorObject: 'warded-stone-door',
+    tunnelWidth: [2, 2],
+    startRoomSize: 7,
+    fightRooms: { count: [2, 3], size: [9, 11] },
+    obstacles: { objects: ['stalagmite-cluster'], roomChance: 0.67, density: 0.06 },
+    enemyGroups: [[voidling, voidling, voidling]],
+    loot: false,
+    // The Crypt's key, lying in the party's way: it takes it, and must find its way out
+    foundKey: {
+      key: 'crypt',
+      name: 'A Strange Object',
+      conversation: {
+        opening: [
+          'A strange glowing object on the ground that beckons you to take it.',
+          'If you can escape this place, maybe you can find out what it is.',
+        ],
+        effects: [{ kind: 'giveQuest', quest: 'escape-dark-tunnel' }],
+      },
+      // At the door out, the object left behind
+      leaving: { opening: ["You can't get that strange object out of your mind... Better go pick it up."] },
+    },
+  },
+} satisfies Record<string, PassageConfig>;
+
+/** Where the game begins: the passage the party arrives in (screens/OpeningScreen, then GameScreen's opening). */
+export const OPENING_PASSAGE: PassageKey = 'darkTunnel';
+
+/** A passage, by its PASSAGES key. */
+export type PassageKey = keyof typeof PASSAGES;
+
+/** Where the party can be outside the Sanctum: a rift dungeon or a passage, by its key. */
+export type AreaKey = DungeonKey | PassageKey;
+
+export const isPassage = (key: AreaKey): boolean => key in PASSAGES;
+
+/** The key a passage has lying in it to be found (PassageConfig.foundKey), if it is one and has one. */
+export const foundKeyIn = (key: AreaKey) => (isPassage(key) ? PASSAGES[key].foundKey : undefined);
+
+/** How an area's map is drawn: its name, terrain, clutter and doors. */
+export const areaLook = (key: AreaKey): DungeonLook => (isPassage(key) ? PASSAGES[key] : DUNGEONS[key]);
+
+/** A fresh area and its enemies: a rift dungeon (buildDungeon) or a passage (buildPassage). */
+export const buildArea = (key: AreaKey, partyLevel: number, gen?: GenOptions) =>
+  isPassage(key) ? buildPassage(PASSAGES[key], partyLevel, gen) : buildDungeon(DUNGEONS[key], partyLevel, gen);

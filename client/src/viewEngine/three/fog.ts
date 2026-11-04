@@ -184,6 +184,31 @@ export class FogOfWar {
     });
   }
 
+  /**
+   * Draw a model (its meshes fogged by apply) see-through, at `opacity` (0..1; fading it in), or (1) solid again. While
+   * faded, its meshes draw with their own copies of their materials (dropped once it is solid).
+   */
+  fade(obj: THREE.Object3D, opacity: number): void {
+    obj.traverse((c) => {
+      if (!(c instanceof THREE.Mesh)) return;
+      const own = c.userData.unfaded as THREE.Material | undefined;
+      if (opacity >= 1) {
+        if (own) { (c.material as THREE.Material).dispose(); c.material = own; delete c.userData.unfaded; }
+        return;
+      }
+      if (!own) {
+        const base = c.material as THREE.Material, copy = base.clone();
+        // Its shader changes (fog, glow, halo) and their program key carry over: clone() copies neither
+        copy.onBeforeCompile = base.onBeforeCompile;
+        copy.customProgramCacheKey = base.customProgramCacheKey;
+        copy.transparent = true;
+        c.userData.unfaded = base;
+        c.material = copy;
+      }
+      (c.material as THREE.Material).opacity = opacity;
+    });
+  }
+
   /** Whether there is fog to draw. */
   get active(): boolean {
     return this.uniforms.fogOn.value > 0.5;

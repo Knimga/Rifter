@@ -12,7 +12,7 @@ import { HOLD_LABEL } from '../designs/_character';
 import { CATEGORY_FOLDER } from '../core/folders';
 import type { WeaponType } from '../../data/gear/types';
 import { TINT_CHOICES, tintChoice } from '../tintChoices';
-import { DUNGEONS, type DungeonKey } from '../../data/world/dungeons';
+import { areaLook, DUNGEONS, PASSAGES, type AreaKey } from '../../data/world/dungeons';
 import { isTinted, tintModel } from '../core/tint';
 import type { RGB } from '../core/vec';
 import { TILE_BORDER_COLOR } from '../../components/mapParts';
@@ -23,8 +23,8 @@ import DungeonPreview from './DungeonPreview';
 import SanctumPreview from './SanctumPreview';
 
 /** A map the Maps view shows: the Sanctum or a dungeon. */
-type MapKey = 'sanctum' | DungeonKey;
-const isMapKey = (k: string): k is MapKey => k === 'sanctum' || k in DUNGEONS;
+type MapKey = 'sanctum' | AreaKey;
+const isMapKey = (k: string): k is MapKey => k === 'sanctum' || k in DUNGEONS || k in PASSAGES;
 import { BTN, INPUT, Toggle } from './ui';
 
 // Cell size follows the game's tile size (TILE_SIZE, the one constant the maps use), so the game view
@@ -317,10 +317,10 @@ export default function ForgePage() {
         })}
         <div>
           <h2 className="text-xs font-bold uppercase tracking-widest text-gray-500 mb-1">Maps</h2>
-          {(['sanctum', ...Object.keys(DUNGEONS)] as MapKey[]).map((k) => (
+          {(['sanctum', ...Object.keys(PASSAGES), ...Object.keys(DUNGEONS)] as MapKey[]).map((k) => (
             <button key={k} onClick={() => setMapKey(k)}
               className={`w-full text-left px-2 py-1.5 rounded ${mapKey === k ? 'bg-gray-700' : 'hover:bg-gray-700/50'}`}>
-              {k === 'sanctum' ? 'The Sanctum' : DUNGEONS[k].name}
+              {k === 'sanctum' ? 'The Sanctum' : areaLook(k).name}
             </button>
           ))}
         </div>

@@ -97,6 +97,8 @@ export interface BodyBuild {
   figure?: 'male' | 'female';
   /** Half-width between the shoulder joints (default: the figure's, 0.225 for 'male'). Broader shoulders move the arms out. */
   shoulderX?: number;
+  /** Leg thickness multiplier (default: the figure's, 1 for 'male'): a stout build's thicker legs (Rix's). */
+  legs?: number;
   /** Arm thickness multiplier (default: the figure's, 1 for 'male'). */
   arms?: number;
   /** Boot thickness multiplier (default 1); above ~1.1 the boots are thicker than the legs. */
@@ -121,10 +123,10 @@ export const FIGURE_FRAME = {
   female: { shoulderX: 0.205, arms: 0.86, legs: 0.86, feet: 0.8 },
 } as const;
 
-/** A build's shoulder half-width and arm thickness (its own, else its figure's), and its figure's leg thickness and foot size. */
+/** A build's shoulder half-width and arm and leg thickness (its own, else its figure's), and its figure's foot size. */
 export function bodyFrame(build: BodyBuild): { shoulderX: number; arms: number; legs: number; feet: number } {
   const f = FIGURE_FRAME[build.figure ?? 'male'];
-  return { shoulderX: build.shoulderX ?? f.shoulderX, arms: build.arms ?? f.arms, legs: f.legs, feet: f.feet };
+  return { shoulderX: build.shoulderX ?? f.shoulderX, arms: build.arms ?? f.arms, legs: build.legs ?? f.legs, feet: f.feet };
 }
 
 /**
@@ -327,6 +329,9 @@ export function buildBody(m: Mesh, look: BodyLook, build: BodyBuild = {}): void 
   m.anchor('forearm_l', lerp3(left.elbow, left.wrist, 0.5));
   m.anchor('elbow_l', left.elbow);
   m.anchor('fist_l', left.fist); // where an offhand held dangling hangs from (a focus)
+  // A little above the top of the head, over any hair: where a portrait frames from when something rises higher
+  // (Ardas's staff and its gem: renderPortrait)
+  m.anchor('head_top', [0, HEAD.center[1] + HEAD.ry * 1.6, 0]);
   if (build.hold === 'bow' || build.hold === 'crossbow') m.anchor('hand_l', left.fist);
   if (build.hold === 'shoulderCarry') m.anchor('shoulder_rest_r', carryRest(right.shoulder, build));
 
@@ -375,6 +380,37 @@ export function capWithBangs(m: Mesh, color: RGB, rf: (a: number, b: number) => 
     const dir = norm([t * 0.45, -0.75, 0.55]);
     frustum(m, base, add(base, mul(dir, rf(0.05, 0.065))), 0.03, 0.004, 4, color);
   }
+}
+
+/**
+ * A short bob framing the face (Ileena's): smooth over the crown and low over the brow, falling straight down the back
+ * and sides to the jaw, open in front; at its front edges, a point on each side curves in over the cheek, onto the
+ * front of the face.
+ */
+export function bobHair(m: Mesh, color: RGB): void {
+  const { center: h, rx, ry, rz } = HEAD;
+  m.part('hair', h);
+  blob(m, add(h, [0, ry * 0.28, -0.008]), [rx * 1.16, ry * 0.84, rz * 1.14], 1, 0.02, color, { floorY: h[1] + ry * 0.14 }); // crown
+  // The back, down to the jaw, reaching well up under the crown so no scalp shows between them
+  blob(m, add(h, [0, -ry * 0.2, -rz * 0.3]), [rx * 1.2, ry * 0.88, rz * 0.92], 1, 0.02, color);
+  blob(m, add(h, [0, -ry * 0.9, -rz * 0.42]), [rx * 0.9, ry * 0.32, rz * 0.55], 0, 0.02, color); // over the nape, down to the collar
+  for (const sx of [-1, 1]) {
+    // Each side, falling past the cheek to the jaw, clear of the face
+    blob(m, add(h, [sx * rx * 1.02, -ry * 0.3, -rz * 0.06]), [rx * 0.26, ry * 0.74, rz * 0.6], 1, 0.02, color);
+    // Its point curving in over the cheek, reaching a little onto the front of the face
+    const base = add(h, [sx * rx * 1.04, -ry * 0.4, rz * 0.46]);
+    frustum(m, base, add(base, [-sx * rx * 0.36, -ry * 0.16, rz * 0.34]), 0.036, 0.003, 4, color);
+  }
+}
+
+/**
+ * A smooth scalp under spiky hair (spikyHair), so no skin shows through the cap's facets at the hairline. Build it
+ * last: its random draws must not shift the hair's (the Knight's, Rix's).
+ */
+export function spikyScalp(m: Mesh, color: RGB): void {
+  const { center: h, rx, ry, rz } = HEAD;
+  m.part('hair', h);
+  blob(m, add(h, [0, ry * 0.25, -0.01]), [rx * 1.12, ry * 0.85, rz * 1.14], 1, 0, color, { floorY: h[1] + ry * 0.1 });
 }
 
 /**
@@ -468,6 +504,25 @@ export function pauldron(m: Mesh, sx: 1 | -1, shoulder: Vec3, look: PauldronLook
     blob(m, at, [(0.085 - 0.008 * l) * k, 0.03 * k, (0.104 - 0.008 * l) * k], 0, 0.04, look.lames[l - 1], { floorY: at[1] });
   }
   m.xf(s0, (p) => add(rotZ(p, -sx * 0.5), [shoulder[0] * 0.98, shoulder[1] + 0.04 * k, 0]));
+}
+
+/** A leather chestpiece's colors: its leather, its belt (and the strap under its buckle), the buckle's iron. */
+export interface ChestpieceLook { leather: RGB; strap: RGB; buckle: RGB }
+
+/**
+ * A heavy leather chestpiece (the Barbarian's, Rix's): broad across the shoulders, narrowing to the waist and flaring
+ * into a short hem over the tops of the thighs, a stitched seam across the chest, and a wide belt with an iron buckle.
+ */
+export function leatherChestpiece(m: Mesh, look: ChestpieceLook): void {
+  const T = TORSO;
+  m.part('torso', [0, T.waist, 0]);
+  loft(m, [
+    ell(T.hip - 0.1, 0.235, 0.15), ell(T.hip + 0.02, 0.21, 0.136), ell(T.waist, 0.178, 0.112),
+    ell(T.chest, 0.228, 0.136), ell(T.shoulder + 0.01, 0.288, 0.142), ell(T.collar, 0.16, 0.104),
+  ], look.leather);
+  band(m, T.chest + 0.03, T.chest - 0.02, 0.23, 0.138, 0.229, 0.137, mulC(look.leather, 1.25)); // stitched seam
+  band(m, T.hip + 0.07, T.hip, 0.212, 0.138, 0.214, 0.139, look.strap);
+  box(m, [0, T.hip + 0.035, 0.138], [0.06, 0.05, 0.014], look.buckle);
 }
 
 /**
@@ -828,7 +883,13 @@ export function casterRobe(m: Mesh, rf: (a: number, b: number) => number, look: 
   const T = TORSO;
   m.part('robe', [0, T.waist, 0]);
   const N = 10;
-  const rings = [
+  // A female figure's robe (Ileena's) narrows at the waist and swells forward over the bust as Lynn's blouse does
+  // (bustRing), a little outside it, easing in to her narrower shoulders
+  const rings = build.figure === 'female' ? [
+    ell(0.05, 0.3, 0.2, N), ell(0.45, 0.25, 0.165, N), ell(T.hip, 0.21, 0.136, N), ell(T.waist, 0.136, 0.094, N),
+    bustRing(T.chest - 0.04, 0.162, 0.106, 0.016, N), bustRing(T.chest + 0.04, 0.182, 0.112, 0.054, N), bustRing(T.chest + 0.1, 0.184, 0.114, 0.032, N),
+    ell(T.shoulder + 0.01, bodyFrame(build).shoulderX - 0.01, 0.118, N), ell(T.collar, 0.126, 0.09, N),
+  ] : [
     ell(0.05, 0.3, 0.2, N), ell(0.45, 0.25, 0.165, N), ell(T.hip, 0.21, 0.136, N), ell(T.waist, 0.15, 0.1, N),
     ell(T.chest, 0.178, 0.114, N), ell(T.shoulder + 0.01, 0.2, 0.12, N), ell(T.collar, 0.135, 0.095, N),
   ];

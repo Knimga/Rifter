@@ -97,7 +97,9 @@ export function renderPortrait(model: Model): string {
   shared ??= new IconRenderer();
   return shared.render(model, (cam, obj) => {
     obj.rotation.y = PORTRAIT.yaw;
-    const head = model.mesh.anchors.overhead[1] - 0.12; // top of the head (finalize puts overhead 0.12 above it)
+    // The top of the head: the model's top (finalize puts overhead 0.12 above it), unless something it holds rises
+    // higher than its head (a character body marks head_top just over its hair)
+    const head = Math.min(model.mesh.anchors.overhead[1] - 0.12, model.mesh.anchors.head_top?.[1] ?? Infinity);
     const top = head + PORTRAIT.top * head, bottom = head - PORTRAIT.bottom * head;
     const cy = (top + bottom) / 2, span = top - bottom;
     const fov = (PORTRAIT.fovDeg * Math.PI) / 180;
@@ -106,8 +108,11 @@ export function renderPortrait(model: Model): string {
     cam.aspect = 1;
     cam.near = dist * 0.1;
     cam.far = dist * 4;
-    cam.position.set(0, cy + dist * 0.08, dist);
-    cam.lookAt(0, cy, 0);
+    // Centered on the head where it is marked (a golem's sits well forward of its body), turned with the model
+    const a = model.mesh.anchors.head_top, yaw = PORTRAIT.yaw;
+    const hx = a ? a[0] * Math.cos(yaw) + a[2] * Math.sin(yaw) : 0, hz = a ? -a[0] * Math.sin(yaw) + a[2] * Math.cos(yaw) : 0;
+    cam.position.set(hx, cy + dist * 0.08, hz + dist);
+    cam.lookAt(hx, cy, hz);
     cam.updateProjectionMatrix();
   });
 }

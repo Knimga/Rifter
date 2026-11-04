@@ -1187,6 +1187,44 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
     dropsGold: 0.4,
     goldBonus: 50,
     model: 'creature.eyelax'
+  },
+  {
+    id: 'voidling',
+    name: 'Voidling',
+    attributes: { finesse: 3, mind: 3, spirit: 2 },
+    highAttributes: ['mind', 'finesse'],
+    lowAttributes: ['toughness', 'strength'],
+    baseHp: 15,
+    baseArmor: 10,
+    abilities: [
+      {
+        name: 'Umbral Claws',
+        mpCost: 0,
+        apCost: 1,
+        range: 1,
+        target: 'enemy',
+        attackCategory: 'melee',
+        displayElement: 'shadow',
+        effects: [
+          { type: 'damage', appliesTo: 'target', damageElement: 'shadow', minDamage: 3, maxDamage: 5 }
+        ]
+      },
+      {
+        name: 'Sap Will',
+        mpCost: 7,
+        apCost: 1,
+        range: 2,
+        target: 'enemy',
+        attackCategory: 'magic',
+        displayElement: 'shadow',
+        effects: [
+          { type: 'debuff', appliesTo: 'target', damageElement: 'shadow', stats: { strength: -4, mind: -4 }, turns: 3, maxStacks: 1 }
+        ]
+      }
+    ],
+    xpMultiplier: 0.8,
+    dropChance: 0,
+    model: 'creature.voidling'
   }
 ];
 

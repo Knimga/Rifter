@@ -9,6 +9,7 @@
 import type { ModelLink } from '../../forge/core/types';
 import type { RGB } from '../../forge/core/vec';
 import { DUNGEONS, type DungeonKey } from './dungeons';
+import type { QuestCondition } from './quests';
 import { pick } from '../random';
 
 export interface RiftModelData {
@@ -30,8 +31,20 @@ export const RIFT_MODELS = {
 /** The color of every rift back to the Sanctum: a deep royal blue. */
 export const SANCTUM_RIFT_COLOR: RGB = [40, 65, 175];
 
-/** The keys the party starts the game with. */
-export const STARTING_KEYS: readonly DungeonKey[] = ['crypt'];
+/**
+ * The keys the party starts the game with: none (it finds the Crypt's in the Dark Tunnel, PASSAGES' foundKey, not
+ * knowing what it is; Ardas names it and it goes on the keyring).
+ */
+export const STARTING_KEYS: readonly DungeonKey[] = [];
+
+/** The color of the portals the party arrives through at the game's opening (OpeningArrival): a dark void purple. */
+export const ARRIVAL_PORTAL_COLOR: RGB = [104, 44, 200];
+
+/**
+ * When the party can use the Rifter: once Ileena has told it how (the "Use the Rifter" quest moved on past speaking
+ * with her, or done). Until then its receptacle doesn't respond.
+ */
+export const RIFTER_UNLOCK: QuestCondition = { reached: 'use-the-rifter', step: 'enter-rift' };
 
 /**
  * The key a boss drops: one of a dungeon the party has no key to yet (`owned`), and that isn't already lying

@@ -3,7 +3,8 @@
 // just off the floor over a faint pool of its light. Its glow takes the tint (the swirl's arms fading from the
 // tint's deep shade to the tint itself, the rim, its motes and halos, the floor pool); the void stays black.
 // Animated: the swirl turns, and its rim and the motes hugging it turn slowly the other way (PartSpin; both keep
-// the oval outline). Built facing +z, standing on the floor. The oval is built round (unit radius) in the x-y
+// the oval outline). It can open (`open`: swirl, rim and floor pool growing out of nothing) and close (`close`:
+// collapsing back into it): a portal the party arrives through at the game's opening. Built facing +z, standing on the floor. The oval is built round (unit radius) in the x-y
 // plane and squashed to OVAL; the spins happen in that round frame.
 import type { Design, Tone } from '../../core/types';
 import type { Mesh } from '../../core/mesh';
@@ -18,6 +19,9 @@ const VOID_PURPLE: RGB = [24, 12, 32];
 const BLACK: RGB = [0, 0, 0];
 /** The floor pool: mostly the tint, a third of its deep shade. */
 const GROUND: Tone = [0.65, 0.35];
+
+/** Its parts that open and close (the whole rift). */
+const OPENING = ['swirl', 'rim', 'glow'];
 
 /** Squash from the round frame to the oval: half as wide as tall. */
 const OVAL: Vec3 = [0.5, 1, 1];
@@ -120,6 +124,11 @@ const design: Design = {
   motion: [
     { part: 'swirl', axis: 'z', turnsPerSec: 0.22, frame: OVAL },
     { part: 'rim', axis: 'z', turnsPerSec: -0.1, frame: OVAL },
+  ],
+  // Opening, then (listed after it) closing again
+  animations: [
+    { name: 'open', ms: 1100, grows: OPENING.map((part) => ({ part })) },
+    { name: 'close', ms: 800, grows: OPENING.map((part) => ({ part, shrink: true })) },
   ],
   build(c) {
     const m = c.mesh;

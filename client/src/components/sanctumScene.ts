@@ -1,16 +1,18 @@
 // What the Sanctum shows (as zoneScenery.ts does for a dungeon's zone): its 3D floor and walls, its fog, and its map
-// objects (the Rifter, the decorative objects, the NPCs). SanctumMap draws them in the game; the forge's Maps view
+// objects (the Rifter, its doors, the decorative objects, the NPCs). SanctumMap draws them in the game; the forge's Maps view
 // draws the same.
 import { SANCTUM, SANCTUM_FLOORS, SANCTUM_SHOWN, SANCTUM_TERRAIN } from '../data/world/sanctum';
 import { npc } from '../data/world/npcs';
 import { decorObjectModel } from '../data/world/decorObjects';
 import { interactiveObjectModel } from '../data/world/interactiveObjects';
 import { DUNGEONS, type DungeonKey } from '../data/world/dungeons';
+import { posKey } from '../data/world/grid';
 import { yawFromGridMove } from '../forge/core/facing';
 import { buildTerrain } from '../forge/terrain/build';
 import { RIFTER_TINT_PARTS } from '../forge/designs/_rifter';
 import type { MapObject, UnitAim } from './ModelLayer';
 import type { FogInput } from '../viewEngine/three/fog';
+import { doorAt } from './zoneScenery';
 
 /**
  * The Sanctum's fog: everything in it always in sight (its floor and the walls around it), so it only darkens the
@@ -20,8 +22,11 @@ import type { FogInput } from '../viewEngine/three/fog';
  */
 export const SANCTUM_FOG: FogInput = { cols: SANCTUM.width, rows: SANCTUM.height, visible: SANCTUM_SHOWN, explored: SANCTUM_SHOWN, still: true };
 
-/** The Sanctum's 3D floor and walls (forge/terrain): it never changes, so it is built once. */
-export const SANCTUM_3D = buildTerrain({ cols: SANCTUM.width, rows: SANCTUM.height, floors: SANCTUM_FLOORS, doors: [], style: SANCTUM_TERRAIN, seed: 0 });
+/** The Sanctum's 3D floor and walls (forge/terrain), its walls opened at its doors: it never changes, so it is built once. */
+export const SANCTUM_3D = buildTerrain({ cols: SANCTUM.width, rows: SANCTUM.height, floors: SANCTUM_FLOORS, doors: SANCTUM.doors, style: SANCTUM_TERRAIN, seed: 0 });
+
+/** The Sanctum's doors (SANCTUM.doors), each a heavy door facing the floor it opens onto. Nothing uses them yet. */
+export const SANCTUM_DOORS: MapObject[] = SANCTUM.doors.map((pos, i) => doorAt(`door-${i}`, 'warded-stone-door', pos, (p) => SANCTUM_FLOORS.has(posKey(p))));
 
 /**
  * What the Rifter is doing: the key set in it (shown in its socket), the key whose rift it shows (null: dormant, no
@@ -72,5 +77,6 @@ export const SANCTUM_DECOR: MapObject[] = SANCTUM.decor.map((d, i) => ({
  */
 export const npcObjects = (npcAims: Record<string, UnitAim> = {}): MapObject[] => SANCTUM.npcs.map((n) => ({
   id: n.id, link: npc(n.id).model, pos: n.pos, facing: yawFromGridMove(...n.facing),
+  ...(npc(n.id).holds ? { held: npc(n.id).holds } : {}),
   ...(npcAims[n.id] ? { aim: npcAims[n.id] } : {}),
 }));

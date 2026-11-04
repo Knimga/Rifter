@@ -26,14 +26,21 @@ export interface TerrainStyle {
     finish: 'masonry' | 'cyclopean' | 'rough';
     /** How tall its full walls stand (build.ts WALL_HEIGHTS): 'low' (1.5 tiles) or 'high' (half again). Stubs stay low. */
     height: 'low' | 'high';
-    /** 0..1: how much a rough wall bulges, a cyclopean wall's stones swell and a masonry wall's blocks vary. */
+    /**
+     * 0..1: how much a rough wall bulges, a cyclopean wall's stones swell and a masonry wall's blocks vary. A rough wall
+     * may go up to about 2, for ultra-rough, craggy rock.
+     */
     bumpiness: number;
   };
   /**
    * Another color running through the floor and walls: lava (`glow`: lit from within, with halos scattered along it), moss. `share` (0..1) of the
    * surface, as thin winding `cracks` or connected `patches`; a flagstone floor shows them in its joints.
    */
-  veins?: { color: RGB; share: number; pattern: 'cracks' | 'patches'; glow?: boolean };
+  veins?: {
+    color: RGB; share: number; pattern: 'cracks' | 'patches'; glow?: boolean;
+    /** With `glow`: the share (0..1) of floor tiles and wall faces with a vein showing that get a halo (build.ts VEIN_HALO_CHANCE by default). */
+    halos?: number;
+  };
 }
 
 /** What a zone's terrain is built from: its grid, its walkable tiles ('x,y') and its doors (wall tiles). */

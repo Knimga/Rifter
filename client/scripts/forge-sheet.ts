@@ -14,7 +14,7 @@
 //   --tint <name>       tinted models (Rifts & Keys, the active Rifter, the Affix Shard): paint them in a dungeon's riftColor or a shard
 //                       category's color ('shard-offense'; default: the first
 //                       dungeon), or a color given as #rrggbb
-//   --terrain <dungeon> a generated zone's floor, walls, doors and scenery instead (a DUNGEONS key: crypt, firelands...);
+//   --terrain <dungeon> a generated zone's floor, walls, doors and scenery instead (a DUNGEONS or PASSAGES key: crypt, darkTunnel...);
 //                       --zone <n> (default 0), --seed <n> the layout (default 1), --tile <px> (default 28),
 //                       --crop x0,y0,x1,y1 only those tiles, close up (with a bigger --tile)
 import { writeFileSync } from 'node:fs';
@@ -38,8 +38,7 @@ import { buildTerrain } from '../src/forge/terrain/build';
 import { mulberry32 } from '../src/forge/core/rng';
 import { buildInstance } from '../src/forge/core/link';
 import { doorObjects, sceneryObjects, zoneGround } from '../src/components/zoneScenery';
-import { DUNGEONS } from '../src/data/world/dungeons';
-import { buildDungeon } from '../src/data/world/dungeonGen';
+import { areaLook, buildArea, DUNGEONS, PASSAGES } from '../src/data/world/dungeons';
 
 const args = process.argv.slice(2);
 const flag = (n: string) => args.includes(`--${n}`);
@@ -241,18 +240,18 @@ function downsample(color: Uint8Array, w: number, h: number): Uint8Array {
   return out;
 }
 
-// --terrain <dungeon>: one generated zone of a dungeon (a DUNGEONS key) as the game draws it: its 3D floor and walls
+// --terrain <dungeon>: one generated zone of a dungeon or passage (a DUNGEONS or PASSAGES key) as the game draws it: its 3D floor and walls
 // (forge/terrain) with its doors, obstacles and clutter (approved designs), the whole zone in one image
 const terrainKey = opt('terrain', '');
 if (terrainKey) {
-  const config = DUNGEONS[terrainKey];
-  if (!config) {
-    console.error(`no dungeon '${terrainKey}' (one of: ${Object.keys(DUNGEONS).join(', ')})`);
+  if (!(terrainKey in DUNGEONS) && !(terrainKey in PASSAGES)) {
+    console.error(`no dungeon '${terrainKey}' (one of: ${[...Object.keys(PASSAGES), ...Object.keys(DUNGEONS)].join(', ')})`);
     process.exit(1);
   }
   // Generation draws on Math.random: seeded, so a --seed always gives the same zone
   Math.random = mulberry32(Number(opt('seed', '1')));
-  const { dungeon } = buildDungeon(config, 1);
+  const config = areaLook(terrainKey);
+  const { dungeon } = buildArea(terrainKey, 1);
   const zone = dungeon.zones[Math.min(Number(opt('zone', '0')), dungeon.zones.length - 1)];
   const terrain = buildTerrain({ cols: zone.width, rows: zone.height, floors: zoneGround(zone), doors: zone.doors.map((d) => d.pos), style: config.terrain, seed: zone.id });
   const approved = Object.fromEntries((await loadDesigns()).map((l) => [l.design.id, l.design]));

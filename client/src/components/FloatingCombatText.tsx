@@ -38,8 +38,9 @@ export default function FloatingCombatText({ ft, at, onComplete }: Props) {
       className="absolute z-30 pointer-events-none flex items-center justify-center"
       style={{ left: at.left - TILE_SIZE / 2, top: at.top - TILE_SIZE / 2, width: TILE_SIZE, height: TILE_SIZE }}
     >
+      {/* As wide as its text, up to a few words' worth before it wraps (not the tile's narrow width), centered on it */}
       <span
-        className={`font-bold drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)] ${ft.look === 'levelUp' ? 'rf-float-levelup' : 'text-sm'} ${ft.icon ? 'inline-flex items-center gap-1 whitespace-nowrap' : ''}`}
+        className={`shrink-0 w-max max-w-[240px] text-center font-bold drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)] ${ft.look === 'levelUp' ? 'rf-float-levelup' : 'text-sm'} ${ft.icon ? 'inline-flex items-center gap-1 whitespace-nowrap' : ''}`}
         style={{ color: ft.color, animation: `floatUp ${DURATION_MS}ms ease-out forwards` }}
       >
         {ft.icon === 'gold' && <FaCoins aria-hidden="true" className="w-3 h-3 shrink-0" style={{ color: 'var(--rift-gold)' }} />}

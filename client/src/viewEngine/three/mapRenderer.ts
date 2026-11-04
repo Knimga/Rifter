@@ -19,6 +19,8 @@ const MS_PER_TILE = 200;
 const MAX_MOVE_MS = 1000;
 /** How long a hit's flash lasts. */
 const FLASH_MS = 120;
+/** How long a unit takes to fade in as it appears (MapUnit.fadeIn). */
+const FADE_IN_MS = 900;
 /**
  * How high (tiles) a map object's model may rise and still lie flat on the floor (a seal carved into it): such an
  * object is drawn with the floor, under the map's tile overlays (highlights, the move line), not over them.
@@ -53,6 +55,13 @@ export interface MapUnit {
   size?: number | readonly [number, number];
   /** A hit's flash: when it changes, the model flashes white for FLASH_MS (one already set when the unit appears doesn't). */
   flash?: number;
+  /** It fades in as it appears (over FADE_IN_MS), instead of being there at once (a party member stepping out of a portal). */
+  fadeIn?: boolean;
+  /**
+   * Its `played` animations play from their start when it appears (a portal opening), instead of showing them done
+   * (a chest already looted).
+   */
+  playIn?: boolean;
 }
 
 interface Entry {
@@ -80,6 +89,8 @@ interface Entry {
   flashMs: number;
   /** It lies flat on the floor (FLAT_HEIGHT): drawn with the terrain's floor (groundCanvas), under the tile overlays. */
   flat: boolean;
+  /** How far into fading in it is (ms), while it does (MapUnit.fadeIn). */
+  fadeMs?: number;
 }
 
 /** Each played animation's progress (0..1), for animateParts. */
@@ -267,11 +278,16 @@ export class MapModelRenderer {
         // A new unit adopts any existing aim without turning to it (a remount never replays an old attack)
         const yaw = u.lying ? lootYaw() : (u.facing ?? 0);
         e = { model: u.model, obj: makeObject(u, this.fog), pos: u.pos, at: { ...u.pos }, yaw, targetYaw: yaw, aimSeq: u.aim?.seq, anims: {}, viewer: u.viewer, size: typeof u.size === 'object' ? u.size : [u.size ?? 1, u.size ?? 1], flashSeq: u.flash, flashMs: 0, flat: isFlat(u) };
+        if (u.fadeIn) {
+          e.fadeMs = 0;
+          this.fog.fade(e.obj, 0);
+        }
         this.addObject(e);
         this.entries.set(u.id, e);
         this.place(u.id, e);
-        // A unit that appears in an animated state (a chest already looted) shows it done, not replayed
-        syncAnimations(e, u.played, true);
+        // A unit that appears in an animated state (a chest already looted) shows it done, not replayed; one that
+        // plays in (a portal opening) plays it from now
+        syncAnimations(e, u.played, !u.playIn);
         animateParts(e.obj, 0, progressOf(e));
         changed = true;
       } else if (u.pos.x !== e.pos.x || u.pos.y !== e.pos.y) {
@@ -328,6 +344,7 @@ export class MapModelRenderer {
 
   private removeObject(e: Entry): void {
     if (this.ground && e.obj.parent === this.ground.flats) this.ground.dirty = true;
+    if (e.fadeMs !== undefined) this.fog.fade(e.obj, 1); // drops its faded materials' copies
     e.obj.removeFromParent();
   }
 
@@ -378,6 +395,12 @@ export class MapModelRenderer {
         animating = true;
       }
       e.obj.rotation.y = e.yaw;
+      if (e.fadeMs !== undefined) {
+        e.fadeMs = Math.min(FADE_IN_MS, e.fadeMs + dt);
+        this.fog.fade(e.obj, e.fadeMs / FADE_IN_MS);
+        if (e.fadeMs >= FADE_IN_MS) e.fadeMs = undefined;
+        animating = true;
+      }
       if (e.flashMs > 0) {
         e.flashMs = Math.max(0, e.flashMs - dt);
         if (!e.flashMs) this.fog.flash(e.obj, false);

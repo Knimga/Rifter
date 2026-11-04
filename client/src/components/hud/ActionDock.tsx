@@ -14,7 +14,7 @@ import ItemIcon from '../ItemIcon';
 import AbilityCard, { ApDots, abilityTint } from '../ui/AbilityCard';
 import ApTracker, { type ApState } from './ApTracker';
 import RiftButton from '../ui/RiftButton';
-import Portrait from './Portrait';
+import Portrait, { HUD_PORTRAIT_SIZE } from './Portrait';
 import { heldGear } from '../characterModel';
 import { useLatest } from '../../hooks/useLatest';
 
@@ -115,7 +115,7 @@ export default function ActionDock({ member, stats, mp, slots, onSlotsChange, ar
     <section aria-label="Actions" className="rf-hud relative flex items-center gap-5 px-[18px] py-4" style={{ boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.03), 0 12px 30px rgba(0, 0, 0, 0.5)' }}>
       {/* The member */}
       <div className="flex items-center gap-3.5 w-[244px]">
-        <Portrait classKey={member.selectedClass} {...heldGear(member.gear)} size={56} />
+        <Portrait classKey={member.selectedClass} {...heldGear(member.gear)} size={HUD_PORTRAIT_SIZE} />
         <div className="min-w-0 flex flex-col gap-[3px]">
           <span className="font-display text-lg tracking-[0.04em] text-rift-bright truncate">{member.characterName}</span>
           <span className="text-[11px] text-rift-label">{CLASSES[member.selectedClass].name}</span>

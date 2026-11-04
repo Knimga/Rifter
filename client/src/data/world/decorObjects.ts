@@ -58,6 +58,19 @@ export const DECOR_OBJECTS: DecorObjectData[] = [
   // A waist-high bookshelf, its back against a wall: tomes and scrolls on its shelves (some leaning, some held by a
   // bookend), and on top a small glowing crystal ball, a few small crystals and a loose scroll or two
   { id: 'sages-bookshelf', name: "Sage's Bookshelf", model: 'decor.sages-bookshelf' },
+  // A geomancer's low workbench of dark wood with a thick stone top, its back against a wall, over two tiles: a
+  // half-cracked geode glowing amber in its middle, raw ore, a hammer and chisel, dark leylines carved in the top,
+  // dried herbs and little cones of colored earths and dusts along its edges, brown rubble on the floor around it
+  { id: 'ore-bench', name: 'Ore Bench', model: 'decor.ore-bench', span: 2 },
+  // A geomancer's cairn: a few brown stones stacked upright, barely balanced, brown rubble around its foot
+  { id: 'brown-stone-cairn', name: 'Brown Stone Cairn', model: 'decor.brown-stone-cairn' },
+  // A free-standing torch burning at head height on an iron pole, the pole held up by a small tripod at its foot
+  { id: 'floor-torch', name: 'Floor Torch', model: 'decor.floor-torch' },
+  // A plain, featureless slab of dark stone for a table, over two tiles, its top littered with an arcanist's work: books
+  // and an open tome, scrolls, brass instruments, a lens, an inkwell, and small glowing jars, crystals and an orb
+  { id: 'arcane-research-table', name: 'Arcane Research Table', model: 'decor.arcane-research-table', span: 2 },
+  // A few haphazard stacks of books on the floor, one taller than the others, a book or two lying flat or leaning against them
+  { id: 'book-stacks', name: 'Book Stacks', model: 'decor.book-stacks' },
 
   // ── Wall clutter ──
   // Grey cobwebs strung in the corner where the wall meets the floor, and a strand or two higher up

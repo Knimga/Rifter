@@ -12,12 +12,13 @@
 // One fixed look (the shards' places and colors are written in).
 import type { Design } from '../../core/types';
 import type { Mesh } from '../../core/mesh';
-import { bipyr, blob, box, frustum, tube } from '../../core/primitives';
+import { bipyr, box } from '../../core/primitives';
 import { embed } from '../../core/embed';
 import { paintTint } from '../../core/tint';
-import { add, mulC, rotY, sub, type RGB, type Vec3 } from '../../core/vec';
+import { add, mulC, rotY, type RGB, type Vec3 } from '../../core/vec';
 import { decorEntry } from '../_decor';
-import { LEATHER, PARCHMENT, book, bookStack, candle, openTome, scroll } from '../_books';
+import { LEATHER, book, bookStack, candle, openTome, scroll } from '../_books';
+import { JAR_GLOW, armillary, jar, leyline, mortar, openScroll } from '../_arcana';
 import affixShard from '../loot/affix-shard';
 import { SHARD_CATEGORIES } from '../../../data/gear/shards';
 
@@ -27,10 +28,6 @@ const STONE_DEEP: RGB = [12, 12, 16]; // the carving's recesses
 const LEY: RGB = [70, 186, 255]; // the leylines' light: a cool, semi-neon blue
 const LEY_HALO: RGB = [40, 120, 220];
 const CRYSTAL: RGB = [200, 238, 255];
-const BRASS: RGB = [146, 116, 58];
-/** The jars' glowing contents: teal, violet, amber. */
-const JAR_GLOW: RGB[] = [[90, 224, 204], [184, 124, 255], [255, 172, 84]];
-const GLASS: RGB = [40, 48, 56];
 
 /** The table's extent: its ends (x), back (−z, at the wall) and front (+z), and its top. */
 const X1 = 1.42, Z0 = -0.44, Z1 = 0.3, TOP = 0.5;
@@ -43,26 +40,13 @@ const REACH = Math.hypot(X1 + 0.02, Z0 - 0.02);
 /** Where someone using the table stands: in front of the circle (the open tome turns toward them). */
 const READER: Vec3 = [0, TOP, Z1 + 0.5];
 
-/** A flat strip lying on the top (`y` just above it) from `p` to `q`, `w` wide: a leyline. */
-function strip(m: Mesh, p: Vec3, q: Vec3, w: number, col: RGB): void {
-  const d = sub(q, p), len = Math.hypot(d[0], d[2]) || 1;
-  const n: Vec3 = [(-d[2] / len) * (w / 2), 0, (d[0] / len) * (w / 2)];
-  const below = add(add(p, q).map((v) => v / 2) as Vec3, [0, -0.05, 0]);
-  m.quad(add(p, n), add(q, n), sub(q, n), sub(p, n), col, below, { e: 0.9, j: 0.05 });
-}
+/** A glowing leyline on the top from `p` to `q`, `w` wide (_arcana's leyline). */
+const strip = (m: Mesh, p: Vec3, q: Vec3, w: number, col: RGB) => leyline(m, p, q, w, col, { e: 0.9, j: 0.05 });
 
 /** An arc of leyline around `c` (radius r, from angle a0 to a1), in `segs` strips. */
 function arc(m: Mesh, c: Vec3, r: number, a0: number, a1: number, segs: number, w: number, col: RGB): void {
   const at = (a: number): Vec3 => [c[0] + Math.cos(a) * r, c[1], c[2] + Math.sin(a) * r];
   for (let i = 0; i < segs; i++) strip(m, at(a0 + ((a1 - a0) * i) / segs), at(a0 + ((a1 - a0) * (i + 1)) / segs), w, col);
-}
-
-/** A glass jar on `c`: dark glass, its glowing contents showing through, a cork; a small glow around it. */
-function jar(m: Mesh, c: Vec3, h: number, r: number, glow: RGB): void {
-  frustum(m, add(c, [0, 0.004, 0]), add(c, [0, h * 0.7, 0]), r * 0.84, r * 0.8, 7, glow, { e: 0.85, j: 0.06 });
-  frustum(m, c, add(c, [0, h, 0]), r, r * 0.86, 7, GLASS, { a: 0.45, j: 0.04 });
-  frustum(m, add(c, [0, h, 0]), add(c, [0, h + 0.03, 0]), r * 0.5, r * 0.46, 6, LEATHER[3], { j: 0.1 });
-  m.halo(add(c, [0, h * 0.45, 0]), r * 2.6, mulC(glow, 0.7));
 }
 
 const design: Design = {
@@ -148,12 +132,7 @@ const design: Design = {
     scroll(m, [-0.9, TOP, 0.16], 0.26, 0.026, 0.25);
     scroll(m, [-1.1, TOP, -0.08], 0.22, 0.022, -0.9);
     // A scroll half unrolled across the top, its roll at one end
-    {
-      const from = m.faces.length;
-      box(m, [0.09, 0.003, 0], [0.18, 0.006, 0.13], PARCHMENT, 0.08);
-      frustum(m, [0, 0.02, -0.075], [0, 0.02, 0.075], 0.02, 0.02, 6, PARCHMENT, { j: 0.1 });
-      m.xf(from, (p) => add(rotY(p, -0.35), [-0.72, TOP, -0.22]));
-    }
+    openScroll(m, [-0.72, TOP, -0.22], -0.35);
     // Shards scattered among them: the Affix Shard's model, small, each in a category's color and softly glowing
     const shards: [Vec3, number, number][] = [ // where, its turn, its category (SHARD_CATEGORIES index)
       [[-0.84, TOP, -0.04], 0.4, 5], [[-1.02, TOP, 0.06], 1.9, 3], [[-0.7, TOP, 0.2], 3.1, 1],
@@ -174,20 +153,9 @@ const design: Design = {
 
     // The right: a brass armillary on its stand, a mortar and pestle, a candle, glowing jars and a stack of books
     m.part('right', [0.95, TOP, 0]);
-    {
-      const base: Vec3 = [0.98, TOP, 0.04];
-      frustum(m, base, add(base, [0, 0.025, 0]), 0.07, 0.06, 7, BRASS, { j: 0.1 });
-      frustum(m, add(base, [0, 0.025, 0]), add(base, [0, 0.12, 0]), 0.012, 0.01, 5, BRASS, { j: 0.1 });
-      const ctr = add(base, [0, 0.2, 0]);
-      const ring = (axis: (a: number) => Vec3) => tube(m, Array.from({ length: 13 }, (_, i) => add(ctr, axis((i / 12) * Math.PI * 2))), 0.008, 0.008, 4, BRASS, { j: 0.12, caps: false });
-      ring((a) => [Math.cos(a) * 0.085, Math.sin(a) * 0.085, 0]);
-      ring((a) => [0, Math.sin(a) * 0.085, Math.cos(a) * 0.085]);
-      ring((a) => [Math.cos(a) * 0.085, Math.sin(a) * 0.03, Math.sin(a) * 0.08]);
-      blob(m, ctr, [0.022, 0.022, 0.022], 0, 0.05, JAR_GLOW[0], { e: 0.9 });
-    }
+    armillary(m, [0.98, TOP, 0.04], JAR_GLOW[0]);
     // Mortar and pestle
-    frustum(m, [1.24, TOP, 0.13], [1.24, TOP + 0.06, 0.13], 0.045, 0.06, 7, STONE_TOP, { j: 0.12 });
-    frustum(m, [1.24, TOP + 0.04, 0.13], [1.29, TOP + 0.13, 0.1], 0.012, 0.016, 5, mulC(STONE_TOP, 1.2), { j: 0.1 });
+    mortar(m, [1.24, TOP, 0.13], STONE_TOP);
     // A candle with its flame
     candle(m, [0.56, TOP, 0.16]);
     // Glowing jars, clustered toward the back

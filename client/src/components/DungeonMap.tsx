@@ -1,4 +1,4 @@
-import { useMemo, useState, lazy, Suspense } from 'react';
+import { useMemo, useState, lazy, Suspense, type ReactNode } from 'react';
 import { FaCoins } from 'react-icons/fa';
 import { loot } from '../data/gear/loot';
 import { totalShards, type ShardCounts } from '../data/gear/shards';
@@ -20,16 +20,22 @@ import { unitKey } from '../data/combat/abilityExecution';
 import type { FloatingText } from './FloatingCombatText';
 import { MoveCostPips } from './MoveLine';
 import { interactiveObjectGlow, interactiveObjectModel, interactiveObjectName } from '../data/world/interactiveObjects';
-import { RIFT_MODELS, SANCTUM_RIFT_COLOR, riftGlowCss } from '../data/world/rifts';
+import { SANCTUM_RIFT_COLOR, riftGlowCss } from '../data/world/rifts';
 import { DUNGEONS, type DungeonKey } from '../data/world/dungeons';
-import { Board, FloorGrid, FloorTile, HoverEdgeGlow, MapFloats, MapTag, MoveLineOverlay, ObjectTag, RIFT_TAG_HEIGHT, TileHighlight, UprightAt, UsableGlow, riftTag, toMapMember, useBoard, useHoveredTile, useStableHandler, type PartyTokenData, TILE_HIGHLIGHT } from './mapParts';
+import type { QuestMark } from '../data/world/dialogue';
+import { Board, FloorGrid, FloorTile, HoverEdgeGlow, KEY_TAG_HEIGHT, LootGlow, MapFloats, MapTag, MoveLineOverlay, ObjectTag, RIFT_TAG_HEIGHT, TileHighlight, UprightAt, UsableGlow, riftTag, toMapMember, useBoard, useHoveredTile, useStableHandler, keyLoot, type PartyTokenData, TILE_HIGHLIGHT } from './mapParts';
 import UnitStatus, { statusMarkers } from './hud/UnitStatus';
 import type { MapLoot, MapObject, UnitAim, UnitFx } from './ModelLayer';
 
-/** How high (world tiles) a rift key's name tag (or a gold pile's amount) sits over the floor it lies on. */
-const KEY_TAG_HEIGHT = 0.35;
 /** How high a container's name tag sits: just over a chest's lid (a dead adventurer, lying flat, is lower still). */
 const CONTAINER_TAG_HEIGHT = 0.62;
+/** How high (world tiles) a quest marker floats over a rift key lying on the floor: above its keystone, clear of its name tag. */
+const KEY_MARK_HEIGHT = 0.95;
+/** How high (world tiles) a dialogue spoken over a tile points (a found key's): over the head and bars of the leader standing there. */
+const DIALOGUE_HEIGHT = 1.6;
+
+/** No extra map objects (DungeonMap's sceneObjects): one stable array. */
+const NO_OBJECTS: MapObject[] = [];
 
 // 3D party, enemy and loot models over the tile grid. Lazy: it pulls in three.js (GameScreen preloads it on mount).
 const ModelLayer = lazy(() => import('./ModelLayer'));
@@ -101,6 +107,17 @@ interface Props {
   onLootClick?: (pos: Pos) => void;
   /** Rift keys lying on the floor ("x,y" → the dungeon whose key it is): drawn in its color, picked up by a click. */
   droppedKeys?: Record<string, DungeonKey>;
+  /**
+   * A quest marker over every rift key lying on the floor, if any: ? (a quest step waiting on one being picked up), !
+   * (a found key that gives one: PassageConfig.foundKey).
+   */
+  keyMark?: QuestMark | null;
+  /** A found key lying on the floor (PassageConfig.foundKey): what its tag calls it (the party doesn't know it yet). */
+  foundKey?: { key: DungeonKey; name: string } | null;
+  /** More map objects, for the moment (the opening's portals: zoneScenery arrivalPortal). */
+  sceneObjects?: MapObject[];
+  /** A dialogue spoken over a tile (a found key's, over where it lies: NpcDialogue), its point just over it. */
+  dialogue?: { at: Pos; content: ReactNode } | null;
   /** Gold lying on the floor ("x,y" → how much): drawn as the Gold Coins model, picked up by a click. */
   droppedGold?: Record<string, number>;
   /** Affix shards lying on the floor ("x,y" → which): drawn as the Affix Shards model, picked up by a click. */
@@ -120,7 +137,7 @@ interface Props {
   fog: FogState | null;
 }
 
-export default function DungeonMap({ playerPos, activeMoverPos, party, moveTargets, moveApCost, onMove, onLocationChange, onDoorClick, chests, emptiedChests, onOpenChest, activeTarget, activeAbilityArea, areaTone, actionRange, onAbilityUse, onAbilityDeselect, onMemberSelect, enemies, inCombat, isPlayerTurn, activeCombatantId, floatingTexts, onFloatingTextComplete, zone, riftPos, partyBuffs, partyHots, partyDots, terrain, clutter, doorObject, enemyAoePreview, enemyTargetKey, tileTargets = null, droppedItems = {}, droppedKeys = {}, droppedGold = {}, droppedShards = {}, onLootClick, aims, fx, highlightUnitId = null, fog, onReady }: Props) {
+export default function DungeonMap({ playerPos, activeMoverPos, party, moveTargets, moveApCost, onMove, onLocationChange, onDoorClick, chests, emptiedChests, onOpenChest, activeTarget, activeAbilityArea, areaTone, actionRange, onAbilityUse, onAbilityDeselect, onMemberSelect, enemies, inCombat, isPlayerTurn, activeCombatantId, floatingTexts, onFloatingTextComplete, zone, riftPos, partyBuffs, partyHots, partyDots, terrain, clutter, doorObject, enemyAoePreview, enemyTargetKey, tileTargets = null, droppedItems = {}, droppedKeys = {}, keyMark = null, foundKey = null, sceneObjects = NO_OBJECTS, dialogue = null, droppedGold = {}, droppedShards = {}, onLootClick, aims, fx, highlightUnitId = null, fog, onReady }: Props) {
   const { width, height, floors, doors } = zone;
   const hover = useHoveredTile();
   const hoveredTile = hover.hovered;
@@ -156,9 +173,7 @@ export default function DungeonMap({ playerPos, activeMoverPos, party, moveTarge
       if (!top) continue;
       out.push({ id: top.id, link: top.model, pos: keyPos(key) });
     }
-    for (const [key, dungeon] of Object.entries(droppedKeys)) {
-      out.push({ id: `key-${dungeon}`, link: RIFT_MODELS.keystone.model, pos: keyPos(key), tint: DUNGEONS[dungeon].riftColor });
-    }
+    for (const [key, dungeon] of Object.entries(droppedKeys)) out.push(keyLoot(key, dungeon));
     for (const key of Object.keys(droppedGold)) out.push({ id: `gold-${zone.id}-${key}`, link: loot('gold').model, pos: keyPos(key) });
     for (const key of Object.keys(droppedShards)) out.push({ id: `shards-${zone.id}-${key}`, link: loot('affix-shards').model, pos: keyPos(key) });
     return out;
@@ -185,8 +200,8 @@ export default function DungeonMap({ playerPos, activeMoverPos, party, moveTarge
     for (const c of chests) {
       out.push({ id: c.id, link: interactiveObjectModel(c.object), pos: c.pos, facing: yawFromGridMove(...c.facing), played: emptiedChests.has(c.id) ? ['open'] : undefined });
     }
-    return [...out, ...scenery];
-  }, [doors, floors, riftPos, doorObject, chests, emptiedKey, scenery]); // eslint-disable-line react-hooks/exhaustive-deps -- the zone by its doors and floor; emptied chests by their key
+    return [...out, ...scenery, ...sceneObjects];
+  }, [doors, floors, riftPos, doorObject, chests, emptiedKey, scenery, sceneObjects]); // eslint-disable-line react-hooks/exhaustive-deps -- the zone by its doors and floor; emptied chests by their key
 
   // What aiming at a tile aims at: the large creature on it (all of it), else the tile (as aimPartyAction does)
   const enemyBodies = useMemo(() => modelEnemies.map(bodyOf), [modelEnemies]);
@@ -293,14 +308,8 @@ export default function DungeonMap({ playerPos, activeMoverPos, party, moveTarge
     return (
       <FloorTile key={key} p={p} hover={hover} onClick={onTileClick}
         brighten={floor && !door && !activeTarget && !highlight && moveTargets.has(key) && hover.isHovered(p)}>
-        {(tileItems?.[0] || tileKey || tileGold || tileShards) && (
-          // The pile (an item, a rift key, gold, shards) is drawn by ModelLayer; a soft round glow on the floor under
-          // it, pale yellow whatever lies there, shows it can be picked up
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-            <div className={`w-10 h-10 rounded-full ${isLootAdjacent ? 'animate-pulse' : 'invisible'}`}
-              style={{ background: 'radial-gradient(circle, color-mix(in srgb, var(--rift-loot-glow) 55%, transparent) 0%, color-mix(in srgb, var(--rift-loot-glow) 22%, transparent) 45%, transparent 70%)' }} />
-          </div>
-        )}
+        {/* The pile (an item, a rift key, gold, shards) is drawn by ModelLayer; the glow under it shows it can be picked up */}
+        {(tileItems?.[0] || tileKey || tileGold || tileShards) && <LootGlow on={isLootAdjacent} />}
         {/* A door, the rift or a chest the leader can use now: a soft pulsing glow on its tile (stronger on hover) */}
         {/* The rift, hovered from farther away: its edges glow faintly */}
         {isRift && !isAdjacentToRift && hover.isHovered(p) && <HoverEdgeGlow color={riftGlowCss(SANCTUM_RIFT_COLOR)} />}
@@ -359,9 +368,26 @@ export default function DungeonMap({ playerPos, activeMoverPos, party, moveTarge
         );
       })}
 
+      {/* A quest marker over each rift key lying where the party has seen (a quest step waiting on one being picked up) */}
+      {keyMark && Object.keys(droppedKeys).filter(isKnown).map((key) => {
+        const { x, y } = keyPos(key);
+        return (
+          <UprightAt key={`mark-${key}`} board={board} x={x} y={y} height={KEY_MARK_HEIGHT} className="z-30">
+            <span role="img" aria-label={keyMark === '!' ? 'Quest available' : 'Quest: pick up the key'} className={`rf-quest-mark ${keyMark === '!' ? 'text-[24px]' : 'text-[30px]'}`}>{keyMark}</span>
+          </UprightAt>
+        );
+      })}
+
+      {/* A dialogue spoken over a tile (a found key's) */}
+      {dialogue && (
+        <UprightAt board={board} x={dialogue.at.x} y={dialogue.at.y} height={DIALOGUE_HEIGHT} className="z-40">
+          <div className="absolute bottom-1/2 left-1/2 -translate-x-1/2 mb-2">{dialogue.content}</div>
+        </UprightAt>
+      )}
+
       {/* A rift key's name while it is hovered */}
       {hoveredTile && droppedKeys[posKey(hoveredTile)] && isKnown(posKey(hoveredTile)) && (
-        <ObjectTag board={board} x={hoveredTile.x} y={hoveredTile.y} height={KEY_TAG_HEIGHT} text={DUNGEONS[droppedKeys[posKey(hoveredTile)]].keyName} />
+        <ObjectTag board={board} x={hoveredTile.x} y={hoveredTile.y} height={KEY_TAG_HEIGHT} text={droppedKeys[posKey(hoveredTile)] === foundKey?.key ? foundKey.name : DUNGEONS[droppedKeys[posKey(hoveredTile)]].keyName} />
       )}
 
       {/* How much gold lies there, while it is hovered */}

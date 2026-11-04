@@ -68,6 +68,10 @@
   --rift-gold-text: #e6d9a8; /* an amount of gold being traded (the vendor's prices, the party's gold there) */
   --rift-noprof: #c4544f;    /* not proficient: the red tint of an item cell the viewer can't use (every grid) */
   --rift-levelup: #e2d496;   /* level-up cues and XP fill: "act now", deliberately not the --glow accent */
+  --rift-quest: #f5cf3a;     /* quests: the ! and ? markers over NPCs and before topics, the tracker's bullets */
+  --rift-black: #000000;     /* pure black: the opening (its background, the narration's glow) */
+  --rift-swirl-violet: #8a4cff; /* the opening's swirling background (components/ui/VoidSwirl.tsx): its violet light */
+  --rift-swirl-blue: #3f6dff;   /* and its blue */
   --pulse-combat: #8a1a1a;   /* the dark red pulse around the screen's edge as combat begins (EdgePulse) */
   --rift-xp-track: #1a1c20;
   --rift-fog: #000000;       /* fog of war over unseen tiles (read by the map renderer: viewEngine/three/fog.ts): the game screen's black, so its edges melt into it */
@@ -173,6 +177,46 @@
 
   /* A floating box: tooltips and menus */
   .rf-tip { background: var(--rift-panel); border: 1px solid var(--rift-edge); border-radius: 2px; box-shadow: var(--shadow-float); }
+
+  /* An NPC's dialogue pane over its head (NpcDialogue): rounded, a faint top-lit gradient as on a polished surface,
+     and a small point under it toward the speaker */
+  .rf-dialogue {
+    background: linear-gradient(180deg, var(--rift-raised-hi) 0%, var(--rift-panel) 48%, var(--rift-sunk) 100%);
+    border: 1px solid var(--rift-edge); border-radius: 10px;
+    box-shadow: var(--shadow-float), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  }
+  /* A topic to ask about in it: a diamond before it; hovered, it brightens and glows strongly, its diamond too */
+  .rf-topic { transition: color 180ms ease, text-shadow 180ms ease; }
+  .rf-topic:hover:not(:disabled), .rf-topic:focus-visible {
+    color: var(--rift-bright); outline: none;
+    text-shadow: 0 0 8px color-mix(in srgb, var(--glow) 85%, transparent), 0 0 20px color-mix(in srgb, var(--glow) 60%, transparent);
+  }
+  .rf-topic-mark { background: var(--glow); transition: box-shadow 180ms ease, background-color 180ms ease; }
+  .rf-topic:hover:not(:disabled) .rf-topic-mark, .rf-topic:focus-visible .rf-topic-mark {
+    background: var(--rift-bright); box-shadow: 0 0 8px var(--glow), 0 0 16px color-mix(in srgb, var(--glow) 70%, transparent);
+  }
+  /* A quest marker (! a quest to take, ? one to hand in): over an NPC's head, or before a topic, glowing yellow */
+  .rf-quest-mark {
+    font-family: 'Metamorphous', Georgia, serif; font-weight: 400; line-height: 1; color: var(--rift-quest);
+    text-shadow: 0 0 7px color-mix(in srgb, var(--rift-quest) 95%, transparent), 0 0 18px color-mix(in srgb, var(--rift-quest) 60%, transparent), 0 2px 3px rgba(0, 0, 0, 0.8);
+  }
+  .rf-dialogue::after {
+    content: ""; position: absolute; left: 50%; bottom: -7px; width: 12px; height: 12px; transform: translateX(-50%) rotate(45deg);
+    background: var(--rift-sunk); border-right: 1px solid var(--rift-edge); border-bottom: 1px solid var(--rift-edge);
+  }
+
+  /* Narration (the game's opening: components/Narration.tsx): pale letters in a black glow, readable over anything */
+  .rf-narration {
+    color: var(--rift-ink);
+    text-shadow: 0 0 6px var(--rift-black), 0 0 14px var(--rift-black), 0 0 28px var(--rift-black), 0 2px 3px var(--rift-black);
+  }
+  .rf-narration-hint { filter: drop-shadow(0 0 6px var(--rift-black)) drop-shadow(0 0 12px var(--rift-black)); }
+  /* Behind the narration in the game (the party arrived): the map dimmed */
+  .rf-narration-dim { background: color-mix(in srgb, var(--rift-black) 55%, transparent); animation: rf-dim-in 700ms ease both; }
+  @keyframes rf-dim-in { from { opacity: 0; } }
+  /* A black cover lifting (the opening fading in: screens/OpeningScreen.tsx) */
+  @keyframes rf-uncover { from { opacity: 1; } to { opacity: 0; } }
+
 
   /* Section titles: `rf-label` small grey caps (menu screens), `rf-h` display-font caps (the party window) */
   .rf-label { margin: 0; font-size: 11px; font-weight: 400; letter-spacing: 0.14em; text-transform: uppercase; color: var(--rift-label); }
@@ -619,6 +663,21 @@
     border: 1px solid color-mix(in srgb, var(--rift-levelup) 34%, transparent); border-radius: 1px;
     font-size: 9px; line-height: 12px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--rift-levelup); pointer-events: none;
   }
+  /* A key's shortcut shown on its button: a small keycap after the label (the Party button's I) */
+  .rf-keycap {
+    display: inline-flex; align-items: center; justify-content: center; min-width: 16px; height: 16px; margin-left: 8px; padding: 0 3px;
+    box-sizing: border-box; vertical-align: 1px; border: 1px solid var(--rift-edge); border-radius: 2px; background: var(--rift-sunk);
+    font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 10px; line-height: 1; letter-spacing: 0; text-indent: 0; color: var(--rift-muted);
+  }
+  /* A new player's hint (components/hud/HintPane.tsx): its pointer up toward what it is about, and that button pulsing */
+  .rf-hint { border-color: color-mix(in srgb, var(--glow) 45%, var(--rift-line)); animation: rf-dim-in 400ms ease both; }
+  .rf-hint-pointer {
+    position: absolute; top: -6px; right: 34px; width: 10px; height: 10px; transform: rotate(45deg);
+    background: var(--rift-panel); border-left: 1px solid color-mix(in srgb, var(--glow) 45%, var(--rift-line)); border-top: 1px solid color-mix(in srgb, var(--glow) 45%, var(--rift-line));
+  }
+  .rf-btn.is-hinted { animation: rf-hinted 1800ms ease-in-out infinite; }
+  @keyframes rf-hinted { 50% { border-color: color-mix(in srgb, var(--glow) 80%, var(--rift-edge)); box-shadow: 0 0 22px color-mix(in srgb, var(--glow) 38%, transparent); } }
+  @media (prefers-reduced-motion: reduce) { .rf-btn.is-hinted { animation: none; } }
   /* The Party button while someone can level up */
   .rf-btn.is-levelup { border-color: color-mix(in srgb, var(--rift-levelup) 40%, transparent); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), inset 0 -2px 8px rgba(0, 0, 0, 0.6), 0 0 18px color-mix(in srgb, var(--rift-levelup) 12%, transparent); }
 

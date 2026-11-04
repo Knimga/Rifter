@@ -1,4 +1,4 @@
-﻿// The game: the Sanctum or a dungeon, the party moving and fighting in it, and the HUD. Each concern lives in
+// The game: the Sanctum or a dungeon, the party moving and fighting in it, and the HUD. Each concern lives in
 // its own hook (party member state, inventory, chests, experience, turn ticks, action outcomes, keys, the
 // enemy turn); this screen holds where everyone is and the fight, wires the hooks together, and draws it all.
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
@@ -21,9 +21,14 @@ import { covers, findOpenTilesNear, footprint, footprintKeys, isAdjacent, posKey
 import { partyWalk, findFollowerSpawns, spreadOut, trailFollowers } from '../data/world/movement';
 import { SANCTUM, SANCTUM_FLOORS, SANCTUM_RECEPTACLE, isSanctumWalkable, type NpcPlacement } from '../data/world/sanctum';
 import { npc } from '../data/world/npcs';
+import { conversationOf, effectsMark, npcQuestMark, type Conversation, type DialogueEffect, type DialogueTopic, type QuestMark } from '../data/world/dialogue';
+import { currentStep, quest, questHolds, questsFinishedBy, stepIndex, type QuestEvent } from '../data/world/quests';
+import { useQuests } from '../hooks/useQuests';
+import QuestTracker from '../components/hud/QuestTracker';
 import { interactiveObjectName } from '../data/world/interactiveObjects';
-import { buildDungeon, isFreeFloor, objectTilesOf, zoneRift, zoneWalkable, type DungeonData, type ZoneData } from '../data/world/dungeonGen';
-import { DUNGEONS, type DungeonKey } from '../data/world/dungeons';
+import { isFreeFloor, objectTilesOf, zoneRift, zoneWalkable, type DungeonData, type ZoneData } from '../data/world/dungeonGen';
+import { areaLook, buildArea, DUNGEONS, foundKeyIn, isPassage, OPENING_PASSAGE, type AreaKey, type DungeonKey } from '../data/world/dungeons';
+import { ARRIVAL_LINES } from '../data/world/opening';
 import { INITIAL_COMBAT, aggroedBy, startCombat, joinCombat, advanceTurn, apLeft, moveBudget, moveCost, stunnedOutcome, getCurrentCombatant, deadPartyIndices, type CombatState } from '../data/combat/combat';
 import { isRooted } from '../data/units/stats';
 import { creatureUnit, executeAction, memberUnit, toAction, unitKey, type ActionWorld, type CombatUnit } from '../data/combat/abilityExecution';
@@ -38,9 +43,13 @@ import VendorWindow from '../components/VendorWindow';
 import EnchanterWindow from '../components/EnchanterWindow';
 import EdgePulse from '../components/hud/EdgePulse';
 import type { UnitAim } from '../components/ModelLayer';
+import { arrivalPortal } from '../components/zoneScenery';
+import NpcDialogue, { DIALOGUE_PORTRAIT } from '../components/NpcDialogue';
+import Narration from '../components/Narration';
+import { KeyPortrait } from '../components/Keyring';
 import { DORMANT_RIFTER, type RifterState } from '../components/sanctumScene';
 import { RIFT_CLOSE_MS } from '../forge/designs/_rifter';
-import { bossKeyDrop, riftGlowCss } from '../data/world/rifts';
+import { RIFTER_UNLOCK, bossKeyDrop, riftGlowCss } from '../data/world/rifts';
 import { usePartyMembers } from '../hooks/usePartyMembers';
 import { useInventory } from '../hooks/useInventory';
 import { useVendor } from '../hooks/useVendor';
@@ -55,6 +64,10 @@ import { useFogOfWar } from '../hooks/useFogOfWar';
 import { useReach } from '../hooks/useReach';
 import { useSceneReady } from '../hooks/useSceneReady';
 import { useFadeOut } from '../hooks/useFadeOut';
+import { useArrival } from '../hooks/useArrival';
+import { useHints } from '../hooks/useHints';
+import HintPane from '../components/hud/HintPane';
+import { OPENING_FADE_MS } from './OpeningScreen';
 import LoadingCover from '../components/ui/LoadingCover';
 
 import CharacterSheet from '../components/CharacterSheet';
@@ -83,20 +96,24 @@ interface Props {
   setProgress: (progress: PartyProgress) => void;
 }
 
+/** How long the party stands in the Sanctum, come through its door, before its greeter speaks (ms). */
+const GREETING_PAUSE_MS = 1200;
+
 /** Screen space the HUD covers on each side (px): the map pans only within the area inside it. */
 const HUD_INSETS: Insets = { top: 84, right: 24, bottom: 164, left: 300 };
 
 export default function GameScreen({ party, setParty, progress, setProgress }: Props) {
-  const [location, setLocation] = useState<'sanctum' | 'dungeon'>('sanctum');
+  // The game begins in a dungeon: the opening's passage, the party arriving there (scene 'arrival', below)
+  const [location, setLocation] = useState<'sanctum' | 'dungeon'>('dungeon');
   const [playerPos, setPlayerPos] = useState<Pos>(SANCTUM.playerStart);
   const [enemies, setEnemies] = useState<EnemyInstance[]>([]);
   const [combat, setCombat] = useState<CombatState>(INITIAL_COMBAT);
-  const { floatingTexts, spawnFloat, removeFloat, clearFloats } = useFloatingText();
+  const { floatingTexts, spawnFloat, announce, removeFloat, clearFloats } = useFloatingText();
   const [showCharSheet, setShowCharSheet] = useState(false);
   const [dungeon, setDungeon] = useState<DungeonData | null>(null);
-  // Which dungeon the party is in (or last entered): its preset gives the map's look and doors
-  const [dungeonKey, setDungeonKey] = useState<DungeonKey>('crypt');
-  const preset = DUNGEONS[dungeonKey];
+  // Which dungeon or passage the party is in (or last entered): its preset gives the map's look and doors
+  const [dungeonKey, setDungeonKey] = useState<AreaKey>('crypt');
+  const preset = areaLook(dungeonKey);
   const [enemyAoePreview, setEnemyAoePreview] = useState<EnemyAoePreview | null>(null);
   // The unit (unitKey) a creature is about to hit, highlighted on the map
   const [enemyTargetKey, setEnemyTargetKey] = useState<string | null>(null);
@@ -107,7 +124,7 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
   const [currentZone, setCurrentZone] = useState(0);
   const [followerPositions, setFollowerPositions] = useState<Pos[]>([...SANCTUM.followerStarts]);
 
-  // â”€â”€â”€ Party â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ─── Party ───────────────────────────────────────────────────────────────
 
   // Each member's HP/MP/effects and effective stats
   const { members, updateMembers, partyHp, partyBuffs, partyHots, partyDots, partyAllStats, reviveDowned, restoreAll, clearEffects } = usePartyMembers(party, progress);
@@ -145,6 +162,22 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
   const zoneSummons = zoneEnemies.filter(e => isAlly(e) && e.currentHp > 0);
   const riftPos = dungeon ? zoneRift(dungeon, currentZone) : null;
 
+  // ─── Scenes ──────────────────────────────────────────────────────────────
+  // A moment the party watches: the opening's arrival in the Dark Tunnel (useArrival), a found key's words (finding:
+  // PassageConfig.foundKey; and at the passage's door while it still lies there: turnBack), the greeting at the Sanctum's door (its greeter speaks at once: SANCTUM.doorGreeter). The
+  // party can't act (move, use abilities or items, open windows) until it is over; its dialogue is still clicked through
+  const [scene, setScene] = useState<'arrival' | 'finding' | 'greeting' | null>('arrival');
+  const locked = scene !== null;
+  // The tile the party faces as it appears on a map (its greeter, through the Sanctum's door), if any
+  const [facesOnArrival, setFacesOnArrival] = useState<Pos | null>(null);
+
+  // The map stays under a dark cover until its 3D layer has drawn (useSceneReady), after fading to black before a
+  // change of map (useFadeOut, below)
+  const mapKey = `${location}:${zone?.id ?? ''}`;
+  const { loading: mapLoading, onReady: onMapReady } = useSceneReady(mapKey);
+  // The opening's arrival plays once the Dark Tunnel is shown: the party coming through its portals, then told
+  const arrival = useArrival(scene === 'arrival' && !mapLoading);
+
   // Party members as drawn on the maps: the leader always, followers only while alive
   const partyPositions = [playerPos, ...followerPositions].slice(0, party.length);
   const memberTokens: PartyTokenData[] = party.map((m, i) => ({
@@ -158,9 +191,17 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
     active: i === activePartyIdx,
     // Equipped items, as the member's 3D model holds them
     ...heldGear(m.gear),
+    faces: facesOnArrival ?? undefined,
+    fadeIn: scene === 'arrival',
   }));
-  // On the map: the living members (isOnMap; the HUD's party rows show everyone)
-  const partyTokens = memberTokens.filter(t => isOnMap(t.hp));
+  // On the map: the living members (isOnMap; the HUD's party rows show everyone); while arriving, those come through yet
+  const partyTokens = memberTokens.filter(t => isOnMap(t.hp) && (scene !== 'arrival' || t.partyIndex < arrival.shown));
+  // The opening's portals, each on its member's tile (useArrival)
+  const portalKey = arrival.portals.map(p => `${p.member}:${p.closing}`).join('|');
+  const portalObjects = useMemo(
+    () => arrival.portals.map(p => arrivalPortal(`arrival-portal-${p.member}`, partyPositions[p.member], p.closing)),
+    [portalKey], // eslint-disable-line react-hooks/exhaustive-deps -- the portals by their key; the party stands still meanwhile
+  );
 
   // Fog of war (dungeons only): what the living members see now, and what the party has seen before. Only
   // known tiles can be walked to, and only enemies in sight are on the map (drawn, targetable).
@@ -180,7 +221,7 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
     ? (steps: number) => moveCost(steps, combat.paidTiles, activeStats.movement).apSpent
     : undefined;
 
-  // Selected action, normalised (weapon folded in) â€” drives map targeting and range
+  // Selected action, normalised (weapon folded in) — drives map targeting and range
   const activeAction = activeAbility ? toAction(activeAbility, activeWeapon) : null;
 
   const { moveTargets, tileTargets } = useReach({
@@ -191,7 +232,7 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
     tileRange: activeAction?.target === 'tile' ? activeAction.range : null,
   });
 
-  // â”€â”€â”€ Latest values, for callbacks, timers and the enemy turn â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ─── Latest values, for callbacks, timers and the enemy turn ─────────────
 
   const enemiesRef = useLatest(enemies);
   const zoneRef = useLatest(zone);
@@ -236,7 +277,7 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
     if (combat.active) setBarViewIdx(activePartyIdx);
   }, [combat.active, activePartyIdx]);
 
-  // â”€â”€â”€ Loot, inventory and chests â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ─── Loot, inventory and chests ──────────────────────────────────────────
 
   /** Whether someone in the party can use an item (proficient): loot favours it, and windows fade what no one can use. */
   const partyCanUse = useCallback((item: Item) => partyCanUseItem(partyRef.current, item), [partyRef]);
@@ -290,6 +331,16 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
   // The Sanctum's NPCs: the one the leader is speaking to (its window open), and where each faces. It turns to the
   // leader when spoken to, and back to its own way (the tile in front of it) when the talk ends
   const [talkingTo, setTalkingTo] = useState<NpcPlacement | null>(null);
+  // Each talk's number: a new talk with a speaking NPC starts its conversation over
+  const [talkCount, setTalkCount] = useState(0);
+  // The conversation a speaking NPC speaks this talk: the one that held as the talk began (it stays the same while
+  // the talk changes the party's quests)
+  const [conversation, setConversation] = useState<Conversation | null>(null);
+  const quests = useQuests();
+  // The new player's hints (data/world/hints.ts): the party window's comes up as the game begins, and goes once it is opened
+  const hints = useHints();
+  const hintDone = hints.done;
+  useEffect(() => { if (showCharSheet) hintDone('party'); }, [showCharSheet, hintDone]);
   const [npcAims, setNpcAims] = useState<Record<string, UnitAim>>({});
   const npcAimSeq = useRef(0);
   const aimNpc = (id: string, at: Pos) => setNpcAims(prev => ({ ...prev, [id]: { x: at.x, y: at.y, seq: ++npcAimSeq.current } }));
@@ -297,6 +348,8 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
     const placed = SANCTUM.npcs.find(n => n.id === id);
     if (!placed) return;
     setTalkingTo(placed);
+    setTalkCount(n => n + 1);
+    setConversation(conversationOf(id, quests.log) ?? null);
     aimNpc(id, playerPos);
   };
   const endTalk = useCallback(() => {
@@ -305,10 +358,88 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
     setTalkingTo(null);
     endVisit(); // a trade can only be undone during the visit it was made in
   }, [talkingTo, endVisit]);
-  // Walking away (the leader no longer beside it) or leaving the Sanctum ends the talk
+  // Walking away (the leader no longer beside it) or leaving the Sanctum ends the talk, as does opening any window
+  // (a service NPC's own window is its talk)
+  const otherWindowOpen = showCharSheet || showRifter || showTesting;
   useEffect(() => {
-    if (talkingTo && (location !== 'sanctum' || !isAdjacent(playerPos, talkingTo.pos))) endTalk();
-  }, [talkingTo, location, playerPos, endTalk]);
+    if (talkingTo && (location !== 'sanctum' || !isAdjacent(playerPos, talkingTo.pos) || otherWindowOpen)) endTalk();
+  }, [talkingTo, location, playerPos, otherWindowOpen, endTalk]);
+  /**
+   * What finishing a conversation or topic does: a quest taken, moved on or completed, a rift key put on the keyring
+   * (each named in floating text over the leader).
+   */
+  const runDialogueEffects = (effects: readonly DialogueEffect[] | undefined) => {
+    for (const e of effects ?? []) {
+      if (e.kind === 'giveQuest') {
+        quests.take(e.quest);
+        announce(playerPos.x, playerPos.y, `New quest: ${quest(e.quest).name}`, 'var(--rift-quest)');
+      } else if (e.kind === 'advanceQuest') {
+        const next = quest(e.quest).steps?.[stepIndex(quests.log, e.quest) + 1];
+        quests.advance(e.quest);
+        if (next) announce(playerPos.x, playerPos.y, `New objective: ${next.objective}`, 'var(--rift-quest)');
+      } else if (e.kind === 'completeQuest') {
+        quests.complete(e.quest);
+        announce(playerPos.x, playerPos.y, `Quest complete: ${quest(e.quest).name}`, 'var(--rift-quest)');
+      } else if (e.kind === 'giveKey') {
+        addKey(e.key);
+        announce(playerPos.x, playerPos.y, DUNGEONS[e.key].keyName, riftGlowCss(DUNGEONS[e.key].riftColor));
+      }
+    }
+  };
+  /** The speaking NPC finished a topic it was asked about: what it does (its effects). */
+  const finishTopic = (topic: DialogueTopic) => runDialogueEffects(topic.effects);
+  /** The speaking NPC finished its conversation: what it does (a topic-less one's effects), and the talk ends. */
+  const finishConversation = () => {
+    if (talkingTo) runDialogueEffects(conversation?.effects);
+    endTalk();
+    if (scene === 'greeting') setScene(null);
+  };
+  // The greeting at the Sanctum's door: GREETING_PAUSE_MS after the Sanctum is shown, its greeter speaks to the party
+  const talkToRef = useLatest(talkTo);
+  useEffect(() => {
+    if (scene !== 'greeting' || location !== 'sanctum' || mapLoading || talkingTo) return;
+    const id = setTimeout(() => talkToRef.current(SANCTUM.doorGreeter), GREETING_PAUSE_MS);
+    return () => clearTimeout(id);
+  }, [scene, location, mapLoading, talkingTo, talkToRef]);
+  // The NPC speaking now, if the party is talking to one without a service (a service opens its window instead)
+  const speaking = talkingTo && !npc(talkingTo.id).service && conversation ? { npcId: talkingTo.id, talk: talkCount, conversation } : null;
+  // The Rifter works once the party has been told how (RIFTER_UNLOCK); a quest step waiting on it marks its receptacle (?)
+  const rifterUsable = questHolds(quests.log, RIFTER_UNLOCK);
+  const rifterMark: QuestMark | null = quests.log.active.some(id => currentStep(quests.log, id)?.marker === 'rifter') ? '?' : null;
+  /**
+   * The party did something (entered a dungeon, picked up a key there): the quests waiting on it move on, their next
+   * objective floating over the leader.
+   */
+  const questDid = (event: QuestEvent) => {
+    for (const id of questsFinishedBy(quests.log, event)) {
+      const next = quest(id).steps?.[stepIndex(quests.log, id) + 1];
+      if (next) announce(playerPos.x, playerPos.y, `New objective: ${next.objective}`, 'var(--rift-quest)');
+    }
+    quests.event(event);
+  };
+  const questDidRef = useLatest(questDid);
+  // The key lying to be found in this passage, if any (its words, then it is taken: finding)
+  const foundKey = location === 'dungeon' ? foundKeyIn(dungeonKey) : undefined;
+  const [finding, setFinding] = useState<Pos | null>(null);
+  // Its words at the passage's door while it still lies in the passage (its `leaving`): the door stays shut
+  const [turnBack, setTurnBack] = useState<Pos | null>(null);
+  // The keys lying on this dungeon's floor are marked: a found key by what its words do (! a quest to take), else by a
+  // quest step waiting on a key being picked up here (?)
+  const keyMark: QuestMark | null = foundKey && zone && Object.values(zone.droppedKeys).includes(foundKey.key)
+    ? effectsMark(foundKey.conversation.effects, quests.log)
+    : quests.log.active.some(id => {
+      const step = currentStep(quests.log, id);
+      return step?.marker === 'droppedKey' && !!step.until && 'pickUpKeyIn' in step.until && step.until.pickUpKeyIn === dungeonKey;
+    }) ? '?' : null;
+  // The quest marker over each NPC (! a quest to take, ? one to hand in), from what it would say now
+  const questMarks = useMemo(() => {
+    const out: Record<string, QuestMark> = {};
+    for (const n of SANCTUM.npcs) {
+      const mark = npcQuestMark(n.id, quests.log);
+      if (mark) out[n.id] = mark;
+    }
+    return out;
+  }, [quests.log]);
   const keysRef = useLatest(keyring.keys);
   const chests = useChests({ location, dungeon, currentZone, combatActive: combat.active, playerPos, partyLevel: progress.level, partyCanUse, takeLoot, takeGold, takeShards });
 
@@ -322,17 +453,40 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
    * and shards into the party's shards (none needs inventory room, so a full inventory never keeps them); a loot pile
    * goes into the inventory, as much as fits.
    */
+  /** The rift key lying on `pos` in this dungeon is gone from its floor. */
+  const clearKeyAt = useCallback((pos: Pos) =>
+    updateCurrentZone(z => ({ ...z, droppedKeys: Object.fromEntries(Object.entries(z.droppedKeys).filter(([k]) => k !== posKey(pos))) })), [updateCurrentZone]);
+  /** Pick up the rift key lying on `pos` in this dungeon: onto the keyring (the quests waiting on it move on). */
+  const pickUpRiftKey = useCallback((pos: Pos, riftKey: DungeonKey) => {
+    addKey(riftKey);
+    announce(pos.x, pos.y, DUNGEONS[riftKey].keyName, riftGlowCss(DUNGEONS[riftKey].riftColor));
+    clearKeyAt(pos);
+    questDidRef.current({ pickUpKeyIn: dungeonKey });
+  }, [dungeonKey, addKey, announce, clearKeyAt, questDidRef]);
+  /**
+   * The found key's words are said: what they do (a quest given), and the key is taken, only from the floor: the party
+   * doesn't know it is a key (someone gives it later: a dialogue's giveKey).
+   */
+  const finishFinding = () => {
+    if (finding && foundKey) {
+      runDialogueEffects(foundKey.conversation.effects);
+      clearKeyAt(finding);
+    }
+    setFinding(null);
+    setScene(null);
+  };
+
   const handleLootPickup = useCallback((pos: Pos) => {
     if (!zone) return;
     const key = posKey(pos);
     // A tile's record with this tile's entry gone (what was lying here has been taken)
     const cleared = <T,>(r: Record<string, T>) => Object.fromEntries(Object.entries(r).filter(([k]) => k !== key));
     const riftKey = zone.droppedKeys[key];
-    if (riftKey) {
-      addKey(riftKey);
-      spawnFloat(pos.x, pos.y, DUNGEONS[riftKey].keyName, riftGlowCss(DUNGEONS[riftKey].riftColor));
-      updateCurrentZone(z => ({ ...z, droppedKeys: cleared(z.droppedKeys) }));
-    }
+    // A rift key: onto the keyring; a found one speaks first (its words), and is taken once they are said (finishFinding)
+    if (riftKey && riftKey === foundKey?.key) {
+      setFinding(pos);
+      setScene('finding');
+    } else if (riftKey) pickUpRiftKey(pos, riftKey);
     const coins = zone.droppedGold[key];
     if (coins) {
       takeGold(coins, pos);
@@ -349,7 +503,7 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
     const remaining = takeLoot(items, pos);
     if (!remaining) return;
     updateCurrentZone(z => ({ ...z, droppedItems: remaining.length > 0 ? { ...z.droppedItems, [key]: remaining } : cleared(z.droppedItems) }));
-  }, [zone, takeLoot, takeGold, takeShards, updateCurrentZone, addKey, spawnFloat]);
+  }, [zone, foundKey, pickUpRiftKey, takeLoot, takeGold, takeShards, updateCurrentZone]);
   const lootPickupRef = useLatest(handleLootPickup);
 
   /**
@@ -369,12 +523,15 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
     // A boss's defeat gives the vendor fresh wares, at the party's level (only then: leaving a dungeon doesn't)
     if (dead.some(isBoss)) restockVendor(partyLevelRef.current);
     for (const e of dead) {
-      const items = generateLootDrops(d.level, partyLevelRef.current, e.classData.dropChance ?? 0, partyCanUse);
-      if (items.length) (drops[posKey(e.pos)] ??= []).push(...items);
-      const coins = rollGold(e.level, e.classData.dropsGold ?? 0, e.classData.goldBonus);
-      if (coins) goldDrops[posKey(e.pos)] = (goldDrops[posKey(e.pos)] ?? 0) + coins;
-      const found = rollShardDrop(SHARD_DROP_CHANCE);
-      if (found) shardDrops[posKey(e.pos)] = mergeShards(shardDrops[posKey(e.pos)] ?? {}, found);
+      // (none in a dungeon whose enemies drop nothing: DungeonData.loot)
+      if (d.loot) {
+        const items = generateLootDrops(d.level, partyLevelRef.current, e.classData.dropChance ?? 0, partyCanUse);
+        if (items.length) (drops[posKey(e.pos)] ??= []).push(...items);
+        const coins = rollGold(e.level, e.classData.dropsGold ?? 0, e.classData.goldBonus);
+        if (coins) goldDrops[posKey(e.pos)] = (goldDrops[posKey(e.pos)] ?? 0) + coins;
+        const found = rollShardDrop(SHARD_DROP_CHANCE);
+        if (found) shardDrops[posKey(e.pos)] = mergeShards(shardDrops[posKey(e.pos)] ?? {}, found);
+      }
       if (isBoss(e)) {
         const lying = [...d.zones.flatMap(z => Object.values(z.droppedKeys)), ...keyDrops.map(k => k.key)];
         const key = bossKeyDrop(keysRef.current, lying);
@@ -401,7 +558,7 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
     });
   }, [partyCanUse, updateCurrentZone, restockVendor]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // â”€â”€â”€ Actions, ticks, experience, keys â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ─── Actions, ticks, experience, keys ────────────────────────────────────
 
   const { unitAims, unitFx, applyActionOutcome, applyOutcomeRef, cancelPendingOutcomes } = useActionOutcomes({
     spawnFloat, updateMembers, partyStatsRef, partyPosRef, partyLevelRef, enemiesRef, dungeonRef, currentZoneRef, setEnemies, setCombat,
@@ -418,11 +575,12 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
   useGameKeys({
     // With the vendor's window open, I closes it and opens the party window instead
     toggleSheet: () => {
-      if (showRifter) return;
+      if (locked || showRifter) return;
       if (talkingTo) { endTalk(); setShowCharSheet(true); return; }
       setShowCharSheet(prev => !prev);
     },
     escape: () => {
+      if (locked) return;
       if (showTesting) { setShowTesting(false); return; } // TEMP (testing only)
       if (showRifter) { setShowRifter(false); return; }
       if (talkingTo) { endTalk(); return; }
@@ -432,17 +590,20 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
     },
     // Out of combat, with no window open: the next party member in order (wrapping round), as a click on their panel
     cycleMember: (back) => {
-      if (combat.active || showCharSheet || showRifter || talkingTo || chests.openChest || showTesting) return false;
+      if (locked || combat.active || showCharSheet || showRifter || talkingTo || chests.openChest || showTesting) return false;
       const n = party.length;
       setBarViewIdx(i => (i + (back ? n - 1 : 1)) % n);
       return true;
     },
   });
 
-  // â”€â”€â”€ Location transitions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ─── Location transitions ──────────────────────────────────────────────
 
-  /** Go back to the Sanctum, or into a dungeon (a fresh one, generated from its preset). */
-  const handleLocationChange = (next: 'sanctum' | DungeonKey) => {
+  /**
+   * Go back to the Sanctum (`by` a rift, arriving in front of the Rifter, or by a passage's door, arriving inside its
+   * door), or into a dungeon or passage (a fresh one, generated from its preset).
+   */
+  const handleLocationChange = (next: 'sanctum' | AreaKey, by: 'rift' | 'door' = 'rift') => {
     cancelPendingOutcomes();
     reviveDowned();
     setLocation(next === 'sanctum' ? 'sanctum' : 'dungeon');
@@ -452,11 +613,11 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
     resetDeaths(); // enemy ids repeat between dungeons
     chests.resetChests(); // so do chest ids: a new dungeon's chests start full
     resetFog(); // and it starts unseen
+    setFacesOnArrival(null);
 
     if (next !== 'sanctum') {
-      const config = DUNGEONS[next];
       setDungeonKey(next);
-      const { dungeon: d, enemies: spawned } = buildDungeon(config, progress.level);
+      const { dungeon: d, enemies: spawned } = buildArea(next, progress.level);
       setDungeon(d);
       setCurrentZone(d.startZoneId);
       setPlayerPos(d.playerStart);
@@ -470,15 +631,23 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
       window.clearTimeout(reopenTimer.current);
       setRifter(DORMANT_RIFTER); // its rift closed after use: dormant again
       setShowRifter(false);
-      // Every way back (a rift, a party wipe) arrives in front of the Rifter
-      const [leader, ...followers] = SANCTUM.riftArrival;
+      // Every way back by a rift (or a party wipe) arrives in front of the Rifter; a passage's door, inside the Sanctum's door
+      const [leader, ...followers] = by === 'door' ? SANCTUM.doorArrival : SANCTUM.riftArrival;
       setPlayerPos(leader);
       setFollowerPositions(followers);
       setEnemies([]);
+      // Through the door, the party faces its greeter, who speaks at once if he has a quest for it (scene 'greeting')
+      if (by === 'door') {
+        setFacesOnArrival(SANCTUM.npcs.find(n => n.id === SANCTUM.doorGreeter)?.pos ?? null);
+        if (npcQuestMark(SANCTUM.doorGreeter, quests.log)) setScene('greeting');
+      }
     }
   };
 
-  // â”€â”€â”€ Death checks â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // The game begins with the opening: the party arriving in its passage (scene 'arrival')
+  useEffect(() => { handleLocationChange(OPENING_PASSAGE); }, []); // eslint-disable-line react-hooks/exhaustive-deps -- once, on mount
+
+  // ─── Death checks ────────────────────────────────────────────────────────
 
   /**
    * Bring fallen members back (reviveDowned: 10% HP), each on a tile of its own: one that was stood on while it
@@ -521,7 +690,7 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [combat.active, currentCombatant, partyHp]);
 
-  // â”€â”€â”€ Aggro detection â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ─── Aggro detection ─────────────────────────────────────────────────────
 
   /**
    * Aggro every unaggroed group with a member visible from `pos`, then start combat with them
@@ -540,16 +709,17 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
       : startCombat(party.map((m, i) => ({ stats: partyStatsRef.current[i], name: m.characterName })), newlyAggroed));
   }, [party, partyStatsRef]);
 
-  // â”€â”€â”€ Door transitions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ─── Door transitions ─────────────────────────────────────────────────
 
   const handleDoorClick = useCallback((doorId: string) => {
     if (!zone || !dungeon || combat.active) return;
 
     const door = zone.doors.find(d => d.id === doorId);
-    if (!door) return;
+    if (!door || door.to === 'sanctum') return; // (out to the Sanctum: goThroughDoor)
+    const { zoneId, doorId: pairedId } = door.to;
 
-    const targetZone = dungeon.zones[door.targetZoneId];
-    const pairedDoor = targetZone.doors.find(d => d.id === door.targetDoorId);
+    const targetZone = dungeon.zones[zoneId];
+    const pairedDoor = targetZone.doors.find(d => d.id === pairedId);
     if (!pairedDoor) return;
 
     // Arrive on the free floor tile closest to the paired door (never on an enemy), followers around it
@@ -557,24 +727,39 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
     const spawnPos = findOpenTilesNear(pairedDoor.pos, isFree, 1, 4)[0];
     if (!spawnPos) return;
 
-    setCurrentZone(door.targetZoneId);
+    setCurrentZone(zoneId);
     setPlayerPos(spawnPos);
     setFollowerPositions(findFollowerSpawns(spawnPos, isFree, 2));
     clearFloats();
 
-    triggerAggro(spawnPos, enemies.filter(e => e.zoneId === door.targetZoneId), targetZone.sight, false);
+    triggerAggro(spawnPos, enemies.filter(e => e.zoneId === zoneId), targetZone.sight, false);
   }, [zone, dungeon, combat.active, enemies, triggerAggro, clearFloats]);
 
-  // â”€â”€â”€ Fading between maps â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ─── Fading between maps ──────────────────────────────────────────────
   // Every change of map (a rift into a dungeon or back to the Sanctum, a door to another zone, a party wipe) first
   // fades the map to black (useFadeOut); the new one fades in once its 3D layer has drawn (useSceneReady)
-  const { fading, fadeOut } = useFadeOut();
+  const { fading, fadeMs, fadeOut } = useFadeOut();
   // (each change as of when the fade ends, with that render's state)
   const changes = useLatest({ handleLocationChange, handleDoorClick, restoreAll });
-  const travel = (next: 'sanctum' | DungeonKey) => fadeOut(() => changes.current.handleLocationChange(next));
-  const goThroughDoor = (doorId: string) => fadeOut(() => changes.current.handleDoorClick(doorId));
+  // Into a dungeon through the Rifter's rift: the quests waiting on the party entering it move on
+  const travel = (next: 'sanctum' | AreaKey) => {
+    if (next !== 'sanctum' && !isPassage(next)) questDid({ enterRift: next });
+    fadeOut(() => changes.current.handleLocationChange(next));
+  };
+  // Through a door: into another zone, or (a passage's way out) into the Sanctum
+  const goThroughDoor = (doorId: string) => {
+    const door = zone?.doors.find(d => d.id === doorId);
+    // Out of a passage with its found key still lying in it: the key's words turn the party back instead
+    if (door?.to === 'sanctum' && foundKey && zone && Object.values(zone.droppedKeys).includes(foundKey.key)) {
+      setTurnBack(door.pos);
+      setScene('finding');
+      return;
+    }
+    const out = door?.to === 'sanctum';
+    fadeOut(() => (out ? changes.current.handleLocationChange('sanctum', 'door') : changes.current.handleDoorClick(doorId)));
+  };
 
-  // â”€â”€â”€ Movement handler â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ─── Movement handler ────────────────────────────────────────────────────
 
   const handleMove = useCallback((newPos: Pos) => {
     const steps = moveTargets.get(posKey(newPos));
@@ -610,7 +795,7 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
     if (zone) triggerAggro(newPos, zoneEnemies, zone.sight, combat.active);
   }, [combat.active, moveTargets, isPlayerTurn, activePartyIdx, activeStats.movement, playerPos, zoneEnemies, zone, dungeon, triggerAggro]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // â”€â”€â”€ End turn â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ─── End turn ────────────────────────────────────────────────────────────
 
   const handleEndTurn = useCallback(() => {
     if (!combat.active || !isPlayerTurn) return;
@@ -618,7 +803,7 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
     setCombat(prev => advanceTurn(prev, zoneEnemies, deadPartyIndices(partyHp)));
   }, [combat.active, isPlayerTurn, activePartyIdx, zoneEnemies, partyHp]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // â”€â”€â”€ Player action â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ─── Player action ───────────────────────────────────────────────────────
 
   const handlePlayerAttack = useCallback((targetPos: Pos) => {
     if (combat.active && !isPlayerTurn) return;
@@ -677,7 +862,7 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
     return () => timers.forEach(clearTimeout);
   }, [outOfAp, stunned, combat.currentTurnIndex, combat.round]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // â”€â”€â”€ Enemy AI turn â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ─── Enemy AI turn ───────────────────────────────────────────────────────
 
   const enemyTurnRefs = useMemo(() => ({
     enemies: enemiesRef,
@@ -699,7 +884,7 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
     setEnemies, setCombat, setEnemyAoePreview, setEnemyTargetKey, showEnemyActivity,
   );
 
-  // â”€â”€â”€ Combat end detection â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ─── Combat end detection ────────────────────────────────────────────────
 
   // Every enemy in the fight is dead (summoned ones too): it's over, and every summoned creature vanishes with it
   useEffect(() => {
@@ -711,33 +896,32 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
     setEnemies(prev => prev.filter(e => !e.summon));
   }, [combat.active, zoneEnemies]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // â”€â”€â”€ Map loading â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  // The map stays under a dark cover until its 3D layer has drawn (useSceneReady), after fading to black before a
-  // change of map (useFadeOut, above)
-  const mapKey = `${location}:${zone?.id ?? ''}`;
-  const { loading: mapLoading, onReady: onMapReady } = useSceneReady(mapKey);
-  // Entering a dungeon zone (by a rift or a door), the view centers on the party (the leader, at about its middle)
+  // ─── Map view ────────────────────────────────────────────────────────────
+  // Entering a dungeon zone (by a rift or a door), or the Sanctum by its door (away from its middle, where the view
+  // otherwise starts), the view centers on the party (the leader, at about its middle)
   const zoneBoard = useMemo(() => (zone ? boardLayout(zone.width, zone.height) : null), [zone?.width, zone?.height]); // eslint-disable-line react-hooks/exhaustive-deps -- zone tracked by its size
-  const viewFocus = location === 'dungeon' && zoneBoard ? zoneBoard.toScreen(playerPos.x + 0.5, playerPos.y + 0.5, 0.5) : undefined;
+  const sanctumBoard = useMemo(() => boardLayout(SANCTUM.width, SANCTUM.height), []);
+  const focusBoard = location === 'dungeon' ? zoneBoard : facesOnArrival ? sanctumBoard : null;
+  const viewFocus = focusBoard ? focusBoard.toScreen(playerPos.x + 0.5, playerPos.y + 0.5, 0.5) : undefined;
 
-  // â”€â”€â”€ Render â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ─── Render ──────────────────────────────────────────────────────────────
 
   const activeTarget = activeAction?.target ?? null;
 
-  // â”€â”€â”€ HUD state â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ─── HUD state ───────────────────────────────────────────────────────────
   // A creature the AI runs (an enemy or a summoned ally) is taking its turn
   const aiActing = combat.active && !!currentCombatant && !currentCombatant.isPlayer;
   // The action bar's member: the acting one in combat (none on an enemy's turn), the selected one out of it
   const dockIdx = combat.active ? (isPlayerTurn ? activePartyIdx : null) : barViewIdx;
   const dockSlotContent = dockIdx !== null ? partySlots[dockIdx]?.[partyActiveSlot[dockIdx] ?? -1] ?? null : null;
   const armedName = dockSlotContent === 'weapon-attack' ? (activeWeapon?.name ?? 'Attack') : dockSlotContent?.name;
-  const locationName = location === 'sanctum' ? 'The Sanctum' : zone ? `${preset.name} Â· Zone ${zone.id + 1}` : '';
+  const locationName = location === 'sanctum' ? 'The Sanctum' : zone && dungeon ? (dungeon.zones.length > 1 ? `${preset.name} · Zone ${zone.id + 1}` : preset.name) : '';
 
   return (
     <Backdrop variant="game" className="h-screen">
 
       {/* The map, full screen: drag with the right mouse button to pan (kept within the area the HUD leaves free) */}
-      <div className="absolute inset-0">
+      <div className={`absolute inset-0 ${locked ? 'pointer-events-none' : ''}`}>
         <PanView resetKey={mapKey} insets={HUD_INSETS} focus={viewFocus}>
           {location === 'sanctum' && (
             <SanctumMap
@@ -754,6 +938,13 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
               onUseRifter={() => setShowRifter(true)}
               onTalkTo={talkTo}
               npcAims={npcAims}
+              speaking={speaking}
+              onTopicDone={finishTopic}
+              onEndTalk={finishConversation}
+              quests={quests.log}
+              questMarks={questMarks}
+              rifterUsable={rifterUsable}
+              rifterMark={rifterMark}
               onEnterRift={travel}
               activeTarget={activeTarget}
               onAbilityUse={handlePlayerAttack}
@@ -804,6 +995,15 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
               tileTargets={tileTargets}
               droppedItems={zone?.droppedItems}
               droppedKeys={zone?.droppedKeys}
+              keyMark={keyMark}
+              foundKey={foundKey}
+              sceneObjects={portalObjects}
+              dialogue={(finding || turnBack) && foundKey ? {
+                at: (finding ?? turnBack)!,
+                content: <NpcDialogue portrait={<KeyPortrait color={DUNGEONS[foundKey.key].riftColor} size={DIALOGUE_PORTRAIT} />} name={foundKey.name}
+                  conversation={finding ? foundKey.conversation : foundKey.leaving} quests={quests.log} onTopicDone={() => {}}
+                  onEnd={finding ? finishFinding : () => { setTurnBack(null); setScene(null); }} />,
+              } : null}
               droppedGold={zone?.droppedGold}
               droppedShards={zone?.droppedShards}
               onLootClick={handleLootPickup}
@@ -815,12 +1015,24 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
       </div>
       {/* The map's cover while its 3D layer starts (under the HUD): fading in before a change of map, fading out
           when the new one is ready */}
-      <LoadingCover loading={mapLoading || fading} fadeIn={fading} className="absolute inset-0 z-20" />
+      <LoadingCover loading={mapLoading || fading} fadeIn={fading} fadeMs={scene === 'arrival' ? OPENING_FADE_MS : fadeMs} className="absolute inset-0 z-20" />
 
-      {/* â”€â”€â”€ HUD â”€â”€â”€ */}
+      {/* The arrival told over the dimmed map, once the party has come through; then the game begins */}
+      {scene === 'arrival' && arrival.telling && (
+        <div className="rf-narration-dim absolute inset-0 z-40 flex items-center justify-center">
+          <Narration lines={ARRIVAL_LINES} onDone={() => { setScene(null); hints.trigger('gameStart'); }} />
+        </div>
+      )}
+
+      {/* ─── HUD ─── (none while the party arrives; not usable while it watches a scene) */}
+      {scene !== 'arrival' && <div className={`contents ${locked ? '[&_*]:pointer-events-none' : ''}`}>
 
       {/* Where the party is */}
-      <div className="absolute top-5 left-6 z-30 rf-label pointer-events-none">{locationName}</div>
+      {/* Where the party is, and its active quests under it */}
+      <div className="absolute top-5 left-6 z-30 flex flex-col gap-12 pointer-events-none">
+        <div className="rf-label">{locationName}</div>
+        <QuestTracker log={quests.log} />
+      </div>
 
       {/* Pulses around the screen's edge: a level-up's (yellow), and combat beginning (dark red). Each new key plays one */}
       {levelUps > 0 && <EdgePulse key={`level-${levelUps}`} kind="levelUp" />}
@@ -844,12 +1056,20 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
       <div className="absolute top-5 right-6 z-30 flex gap-2">
         {/* TEMP (testing only): the testing tools' window (components/DevToolsWindow.tsx). Dev builds only. */}
         {import.meta.env.DEV && <RiftButton size="sm" onClick={() => setShowTesting(true)}>Testing</RiftButton>}
-        <RiftButton size="sm" aria-label={anyoneLeveling ? 'Party (I), level up available' : 'Party (I)'} className={anyoneLeveling ? 'is-levelup' : ''} onClick={() => setShowCharSheet(true)}>Party</RiftButton>
+        <RiftButton size="sm" aria-label={anyoneLeveling ? 'Party (I), level up available' : 'Party (I)'} className={`${anyoneLeveling ? 'is-levelup' : ''} ${hints.current?.target === 'party' ? 'is-hinted' : ''}`} onClick={() => setShowCharSheet(true)}>
+          Party<kbd aria-hidden="true" className="rf-keycap">I</kbd>
+        </RiftButton>
       </div>
       {/* The party's XP, under the top buttons */}
       <div className="absolute top-[72px] right-6 z-30">
         <XpStrip progress={progress} gain={xpGain} />
       </div>
+      {/* A new player's hint, under what it points at (the Party button) */}
+      {hints.current && (
+        <div className="absolute top-[104px] right-6 z-30">
+          <HintPane hint={hints.current} onDismiss={() => hints.dismiss(hints.current!.id)} />
+        </div>
+      )}
 
       {/* The party */}
       <div className="absolute left-6 bottom-6 z-30">
@@ -865,7 +1085,7 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
       {/* An ability is armed: how to use or cancel it */}
       {armedName && (
         <div role="status" className="rf-hud absolute left-1/2 -translate-x-1/2 bottom-[144px] z-30 px-4 py-2 whitespace-nowrap text-xs tracking-[0.04em] text-rift-soft">
-          {armedName} â€” choose a target. Click it again or press Esc to cancel.
+          {armedName} — choose a target. Click it again or press Esc to cancel.
         </div>
       )}
 
@@ -893,6 +1113,7 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
           <ActingStatus name={currentCombatant.name} activity={enemyActivity.activity} seq={enemyActivity.seq} />
         </div>
       )}
+      </div>}
 
       {chests.openChest && (
         // On the right, clear of the map's middle (where the chest and the party are)
@@ -908,7 +1129,7 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
       )}
       {/* TEMP (testing only): the testing tools (components/DevToolsWindow.tsx). Dev builds only. */}
       {import.meta.env.DEV && showTesting && (
-        <DevToolsWindow keys={keyring.keys} onAddKey={keyring.addKey} onAddShard={addShard} onAddGold={addGold}
+        <DevToolsWindow keys={keyring.keys} onAddKey={keyring.addKey} onEnterPassage={(k) => { setShowTesting(false); travel(k); }} onAddShard={addShard} onAddGold={addGold}
           onLevelUp={() => addXp(xpToNext(progress.level) - progress.xp)} onClose={() => setShowTesting(false)} />
       )}
       {talkingTo && npc(talkingTo.id).service === 'enchanting' && (

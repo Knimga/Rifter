@@ -12,6 +12,7 @@ import { ITEM_SEED, linkedDesign } from './core/link';
 import { CHARACTER_HEIGHT } from './core/stage-config';
 import { extentAlong, holdItems, type PlacedItem } from './core/hold';
 import { CLASSES, type ClassKey } from '../data/units/classes';
+import { NPCS } from '../data/world/npcs';
 import { WEAPON_SERIES, WEAPON_TYPE_DATA } from '../data/gear/weapons';
 import { OFFHANDS, OFFHAND_PROFICIENCIES, SHIELDS } from '../data/gear/offhands';
 import type { WeaponType } from '../data/gear/types';
@@ -293,11 +294,14 @@ export function buildCharacter(designs: Record<string, Design>, bodyDesign: Desi
  * Any design's preview model, for the forge (forge view, forge:sheet). A class (character) design is posed
  * for and holds a sample weapon of `weaponType` (default: its starting weapon), with its starting offhand:
  * its shield when that hold leaves the left arm free for one, its other offhand (a quiver) with a one-handed
- * weapon; everything else is built as-is.
+ * weapon; an NPC holds its own weapon (NpcData.holds); everything else is built as-is.
  */
 export function buildPreview(design: Design, seed: number, designs: Record<string, Design>, weaponType?: WeaponType): Model {
   const cls = classOf(design);
-  if (!cls) return buildModel(design, seed);
+  if (!cls) {
+    const holds = design.source.table === 'npcs' ? NPCS.find((n) => n.id === design.source.key)?.holds : undefined;
+    return holds ? buildCharacter(designs, design, seed, holds) : buildModel(design, seed);
+  }
   const kit = CLASSES[cls].startingGear;
   const type = weaponType ?? kit.weapon;
   const weaponLink = sampleWeaponLink(type);

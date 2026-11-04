@@ -29,6 +29,9 @@ export const interactiveObjectGlow = (id: string): string => interactiveObject(i
 export const INTERACTIVE_OBJECTS: InteractiveObjectData[] = [
   // Connects two dungeon zones; sits in a wall tile, facing the floor tile it opens onto
   { id: 'heavy-door', name: 'Heavy Door', model: 'interactive.heavy-door' },
+  // The warded door between the Dark Tunnel and the Sanctum (its west door): an arched slab of the Sanctum's blue-grey
+  // stone, a worn rune carved on it. Placed like a heavy door
+  { id: 'warded-stone-door', name: 'Warded Stone Door', model: 'interactive.warded-stone-door' },
   // The Sanctum's arcane device for opening rifts: a keystone set in it opens a rift to that keystone's place.
   // Three tiles in a line, all unwalkable: an instrument plinth (left, from the party's view), rift
   // stabilizer struts (middle: an opened rift stands there, turned like the device) and the key receptacle

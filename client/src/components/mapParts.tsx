@@ -4,8 +4,10 @@ import { TILE_SIZE, boardLayout, type BoardLayout } from '../viewEngine/board';
 import type { ClassKey } from '../data/units/classes';
 import type { ModelLink } from '../forge/core/types';
 import type { HeldWeapon } from '../forge/equip';
-import type { MapPartyMember } from './ModelLayer';
-import { samePos, type Pos } from '../data/world/grid';
+import type { MapLoot, MapPartyMember } from './ModelLayer';
+import { DUNGEONS, type DungeonKey } from '../data/world/dungeons';
+import { RIFT_MODELS } from '../data/world/rifts';
+import { keyPos, samePos, type Pos } from '../data/world/grid';
 import UnitStatus, { type StatusMarker } from './hud/UnitStatus';
 import MoveLine from './MoveLine';
 import FloatingCombatText, { type FloatingText } from './FloatingCombatText';
@@ -26,6 +28,10 @@ export interface PartyTokenData {
   /** Equipped weapon and offhand, as the member's 3D model holds them (none = nothing). */
   weapon?: HeldWeapon;
   offhand?: ModelLink;
+  /** The tile its model faces as it appears on the map (MapPartyMember.faces). */
+  faces?: Pos;
+  /** Its model fades in as it appears (MapPartyMember.fadeIn). */
+  fadeIn?: boolean;
 }
 
 /** The 3D model layer's view of a party member, with its over-head status (effect markers, HP/MP bars). */
@@ -37,6 +43,8 @@ export function toMapMember(m: PartyTokenData, markers: StatusMarker[] = []): Ma
     weapon: m.weapon,
     offhand: m.offhand,
     active: m.active,
+    faces: m.faces,
+    fadeIn: m.fadeIn,
     overlay: <UnitStatus markers={markers} hp={m.hp} maxHp={m.maxHp} mp={m.mp} maxMp={m.maxMp} />,
   };
 }
@@ -130,6 +138,29 @@ export function MapTag({ text, icon, className = '' }: { text: string; icon?: Re
   return (
     <div role="tooltip" className={`rf-tip px-2.5 py-1.5 whitespace-nowrap font-tech text-xs text-rift-soft ${icon ? 'flex items-center gap-1.5' : ''} ${className}`}>
       {icon}{text}
+    </div>
+  );
+}
+
+/** How high (world tiles) a rift key's name tag (or a gold pile's amount) sits over the floor it lies on. */
+export const KEY_TAG_HEIGHT = 0.35;
+
+/** A rift key lying on the floor at `key` (a tile key), as loot: the keystone, in its dungeon's color. */
+export const keyLoot = (key: string, dungeon: DungeonKey): MapLoot =>
+  ({ id: `key-${dungeon}`, link: RIFT_MODELS.keystone.model, pos: keyPos(key), tint: DUNGEONS[dungeon].riftColor, halo: KEY_HALO });
+
+/** How much wider (and, drawn twice, brighter) a rift key's halo is lying on the floor than in the Rifter's socket (MapLoot.halo). */
+const KEY_HALO = 1.7;
+
+/**
+ * The soft round glow on the floor under something the leader can pick up now (an item, a rift key, gold, shards):
+ * pale yellow whatever lies there, pulsing. Goes inside the tile, on the floor layer; `on` false keeps its place hidden.
+ */
+export function LootGlow({ on }: { on: boolean }) {
+  return (
+    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+      <div className={`w-10 h-10 rounded-full ${on ? 'animate-pulse' : 'invisible'}`}
+        style={{ background: 'radial-gradient(circle, color-mix(in srgb, var(--rift-loot-glow) 55%, transparent) 0%, color-mix(in srgb, var(--rift-loot-glow) 22%, transparent) 45%, transparent 70%)' }} />
     </div>
   );
 }

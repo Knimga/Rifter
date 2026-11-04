@@ -22,6 +22,8 @@ const WING = 8;
  * beyond them, all within MARGIN.
  */
 const at = (x: number, y: number) => ({ x: MARGIN + WING + x, y: MARGIN + WING + y });
+/** A grid tile as `at` writes it (the forge's Maps view reads out the hovered tile so). */
+export const sanctumAt = (p: Pos): Pos => ({ x: p.x - MARGIN - WING, y: p.y - MARGIN - WING });
 
 /** The main room's middle tile (each way): the wings leave its sides there. */
 const MIDDLE = 5;
@@ -50,15 +52,34 @@ export const SANCTUM = {
   /** Where the party arrives back from a dungeon (by a rift, or waking after a wipe): in front of the Rifter, in a line facing it, leader first. */
   riftArrival: [at(15, 5), at(14, 5), at(13, 5)],
   /**
+   * Doors in the Sanctum's walls (INTERACTIVE_OBJECTS 'warded-stone-door', the Dark Tunnel's way in), each in its wall
+   * tile, the wall opened around it. None can be used yet: one in the middle of the west room's west wall.
+   */
+  doors: [at(-8, 5)] as readonly Pos[],
+  /**
+   * Where the party arrives through the west door (from a passage: data/world/dungeons.ts PASSAGES), facing its greeter
+   * (doorGreeter): the leader in front of him, the other two a tile back to its right and left.
+   */
+  doorArrival: [at(-5, 4), at(-6, 5), at(-6, 3)],
+  /** Who greets the party coming through the west door: Rix, whose conversation starts at once if it has a quest for it. */
+  doorGreeter: 'rix',
+  /**
    * The NPCs standing in the Sanctum (data/world/npcs.ts): each one's tile, and the grid direction it faces when no
    * one is talking to it. Denisel, the vendor: in the main room's northwest corner, a tile in from both walls,
-   * facing into the room. Ethela, the enchanter: in the opposite (southeast) corner, likewise. Ardas, the sage: in the
-   * northeast corner, likewise.
+   * facing into the room. Lynn, the enchanter: in the opposite (southeast) corner, likewise. Ardas, the sage: in the
+   * northeast corner, likewise. Gorn, the earth elemental: in the west room, five tiles east of its heavy door (at the
+   * room's east edge, where its hallway comes in), facing the door. Rix: beside him, a tile northwest of him, turned to
+   * face the door too (a facing need not be one of the 8 grid steps: his points straight at the door's tile). Ileena, the
+   * arcanist: by the Rifter, a tile northwest of its northernmost tile, against the east room's north wall, facing
+   * south.
    */
   npcs: [
     { id: 'denisel', pos: at(2, 2), facing: [1, 1] as const },
-    { id: 'ethela', pos: at(8, 8), facing: [-1, -1] as const },
+    { id: 'lynn', pos: at(8, 8), facing: [-1, -1] as const },
     { id: 'ardas', pos: at(8, 2), facing: [-1, 1] as const },
+    { id: 'gorn', pos: at(-3, 5), facing: [-1, 0] as const },
+    { id: 'rix', pos: at(-4, 4), facing: [-4, 1] as const },
+    { id: 'ileena', pos: at(16, 3), facing: [0, 1] as const },
   ] as readonly NpcPlacement[],
   /**
    * The decorative objects in the Sanctum (data/world/decorObjects.ts): each one's middle tile and the grid direction
@@ -75,7 +96,7 @@ export const SANCTUM = {
     { id: 'barrels-and-sacks', pos: at(2, 1), facing: [1, 0] as const },
     // The weapon rack against the north wall beside the barrels, its weapons facing south into the room
     { id: 'weapon-rack', pos: at(3, 1), facing: [0, 1] as const },
-    // Ethela's table against the east wall (its three tiles at x 9, y 7-9), facing west into the room: its middle, the
+    // Lynn's table against the east wall (its three tiles at x 9, y 7-9), facing west into the room: its middle, the
     // ritual circle, right beside her
     { id: 'enchanters-table', pos: at(9, 8), facing: [-1, 0] as const },
     // Her supplies a tile south of her, the chest's back against the south wall, the barrel and sacks facing north
@@ -87,13 +108,29 @@ export const SANCTUM = {
     { id: 'round-reading-table', pos: at(9, 2), facing: [0, 1] as const },
     // The sage's bookshelf just north of Ardas, its back against the north wall, facing south into the room
     { id: 'sages-bookshelf', pos: at(8, 1), facing: [0, 1] as const },
+    // A stack of crates in the main room's northeast corner, behind Ardas, facing south (yaw 0; the look picked in the
+    // forge: seed 10)
+    { id: 'crate-stack', pos: at(9, 1), facing: [0, 1] as const, seed: 10 },
+    // Rix's ore bench behind him, its back against the west room's north wall (its two tiles at x -4 and -3, y 3),
+    // facing south into the room: the first thing seen past him, coming in through the door
+    { id: 'ore-bench', pos: at(-4, 3), facing: [0, 1] as const },
+    // A brown stone cairn beside his bench, at its west end against the north wall
+    { id: 'brown-stone-cairn', pos: at(-5, 3), facing: [0, 1] as const },
+    // A floor torch in the west room's southeast corner, lighting it from across Gorn
+    { id: 'floor-torch', pos: at(-3, 7), facing: [0, 1] as const },
+    // A stack of crates in the east room's northeast corner, beside Ileena, facing south
+    { id: 'crate-stack', pos: at(17, 3), facing: [0, 1] as const },
+    // Ileena's research table west of her, against the east room's north wall (its two tiles at x 14 and 15, y 3),
+    // facing south into the room; her book stacks on the floor beside it, at its west end
+    { id: 'arcane-research-table', pos: at(14, 3), facing: [0, 1] as const },
+    { id: 'book-stacks', pos: at(13, 3), facing: [0, 1] as const },
 
     // Faded wall sigils: two or three in every room, on the walls seen at full height (north and east), and on the walls
     // by the NPCs. Each with its look picked by seed, so a large one never runs past a corner or across a doorway, and
     // one behind furniture rises above it. Facing away from their wall: south on a north wall, west on an east one
     // The main room: in its northwest corner behind Denisel's cart (a narrow, tall one: it would run past the corner),
     // above Ardas's bookshelf, on the east wall beside him (above the reading table), and a small one by the southeast
-    // corner, above the end of Ethela's table
+    // corner, above the end of Lynn's table
     { id: 'faded-wall-sigil', pos: at(1, 1), facing: [0, 1] as const, seed: 39 },
     { id: 'faded-wall-sigil', pos: at(8, 1), facing: [0, 1] as const, seed: 10 },
     { id: 'faded-wall-sigil', pos: at(9, 2), facing: [-1, 0] as const, seed: 25 },

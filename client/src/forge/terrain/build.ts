@@ -23,7 +23,10 @@ import type { Terrain, TerrainInput } from './types';
 export const WALL_HEIGHTS = { low: 1.5, high: 2.25 } as const;
 /** A cut wall's height (tiles): low enough to see over, high enough to read as a wall. */
 export const STUB_HEIGHT = 0.2;
-/** Where a doorway's lintel starts: just above the door's own frame (heavy-door, 1.4 tall). */
+/**
+ * Where a doorway's lintel starts: just above the door's own frame. Every door's frame is flat-topped at 1.4 tiles and
+ * about 0.92 wide (an arched door arches inside it: warded-stone-door), so the jambs and lintel close around any door.
+ */
 const LINTEL_Y = 1.38;
 /**
  * How dark a wall's top is, as a share of its color: near-black, keeping the wall's hue, so the tops read as solid rock
@@ -173,7 +176,7 @@ export function buildTerrain({ cols, rows, floors, doors, style, seed }: Terrain
   let lit: Vec3[] = [];
   const litAt = (p: Vec3) => { if (style.veins?.glow) lit.push(p); };
   const haloOne = (m: Mesh, a: number, b: number, c: number) => {
-    if (lit.length && lattice(haloSeed, a, b, c) < VEIN_HALO_CHANCE)
+    if (lit.length && lattice(haloSeed, a, b, c) < (style.veins?.halos ?? VEIN_HALO_CHANCE))
       m.halo(lit[Math.floor(lattice(haloSeed, a, b, c + 1) * lit.length)], VEIN_HALO_R, haloColor);
     lit = [];
   };

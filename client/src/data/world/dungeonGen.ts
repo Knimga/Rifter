@@ -4,11 +4,13 @@ import type { ShardCounts } from '../gear/shards';
 import type { RGB } from '../../forge/core/vec';
 import type { TerrainStyle } from '../../forge/terrain/types';
 import { bodySize, creatureTiles, generateEnemyInstance } from '../units/enemies';
-import { findOpenTilesNear, fits, footprint, keyPos, neighbors, posKey, reachableTiles, STEPS, type Pos } from './grid';
+import { findOpenTilesNear, fits, footprint, keyPos, neighbors, posKey, reachableTiles, STEPS, type Body, type Pos } from './grid';
 import { chance, pick, randFloat, randInt, shuffle } from '../random';
 import { AGGRO_RANGE } from '../constants';
 import { BASE_MOVEMENT } from '../units/stats';
 import { decorObject, hasDecorDesign, type DecorObjectData } from './decorObjects';
+import type { DungeonKey } from './dungeons';
+import type { Conversation } from './dialogue';
 
 // ─── Core Types ──────────────────────────────────────────────────────────────
 
@@ -23,9 +25,15 @@ export interface Room {
 export interface Door {
   id: string;            // e.g. "door-0"
   pos: Pos;              // wall tile position in this zone
-  targetZoneId: number;  // which zone this door leads to
-  targetDoorId: string;  // paired door id in target zone
+  /**
+   * Where it leads: a door of another zone of the dungeon (that zone, and its paired door's id), or the Sanctum (a
+   * passage's way out, arriving by the Sanctum's door: SANCTUM.doorArrival).
+   */
+  to: { zoneId: number; doorId: string } | 'sanctum';
 }
+
+/** Whether a door leads back to an earlier zone of its dungeon (the way the party entered its zone). */
+const leadsBack = (door: Door, zone: ZoneData) => door.to !== 'sanctum' && door.to.zoneId < zone.id;
 
 export interface ZoneData {
   id: number;
@@ -87,7 +95,8 @@ export interface DungeonRift {
 export interface DungeonData {
   zones: ZoneData[];
   startZoneId: number;
-  endZoneId: number;     // the boss zone
+  /** The boss zone (a passage has none). */
+  endZoneId: number | null;
   /** The leader's tile on arrival, beside the first zone's rift (the followers take the tiles around it). */
   playerStart: Pos;
   /** The ways back to the Sanctum, at most one per zone (zoneRift). */
@@ -96,6 +105,8 @@ export interface DungeonData {
   chests: DungeonChest[];
   /** The party's level when it entered: the first zone's enemies are this level, each zone after one higher; loot is this level. */
   level: number;
+  /** Whether its enemies drop anything when they die (items, gold, shards): a passage's may not (PassageConfig.loot). */
+  loot: boolean;
 }
 
 /**
@@ -204,12 +215,9 @@ export interface ClutterConfig {
   density: number;
 }
 
-export interface DungeonConfig {
+/** What a dungeon's (or a passage's) map is drawn with (DungeonMap): its name, floor, walls, clutter and doors. */
+export interface DungeonLook {
   name: string;
-  width: number;          // applies to all regular zones
-  height: number;         // applies to all regular zones
-  zones: ZoneConfig[];    // regular zones, chained linearly: 0 → 1 → … → boss
-  bossZone: BossZoneConfig;
   /** How its floor and walls look (forge/terrain: the 3D floor and walls drawn over its tiles). */
   terrain: TerrainStyle;
   /**
@@ -217,7 +225,15 @@ export interface DungeonConfig {
    * its full walls, and on its floor. None if absent.
    */
   clutter?: { wall?: ClutterConfig; ground?: ClutterConfig };
-  doorObject: string;     // INTERACTIVE_OBJECTS id of the doors between zones
+  doorObject: string;     // INTERACTIVE_OBJECTS id of its doors
+}
+
+/** A rift dungeon: entered by a rift from the Sanctum (its key in the Rifter), zone after zone to a boss. */
+export interface DungeonConfig extends DungeonLook {
+  width: number;          // applies to all regular zones
+  height: number;         // applies to all regular zones
+  zones: ZoneConfig[];    // regular zones, chained linearly: 0 → 1 → … → boss
+  bossZone: BossZoneConfig;
   /**
    * The dungeon's color: the Sanctum's rift into it and its keystone are painted in it (data/world/rifts.ts; its
    * rifts back to the Sanctum are SANCTUM_RIFT_COLOR). Bright and saturated: the rift's deeper swirl and floor pool derive from it.
@@ -799,8 +815,8 @@ function farFloor(zone: ZoneData, from: Pos): Pos {
 function linkDoors(zoneA: ZoneData, posA: Pos, zoneB: ZoneData, posB: Pos, nextDoorId: { value: number }): void {
   const idA = `door-${nextDoorId.value++}`;
   const idB = `door-${nextDoorId.value++}`;
-  zoneA.doors.push({ id: idA, pos: posA, targetZoneId: zoneB.id, targetDoorId: idB });
-  zoneB.doors.push({ id: idB, pos: posB, targetZoneId: zoneA.id, targetDoorId: idA });
+  zoneA.doors.push({ id: idA, pos: posA, to: { zoneId: zoneB.id, doorId: idB } });
+  zoneB.doors.push({ id: idB, pos: posB, to: { zoneId: zoneA.id, doorId: idA } });
 }
 
 // ─── Main Generator ─────────────────────────────────────────────────────────
@@ -852,7 +868,7 @@ function generateDungeon(config: DungeonConfig, partyLevel: number, gen: GenOpti
   const chests = zones.flatMap((zone) => {
     const boss = zone.id === bossZoneId;
     const objects = boss ? config.bossZone.containers : config.zones[zone.id]?.containers;
-    const entry = zone.id === 0 ? playerStart : zone.doors.find(d => d.targetZoneId < zone.id)?.pos;
+    const entry = zone.id === 0 ? playerStart : zone.doors.find(d => leadsBack(d, zone))?.pos;
     if (!objects?.length || !entry) return [];
     const steps = walkDistances(zone, entry);
     const toEntry = (r: Room) => Math.min(...roomFloor(zone, r).map(p => steps.get(posKey(p)) ?? Infinity));
@@ -865,7 +881,105 @@ function generateDungeon(config: DungeonConfig, partyLevel: number, gen: GenOpti
   // Every zone's floor is final: what sight passes over (its see-through obstacles' tiles added)
   for (const zone of zones) zone.sight = sightOf(zone);
 
-  return { zones, startZoneId: 0, endZoneId: bossZoneId, playerStart, rifts, chests, level: partyLevel };
+  return { zones, startZoneId: 0, endZoneId: bossZoneId, playerStart, rifts, chests, level: partyLevel, loot: true };
+}
+
+// ─── Passages ────────────────────────────────────────────────────────────────
+
+/**
+ * A passage: a dungeon of one zone, a single long tunnel winding from one end of it to the other, with no rifts, keys
+ * or boss. The party starts in a round room at its west end (how it gets there is the story's); along the way the
+ * tunnel opens into larger rooms, each holding one enemy group; at its far end a door leads to the Sanctum (by the
+ * Sanctum's door).
+ */
+export interface PassageConfig extends DungeonLook {
+  width: number;
+  height: number;
+  /** How wide the tunnel runs, [narrowest, widest] (tiles): each stretch between two of its bends takes one. */
+  tunnelWidth: [number, number];
+  /** The round room the party starts in: its size (tiles across). */
+  startRoomSize: number;
+  /** The larger, round rooms along the way: how many, [fewest, most], and each one's size, [smallest, largest] (tiles across). */
+  fightRooms: { count: [number, number]; size: [number, number] };
+  /** The groups its fight rooms hold, one each, cycling through this list (as ZoneConfig.enemyGroups). */
+  enemyGroups: EnemyClassData[][];
+  /** Obstacles in its fight rooms (as ZoneConfig.obstacles). */
+  obstacles?: ObstacleConfig;
+  /** Whether its enemies drop anything (items, gold, shards); default true. */
+  loot?: boolean;
+  /**
+   * A rift key lying in the tunnel on the way to the first fight room, in the middle of the path. When the party reaches
+   * it, `conversation` is spoken (by `name`: the party doesn't know what it is yet), and once it is said the key is
+   * taken: gone from the floor, but not on the keyring (unknown, it isn't a key to the party yet). Someone who knows it
+   * gives it later (a dialogue's giveKey: Ardas's). `leaving`: what it says, the same way, if the party tries the door out
+   * while it still lies there: the door doesn't open, and the party goes back for it.
+   */
+  foundKey?: { key: DungeonKey; name: string; conversation: Conversation; leaving: Conversation };
+}
+
+/**
+ * The passage's bends: how far east each lies from the last, [nearest, farthest] (tiles), and how far up or down it
+ * swings, [least, most]. It mostly swings back the other way each time, so the tunnel snakes. Bends keep this far
+ * from the zone's edge.
+ */
+const BEND_STEP: [number, number] = [7, 11], BEND_SWING: [number, number] = [4, 10], BEND_MARGIN = 3;
+
+/**
+ * A passage's layout (PassageConfig): the start room at the west end, the tunnel winding east from it through its
+ * bends (carveTunnel, each stretch its own width), the fight rooms carved around bends spread evenly along the way,
+ * the found key (if any) between the start and the first fight room, and the door out at the tunnel's far end: the
+ * door spot farthest from the start by walking.
+ */
+function generatePassage(config: PassageConfig, partyLevel: number, gen: GenOptions): DungeonData {
+  const { width: W, height: H } = config;
+  const floors = new Set<string>();
+  const S = config.startRoomSize;
+  const startRoom: Room = { id: 0, x: 2, y: randInt(BEND_MARGIN, H - BEND_MARGIN - S), w: S, h: S };
+  const bends: Pos[] = [roomCenter(startRoom)];
+  let up = chance(0.5);
+  for (let last = bends[0]; last.x < W - 1 - BEND_MARGIN;) {
+    if (chance(0.75)) up = !up;
+    const swing = randInt(...BEND_SWING) * (up ? -1 : 1);
+    const inside = (y: number) => y >= BEND_MARGIN && y <= H - 1 - BEND_MARGIN;
+    const y = inside(last.y + swing) ? last.y + swing : last.y - swing;
+    last = { x: Math.min(W - 1 - BEND_MARGIN, last.x + randInt(...BEND_STEP)), y: Math.max(BEND_MARGIN, Math.min(H - 1 - BEND_MARGIN, y)) };
+    bends.push(last);
+  }
+
+  // The fight rooms: around bends spread evenly between the start and the far end (never the first or last bend)
+  const n = randInt(...config.fightRooms.count);
+  const fightRooms = Array.from({ length: n }, (_, i): Room => {
+    const at = bends[Math.max(1, Math.min(bends.length - 2, Math.round(((i + 1) * (bends.length - 1)) / (n + 1))))];
+    const w = randInt(...config.fightRooms.size), h = Math.max(config.fightRooms.size[0], w - randInt(0, 2));
+    const x = Math.max(1, Math.min(W - 1 - w, at.x - Math.floor(w / 2))), y = Math.max(1, Math.min(H - 1 - h, at.y - Math.floor(h / 2)));
+    return { id: i + 1, x, y, w, h };
+  });
+  [startRoom, ...fightRooms].forEach(r => carveCavern(floors, r));
+  for (let i = 1; i < bends.length; i++) carveTunnel(floors, bends[i - 1], bends[i], randInt(...config.tunnelWidth), W, H);
+
+  const zone: ZoneData = { id: 0, width: W, height: H, floors, rooms: [startRoom, ...fightRooms], doors: [], islands: new Set(), obstacles: [], sight: floors, droppedItems: {}, droppedKeys: {}, droppedGold: {}, droppedShards: {} };
+  if (config.obstacles) placeObstacles(zone, config.obstacles, fightRooms, new Set(), gen);
+  const playerStart = roomSpot(zone, startRoom, true);
+  const steps = walkDistances(zone, playerStart);
+
+  // The found key: on a shortest walk from the start to the first fight room, as far from one as from the other,
+  // outside every room, on the tile most surrounded by floor (the path's middle, not against its wall)
+  if (config.foundKey && fightRooms.length) {
+    const room = roomSpot(zone, fightRooms[0]), toRoom = walkDistances(zone, room), total = steps.get(posKey(room)) ?? Infinity;
+    const onPath = [...zone.floors].map(keyPos).filter(p => !zone.rooms.some(r => inRect(p, r))
+      && (steps.get(posKey(p)) ?? Infinity) + (toRoom.get(posKey(p)) ?? Infinity) === total);
+    const score = (p: Pos) => Math.abs(steps.get(posKey(p))! - toRoom.get(posKey(p))!) * 10 - neighbors(p).filter(q => floors.has(posKey(q))).length;
+    const spot = onPath.reduce<Pos | null>((best, p) => (!best || score(p) < score(best) ? p : best), null);
+    if (spot) zone.droppedKeys[posKey(spot)] = config.foundKey.key;
+  }
+
+  // The way out: the door spot anywhere along the tunnel's walls that is farthest from the start by walking
+  const spots = findDoorCandidates({ ...zone, rooms: [{ id: -1, x: 0, y: 0, w: W, h: H }] });
+  const exit = spots.reduce<Pos | null>((best, c) => (!best || doorDistance(c, steps) > doorDistance(best, steps) ? c : best), null);
+  if (exit) zone.doors.push({ id: 'door-0', pos: exit, to: 'sanctum' });
+  zone.sight = sightOf(zone);
+
+  return { zones: [zone], startZoneId: 0, endZoneId: null, playerStart, rifts: [], chests: [], level: partyLevel, loot: config.loot ?? true };
 }
 
 // ─── Containers ──────────────────────────────────────────────────────────────
@@ -943,7 +1057,7 @@ const ROOM_FILL_SHARE = 0.75;
 /** Fewest enemy groups a regular zone gets (more rooms than ROOM_FILL_SHARE fill, if that leaves it short). */
 const MIN_ZONE_GROUPS = 3;
 
-/** Times a regular zone's groups are placed afresh while it has fewer than MIN_ZONE_GROUPS (spawnDungeonEnemies). */
+/** Times a regular zone's groups are placed afresh while it has fewer than its plan's fewest (SpawnPlan.minGroups). */
 const ZONE_PLACE_TRIES = 12;
 
 /**
@@ -953,8 +1067,8 @@ const ZONE_PLACE_TRIES = 12;
  */
 const GROUP_GAP = 2 * AGGRO_RANGE + 4;
 
-/** How loosely a group stands around its center: random spread added to each tile's distance from it (tiles). */
-const GROUP_SPREAD = 1.5;
+/** How far apart a group's members stand: each one this many empty tiles, [fewest, most], from the nearest placed before it. */
+const MEMBER_GAP: [number, number] = [0, 2];
 
 /** Centers tried, per room, for a group that doesn't fit around the first. */
 const GROUP_CENTER_TRIES = 8;
@@ -962,7 +1076,26 @@ const GROUP_CENTER_TRIES = 8;
 /** Fewest other places a large creature must fit within a move of where it is placed (spawnDungeonEnemies canRoamFrom). */
 const LARGE_MIN_STOPS = 8;
 
-function spawnDungeonEnemies(dungeon: DungeonData, config: DungeonConfig): EnemyInstance[] {
+/**
+ * Which enemies a dungeon's zones get (spawnDungeonEnemies): each regular zone's groups, the boss zone's group, and how
+ * many of a regular zone's rooms get one (`fillShare` of them, and at least `minGroups`).
+ */
+interface SpawnPlan {
+  groups: (zoneId: number) => EnemyClassData[][];
+  bossGroup: EnemyClassData[];
+  fillShare: number;
+  minGroups: number;
+}
+
+/** A rift dungeon's spawn plan: its zones' groups and its boss's, in ROOM_FILL_SHARE of the rooms, at least MIN_ZONE_GROUPS. */
+const dungeonSpawns = (config: DungeonConfig): SpawnPlan => ({
+  groups: (zoneId) => config.zones[zoneId]?.enemyGroups ?? [],
+  bossGroup: config.bossZone.bossGroup,
+  fillShare: ROOM_FILL_SHARE,
+  minGroups: MIN_ZONE_GROUPS,
+});
+
+function spawnDungeonEnemies(dungeon: DungeonData, plan: SpawnPlan): EnemyInstance[] {
   const instances: EnemyInstance[] = [];
   let globalIdx = 0;
   let nextGroupId = 0;
@@ -983,7 +1116,7 @@ function spawnDungeonEnemies(dungeon: DungeonData, config: DungeonConfig): Enemy
   const entryRooms = new Set<Room>();
   for (const zone of dungeon.zones) {
     const entries = zone.id === dungeon.startZoneId ? [dungeon.playerStart]
-      : zone.doors.filter(d => d.targetZoneId < zone.id).map(d => d.pos);
+      : zone.doors.filter(d => leadsBack(d, zone)).map(d => d.pos);
     for (const entry of entries) {
       const steps = walkDistances(zone, entry);
       for (const [key, n] of steps) if (n <= ENTRY_CLEAR_STEPS) nearEntry.add(`${zone.id}:${key}`);
@@ -1060,31 +1193,42 @@ function spawnDungeonEnemies(dungeon: DungeonData, config: DungeonConfig): Enemy
 
   /**
    * Members of a group on the `open` tiles, its large ones first (they need a whole free square), each on the
-   * first tile `order` gives it that it can stand on (canStand). Null if one has nowhere to go.
+   * first tile `order` gives it (knowing the bodies placed so far) that it can stand on (canStand). Null if one has
+   * nowhere to go.
    */
-  const spotsFor = (zone: ZoneData, group: EnemyClassData[], open: Map<string, Pos>, order: (i: number) => Pos[]): Pos[] | null => {
+  const spotsFor = (zone: ZoneData, group: EnemyClassData[], open: Map<string, Pos>, order: (i: number, placed: Body[]) => Pos[]): Pos[] | null => {
     const spots: Pos[] = [];
+    const placed: Body[] = [];
     const byLargeFirst = group.map((_, i) => i).sort((a, b) => bodySize(group[b]) - bodySize(group[a]));
     for (const i of byLargeFirst) {
-      const spot = order(i).find(canStand(zone, group[i], open));
+      const spot = order(i, placed).find(canStand(zone, group[i], open));
       if (!spot) return null;
       for (const p of footprint({ pos: spot, size: bodySize(group[i]) })) open.delete(posKey(p));
       spots[i] = spot;
+      placed.push({ pos: spot, size: bodySize(group[i]) });
     }
     return spots;
   };
 
   /**
-   * Place one enemy group inside `area`, standing together: around a random free tile (freeTiles: away from the
-   * zone's entry and from other groups), each member on the free tile nearest it, loosely (GROUP_SPREAD). Other
-   * centers are tried if it doesn't fit there; false (nothing placed) if it fits around none.
+   * Place one enemy group inside `area`, standing together: the first member on a random free tile (freeTiles: away
+   * from the zone's entry and from other groups), each next one a random MEMBER_GAP of empty tiles from the nearest
+   * member already placed (as near that as fits, staying close to the first). Other first tiles are tried if it doesn't
+   * fit there; false (nothing placed) if it fits around none.
    */
   const placeGroup = (zone: ZoneData, area: Rect, group: EnemyClassData[]): boolean => {
     const free = shuffle(freeTiles(zone, area, false));
+    const cheb = (p: Pos, q: Pos) => Math.max(Math.abs(p.x - q.x), Math.abs(p.y - q.y));
     for (const center of free.slice(0, GROUP_CENTER_TRIES)) {
-      const near = (p: Pos) => Math.max(Math.abs(p.x - center.x), Math.abs(p.y - center.y));
-      const order = free.map(p => ({ p, d: near(p) + Math.random() * GROUP_SPREAD })).sort((a, b) => a.d - b.d).map(t => t.p);
-      const spots = spotsFor(zone, group, new Map(free.map(p => [posKey(p), p])), () => order);
+      const order = (_i: number, placed: Body[]): Pos[] => {
+        if (!placed.length) return [center, ...free.filter(p => p !== center).sort((a, b) => cheb(a, center) - cheb(b, center))];
+        // Steps to the nearest placed member's nearest tile: 1 is right beside it (no gap)
+        const want = randInt(...MEMBER_GAP) + 1;
+        const toPlaced = (p: Pos) => Math.min(...placed.flatMap(b => footprint(b).map(q => cheb(p, q))));
+        return free.map(p => ({ p, d: Math.abs(toPlaced(p) - want) + cheb(p, center) * 0.05 + Math.random() * 0.01 }))
+          .sort((a, b) => a.d - b.d).map(t => t.p);
+      };
+      const spots = spotsFor(zone, group, new Map(free.map(p => [posKey(p), p])), order);
       if (!spots) continue;
       placeAt(zone, group, spots);
       return true;
@@ -1123,7 +1267,7 @@ function spawnDungeonEnemies(dungeon: DungeonData, config: DungeonConfig): Enemy
       // Boss group in the center half of the boss room, its guard flanking the boss across the party's way in.
       // The boss is always placed: if the center is too near the door (a round room's door can sit on its
       // diagonal), anywhere in the room away from the door, and failing that the center after all
-      const group = config.bossZone.bossGroup;
+      const group = plan.bossGroup;
       if (group.length === 0) continue;
       const bossRoom = zone.rooms[0];
       const center: Rect = {
@@ -1132,7 +1276,7 @@ function spawnDungeonEnemies(dungeon: DungeonData, config: DungeonConfig): Enemy
         w: Math.ceil(bossRoom.w / 2),
         h: Math.ceil(bossRoom.h / 2),
       };
-      const entryDoor = zone.doors.find(d => d.targetZoneId < zone.id);
+      const entryDoor = zone.doors.find(d => leadsBack(d, zone));
       const entryDir = entryDoor ? getEntryDirection(entryDoor.pos, bossRoom) : 'south';
       const across = entryDir === 'north' || entryDir === 'south' ? 'x' : 'y';
       if (!placeBossGroup(zone, center, bossRoom, group, across) && !placeBossGroup(zone, bossRoom, bossRoom, group, across)) {
@@ -1141,16 +1285,16 @@ function spawnDungeonEnemies(dungeon: DungeonData, config: DungeonConfig): Enemy
       continue;
     }
 
-    // Regular zone: ROOM_FILL_SHARE of its rooms (not the one the party enters by), and at least MIN_ZONE_GROUPS,
+    // Regular zone: `fillShare` of its rooms (not the one the party enters by), and at least `minGroups`,
     // random ones, get one group each, cycling through the zone's groups (reshuffled each time round). A room takes
     // the next group in the cycle that fits it (away from the entry and other groups); a room none fits is skipped
     // for another. Never two in one room. Where the groups land decides how many fit (a group in the middle of a room
-    // can keep its neighbours' groups out: GROUP_GAP), so a zone left with fewer than MIN_ZONE_GROUPS is placed
+    // can keep its neighbours' groups out: GROUP_GAP), so a zone left with fewer than `minGroups` is placed
     // again, up to ZONE_PLACE_TRIES times, keeping the try that placed the most.
-    const groups = config.zones[zone.id]?.enemyGroups ?? [];
+    const groups = plan.groups(zone.id);
     if (groups.length === 0) continue;
     const candidates = zone.rooms.filter(r => !entryRooms.has(r));
-    const target = Math.max(MIN_ZONE_GROUPS, Math.round(candidates.length * ROOM_FILL_SHARE));
+    const target = Math.max(plan.minGroups, Math.round(candidates.length * plan.fillShare));
     const fill = (): number => {
       let cycle: EnemyClassData[][] = [];
       let filled = 0;
@@ -1166,7 +1310,7 @@ function spawnDungeonEnemies(dungeon: DungeonData, config: DungeonConfig): Enemy
     };
     const before = snapshot();
     let best = { filled: -1, state: before };
-    for (let t = 0; t < ZONE_PLACE_TRIES && best.filled < MIN_ZONE_GROUPS; t++) {
+    for (let t = 0; t < ZONE_PLACE_TRIES && best.filled < plan.minGroups; t++) {
       restore(before);
       const filled = fill();
       if (filled > best.filled) best = { filled, state: snapshot() };
@@ -1177,7 +1321,7 @@ function spawnDungeonEnemies(dungeon: DungeonData, config: DungeonConfig): Enemy
   return instances;
 }
 
-/** Layouts tried for a dungeon whose zones don't all get MIN_ZONE_GROUPS (buildDungeon). */
+/** Layouts tried for a dungeon whose zones don't all get their fewest groups (bestLayout). */
 const LAYOUT_TRIES = 10;
 
 /**
@@ -1189,18 +1333,35 @@ export interface GenOptions {
 }
 
 /**
- * A new dungeon and its enemies: its layout (generateDungeon) and its groups (spawnDungeonEnemies). A layout where a
- * regular zone gets fewer than MIN_ZONE_GROUPS (rooms too close for that many groups GROUP_GAP apart) is built
- * again, up to LAYOUT_TRIES times, keeping the one with the most groups in its emptiest zone.
+ * A layout (`make`: a fresh one each call, and its spawn plan) and its enemies (spawnDungeonEnemies). A layout where a
+ * regular zone gets fewer than its plan's fewest groups (rooms too close for that many groups GROUP_GAP apart) is
+ * built again, up to LAYOUT_TRIES times, keeping the one with the most groups in its emptiest zone.
  */
-export function buildDungeon(config: DungeonConfig, partyLevel: number, gen: GenOptions = { placeable: hasDecorDesign }): { dungeon: DungeonData; enemies: EnemyInstance[] } {
-  let best: { dungeon: DungeonData; enemies: EnemyInstance[]; fewest: number } | null = null;
-  for (let t = 0; t < LAYOUT_TRIES && (best?.fewest ?? -1) < MIN_ZONE_GROUPS; t++) {
-    const dungeon = generateDungeon(config, partyLevel, gen);
-    const enemies = spawnDungeonEnemies(dungeon, config);
+function bestLayout(make: () => { dungeon: DungeonData; plan: SpawnPlan }): { dungeon: DungeonData; enemies: EnemyInstance[] } {
+  let best: { dungeon: DungeonData; enemies: EnemyInstance[]; fewest: number; enough: boolean } | null = null;
+  for (let t = 0; t < LAYOUT_TRIES && !best?.enough; t++) {
+    const { dungeon, plan } = make();
+    const enemies = spawnDungeonEnemies(dungeon, plan);
     const fewest = Math.min(...dungeon.zones.filter(z => z.id !== dungeon.endZoneId)
       .map(z => new Set(enemies.filter(e => e.zoneId === z.id).map(e => e.groupId)).size));
-    if (!best || fewest > best.fewest) best = { dungeon, enemies, fewest };
+    if (!best || fewest > best.fewest) best = { dungeon, enemies, fewest, enough: fewest >= plan.minGroups };
   }
   return { dungeon: best!.dungeon, enemies: best!.enemies };
+}
+
+/** A new rift dungeon and its enemies: its layout (generateDungeon) and its groups (bestLayout). */
+export function buildDungeon(config: DungeonConfig, partyLevel: number, gen: GenOptions = { placeable: hasDecorDesign }): { dungeon: DungeonData; enemies: EnemyInstance[] } {
+  return bestLayout(() => ({ dungeon: generateDungeon(config, partyLevel, gen), plan: dungeonSpawns(config) }));
+}
+
+/**
+ * A new passage and its enemies: its layout (generatePassage) and one group in each of its fight rooms (all its rooms
+ * but the start room, the one the party enters by), retried until each has one (bestLayout).
+ */
+export function buildPassage(config: PassageConfig, partyLevel: number, gen: GenOptions = { placeable: hasDecorDesign }): { dungeon: DungeonData; enemies: EnemyInstance[] } {
+  return bestLayout(() => {
+    const dungeon = generatePassage(config, partyLevel, gen);
+    const fights = dungeon.zones[0].rooms.length - 1;
+    return { dungeon, plan: { groups: () => config.enemyGroups, bossGroup: [], fillShare: 1, minGroups: fights } };
+  });
 }

@@ -17,6 +17,15 @@ export function KeyIcon({ color, className = 'w-[18px] h-[18px]', glow = 3, stre
   );
 }
 
+/** A rift key as a dialogue's portrait (a found key speaking: NpcDialogue): its icon, large, in a portrait's frame (`size` px). */
+export function KeyPortrait({ color, size }: { color: RGB; size: number }) {
+  return (
+    <span aria-hidden="true" className="flex-none flex items-center justify-center box-border bg-rift-raised-hi border border-rift-edge rounded-sm" style={{ width: size, height: size }}>
+      <KeyIcon color={color} className="w-[60%] h-[60%]" glow={8} strength={80} />
+    </span>
+  );
+}
+
 export default function Keyring({ keys }: { keys: readonly DungeonKey[] }) {
   // No keys yet: the empty box says so, dimly, in its middle
   if (keys.length === 0) {

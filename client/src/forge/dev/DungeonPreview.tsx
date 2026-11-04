@@ -2,8 +2,7 @@
 // Board, its 3D floor and walls from the dungeon's TerrainStyle, its doors, rift, scenery and enemies), in the map
 // viewer (MapView), to judge a dungeon's look: try layouts and zones.
 import { useMemo, useState } from 'react';
-import { DUNGEONS, type DungeonKey } from '../../data/world/dungeons';
-import { buildDungeon } from '../../data/world/dungeonGen';
+import { areaLook, buildArea, type AreaKey } from '../../data/world/dungeons';
 import { hasDecorDesign, type DecorObjectData } from '../../data/world/decorObjects';
 import { drafts } from './draftRegistry';
 import { doorObjects, riftObject, sceneryObjects, zoneGround, type DecorLink } from '../../components/zoneScenery';
@@ -24,18 +23,18 @@ const draftLink: DecorLink = (o) => draftOf(o)?.id ?? o.model;
  * A dungeon as the game would generate it with Math.random seeded by `seed` (the same seed, the same layout).
  * `useDrafts`: objects whose design is still a draft are placed too.
  */
-function seededDungeon(key: DungeonKey, seed: number, useDrafts: boolean) {
+function seededDungeon(key: AreaKey, seed: number, useDrafts: boolean) {
   const random = Math.random;
   Math.random = mulberry32(seed);
   try {
-    return buildDungeon(DUNGEONS[key], 1, { placeable: useDrafts ? (o) => hasDecorDesign(o) || !!draftOf(o) : hasDecorDesign });
+    return buildArea(key, 1, { placeable: useDrafts ? (o) => hasDecorDesign(o) || !!draftOf(o) : hasDecorDesign });
   } finally {
     Math.random = random;
   }
 }
 
-export default function DungeonPreview({ dungeonKey }: { dungeonKey: DungeonKey }) {
-  const config = DUNGEONS[dungeonKey];
+export default function DungeonPreview({ dungeonKey }: { dungeonKey: AreaKey }) {
+  const config = areaLook(dungeonKey);
   const [seed, setSeed] = useState(1);
   const [zoneIdx, setZoneIdx] = useState(0);
   const [useDrafts, setUseDrafts] = useState(true);

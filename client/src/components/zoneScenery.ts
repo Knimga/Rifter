@@ -5,7 +5,7 @@ import type { ModelLink } from '../forge/core/types';
 import type { RGB } from '../forge/core/vec';
 import { facingOpenSide, yawFromGridMove } from '../forge/core/facing';
 import { interactiveObjectModel } from '../data/world/interactiveObjects';
-import { RIFT_MODELS, SANCTUM_RIFT_COLOR } from '../data/world/rifts';
+import { ARRIVAL_PORTAL_COLOR, RIFT_MODELS, SANCTUM_RIFT_COLOR } from '../data/world/rifts';
 import { placeClutter, type ClutterKind } from '../forge/terrain/clutter';
 import { decorObject, type DecorObjectData } from '../data/world/decorObjects';
 import type { ClutterConfig, DungeonConfig, ZoneData } from '../data/world/dungeonGen';
@@ -23,18 +23,31 @@ export interface SceneryObject {
   size?: readonly [number, number];
   look?: string;
   tint?: RGB;
+  played?: string[];
+  playIn?: boolean;
 }
 
 /** Whether a zone's tile is floor (a door or the rift faces the floor it opens onto). */
 const floorOf = (zone: ZoneData) => (p: Pos) => zone.floors.has(posKey(p));
 
-/** A zone's doors: its dungeon's door model (`doorObject`, an interactive object), each in its wall tile facing the floor it opens onto. */
+/** A door (`doorObject`: its interactive object, e.g. 'heavy-door') in its wall tile at `pos`, facing the floor it opens onto. */
+export const doorAt = (id: string, doorObject: string, pos: Pos, isFloor: (p: Pos) => boolean): SceneryObject =>
+  ({ id, link: interactiveObjectModel(doorObject), pos, facing: facingOpenSide(pos, isFloor) });
+
+/** A zone's doors: its dungeon's door model (`doorObject`), each in its wall tile (doorAt). */
 export const doorObjects = (zone: ZoneData, doorObject: string): SceneryObject[] =>
-  zone.doors.map((d) => ({ id: d.id, link: interactiveObjectModel(doorObject), pos: d.pos, facing: facingOpenSide(d.pos, floorOf(zone)) }));
+  zone.doors.map((d) => doorAt(d.id, doorObject, d.pos, floorOf(zone)));
 
 /** A zone's rift back to the Sanctum, at `pos`: the Rift in SANCTUM_RIFT_COLOR, facing the floor it opens onto. */
 export const riftObject = (zone: ZoneData, pos: Pos, id: string): SceneryObject =>
   ({ id, link: RIFT_MODELS.rift.model, pos, facing: facingOpenSide(pos, floorOf(zone)), tint: SANCTUM_RIFT_COLOR });
+
+/**
+ * A portal the party arrives through at the game's opening (GameScreen's arrival): a rift in ARRIVAL_PORTAL_COLOR on a
+ * member's tile, turned to the camera, opening as it appears and (`closing`) collapsing again.
+ */
+export const arrivalPortal = (id: string, pos: Pos, closing: boolean): SceneryObject =>
+  ({ id, link: RIFT_MODELS.rift.model, pos, facing: yawFromGridMove(-1, 1), tint: ARRIVAL_PORTAL_COLOR, played: closing ? ['open', 'close'] : ['open'], playIn: true });
 
 /** The tiles a zone's terrain draws as open ground: its floor, and its obstacles' tiles (they stand on floor). */
 export const zoneGround = (zone: ZoneData): ReadonlySet<string> =>

@@ -3,7 +3,7 @@
 // A member with level-up points to spend gets the pale yellow level-up treatment, pulsing, and a LEVEL UP tag.
 import { CLASSES } from '../../data/units/classes';
 import type { PartyTokenData } from '../mapParts';
-import Portrait from './Portrait';
+import Portrait, { HUD_PORTRAIT_SIZE } from './Portrait';
 import { StatBar } from './UnitStatus';
 
 export interface PartyRow {
@@ -22,7 +22,7 @@ export default function PartyRows({ rows, level, selectedIdx, canSelect, onSelec
   onSelect: (partyIndex: number) => void;
 }) {
   return (
-    <section aria-label="Party" className="w-[264px] flex flex-col gap-2">
+    <section aria-label="Party" className="w-[276px] flex flex-col gap-2">
       {rows.map(({ token: t, name, levelUp }) => {
         const sel = t.partyIndex === selectedIdx;
         return (
@@ -31,7 +31,7 @@ export default function PartyRows({ rows, level, selectedIdx, canSelect, onSelec
             onClick={() => canSelect && onSelect(t.partyIndex)}>
             {/* On the top edge, overlapping the border, so the panel doesn't grow */}
             {levelUp && <span className="rf-levelup-tag">Level up</span>}
-            <Portrait classKey={t.classKey} weapon={t.weapon} offhand={t.offhand} size={44} />
+            <Portrait classKey={t.classKey} weapon={t.weapon} offhand={t.offhand} size={HUD_PORTRAIT_SIZE} />
             <span className="flex-1 min-w-0 flex flex-col gap-[5px]">
               <span className="flex items-baseline justify-between gap-2">
                 <span className="font-display text-[15px] tracking-[0.04em] text-rift-ink truncate">{name}</span>

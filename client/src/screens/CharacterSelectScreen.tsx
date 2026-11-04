@@ -15,6 +15,7 @@ import { Hint } from '../components/Tooltip';
 import LoadingCover from '../components/ui/LoadingCover';
 import { useSceneReady } from '../hooks/useSceneReady';
 import { useFadeOut } from '../hooks/useFadeOut';
+import { OPENING_FADE_MS } from './OpeningScreen';
 
 // The class models (three.js): lazy, so the menu screens don't pull in the renderer up front
 const ClassShowcase = lazy(() => import('../components/ClassShowcase'));
@@ -70,7 +71,7 @@ export default function CharacterSelectScreen({ onStart, onBack }: {
   // The screen stays under a dark cover until the class models have drawn (useSceneReady), as the game's map does,
   // and fades to black before it leaves (useFadeOut)
   const { loading: showcaseLoading, onReady: onShowcaseReady } = useSceneReady('character-select');
-  const { fading, fadeOut } = useFadeOut();
+  const { fading, fadeMs, fadeOut } = useFadeOut();
   // Each class's starting weapon, so weapon abilities show its AP cost and element in the dossier
   const startingWeapons = useMemo(() => Object.fromEntries(CLASS_KEYS.map((k) => [k, heldWeapon(startingGear(k))])), []);
 
@@ -286,14 +287,14 @@ export default function CharacterSelectScreen({ onStart, onBack }: {
                   : <span className="text-xs tracking-[0.04em] text-rift-muted">{startHint}</span>}
               </span>
               <RiftButton size="lg" className="!min-h-[52px] !px-12" disabled={!ready}
-                onClick={() => fadeOut(() => onStart(slots.map((s) => ({ classKey: s.classKey!, name: s.name.trim() }))))}>
+                onClick={() => fadeOut(() => onStart(slots.map((s) => ({ classKey: s.classKey!, name: s.name.trim() }))), OPENING_FADE_MS)}>
                 Start Game
               </RiftButton>
             </div>
           </Panel>
         </div>
       </div>
-      <LoadingCover loading={showcaseLoading || fading} fadeIn={fading} className="fixed inset-0 z-50" />
+      <LoadingCover loading={showcaseLoading || fading} fadeIn={fading} fadeMs={fadeMs} className="fixed inset-0 z-50" />
     </Backdrop>
   );
 }

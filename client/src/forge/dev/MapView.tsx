@@ -44,9 +44,11 @@ export interface MapViewProps {
   onDrafts: (on: boolean) => void;
   /** Changes when a fresh set of models should be placed (a new zone), as the game keys its layer. */
   modelKey: string;
+  /** The hovered tile as the map's data writes it, read out beside the controls (default: its grid x, y). */
+  coords?: (p: Pos) => string;
 }
 
-export default function MapView({ title, subtitle, controls, cols, rows, floors, terrain, objects, enemies, center, fog, drafts: useDrafts, onDrafts, modelKey }: MapViewProps) {
+export default function MapView({ title, subtitle, controls, cols, rows, floors, terrain, objects, enemies, center, fog, drafts: useDrafts, onDrafts, modelKey, coords = (p) => `${p.x}, ${p.y}` }: MapViewProps) {
   const [grid, setGrid] = useState(false);
   const [fogOn, setFogOn] = useState(false);
   const [highlights, setHighlights] = useState(false);
@@ -109,6 +111,8 @@ export default function MapView({ title, subtitle, controls, cols, rows, floors,
         <Toggle on={highlights} onClick={() => setHighlights(!highlights)}>Highlights</Toggle>
         <Toggle on={useDrafts} onClick={() => onDrafts(!useDrafts)}>Drafts</Toggle>
         <button className={BTN} onClick={() => setPan({ x: 0, y: 0 })} title="Pan: drag with the right mouse button">Recenter</button>
+        {/* The hovered tile */}
+        <span className="font-mono text-xs text-gray-300">{hover.hovered ? coords(hover.hovered) : '—'}</span>
       </div>
       {/* The viewport: the map pans inside it (right-drag) */}
       <div className="relative overflow-hidden rounded-lg bg-gray-950 h-[calc(100vh-11rem)] touch-none"

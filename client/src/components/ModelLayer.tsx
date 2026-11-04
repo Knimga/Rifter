@@ -1,11 +1,13 @@
 // Draws party members, enemies and loot as 3D models over a map's tile grid (DungeonMap, SanctumMap).
 // Lazy-loaded (it pulls in three.js), so the menu and builder screens never download it.
 import { useEffect, useMemo, useRef, type ReactNode } from 'react';
+import { yawFromGridMove } from '../forge/core/facing';
 import { bodySize, type EnemyInstance } from '../data/units/enemies';
 import { CLASSES, type ClassKey } from '../data/units/classes';
 import type { Design, Model, ModelLink } from '../forge/core/types';
 import { buildInstance, instanceSeed, linkedDesign } from '../forge/core/link';
 import { buildModel } from '../forge/core/build';
+import { hashSeed, mulberry32 } from '../forge/core/rng';
 import { tintModel } from '../forge/core/tint';
 import type { RGB } from '../forge/core/vec';
 import { TILE_SIZE, type BoardLayout } from '../viewEngine/board';
@@ -26,7 +28,21 @@ export interface MapLoot {
   pos: Pos;
   /** The color a tinted model (a rift key) is drawn in: its dungeon's riftColor (core/tint.ts). */
   tint?: RGB;
+  /**
+   * Its halos drawn this many times as wide, and twice as bright (each drawn twice, adding up): something lying on the
+   * floor that should catch the eye (a rift key), its model's own halos sized for where else it shows (the Rifter's socket).
+   */
+  halo?: number;
 }
+
+/** The way a creature faces as it first appears: one of the 8 grid directions, picked at random by its id (always the same for it). */
+const startFacing = (id: string): number => Math.floor(mulberry32(hashSeed(`facing:${id}`))() * 8) * (Math.PI / 4);
+
+/** A model with its halos `k` times as wide and twice as bright (MapLoot.halo). */
+const withHalos = (model: Model, k: number): Model => {
+  const halos = model.mesh.halos.map((h) => ({ ...h, r: h.r * k }));
+  return { ...model, mesh: { ...model.mesh, halos: [...halos, ...halos] } };
+};
 
 /**
  * A fixed thing on the map (a door, a rift, an NPC): it stands on its tile, facing `facing` (yaw, radians), and never
@@ -48,12 +64,16 @@ export interface MapObject {
   look?: string;
   /** A fixed seed for its look (one picked in the forge for a hand-placed object), instead of seeding it from `look` or its id. */
   seed?: number;
+  /** A weapon it holds (an NPC's: NpcData.holds): its body is posed for it and holds its model (buildCharacter). */
+  held?: HeldWeapon;
   /** Its model's animations its state calls for, e.g. ['open'] for a looted chest (see MapUnit.played). */
   played?: string[];
   /** The color a tinted model (a rift) is drawn in: the color of where it leads (core/tint.ts). */
   tint?: RGB;
   /** A tile it turns to face, when `seq` changes (an NPC turning to the one talking to it, and back: MapUnit.aim). */
   aim?: UnitAim;
+  /** Its `played` animations play from their start when it appears (a portal opening: MapUnit.playIn). */
+  playIn?: boolean;
   /**
    * A tinted model holding two tinted things, each in its own color: a color per list of parts (tintModel's
    * `parts`), e.g. the active Rifter's keystone and its rift while the rift swaps keys. Instead of `tint`.
@@ -73,6 +93,10 @@ export interface MapPartyMember {
   overlay: ReactNode;
   /** The active member stands on a floor glow (it follows the model as it moves). */
   active?: boolean;
+  /** The tile it faces as it appears on the map (default: the way models face, +z). */
+  faces?: Pos;
+  /** It fades in as it appears (stepping out of a portal: MapUnit.fadeIn). */
+  fadeIn?: boolean;
 }
 
 interface Props {
@@ -151,7 +175,7 @@ export default function ModelLayer({ board, party = [], enemies = [], loot = [],
       const look = characterLookKey(m.classKey, m.weapon, m.offhand);
       // Seeded by class (classInstanceId), so the member looks as it did on character select
       const model = cached(m.id, look, used, () => buildCharacter(designs, body, instanceSeed(body, classInstanceId(m.classKey)), m.weapon, m.offhand));
-      out.push({ id: m.id, model, pos: m.pos, viewer: true });
+      out.push({ id: m.id, model, pos: m.pos, viewer: true, fadeIn: m.fadeIn, ...(m.faces && { facing: yawFromGridMove(m.faces.x - m.pos.x, m.faces.y - m.pos.y) }) });
     }
     return out;
   }, [partyKey]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -162,17 +186,17 @@ export default function ModelLayer({ board, party = [], enemies = [], loot = [],
     const out: MapUnit[] = [];
     for (const e of enemies) {
       const design = linkedDesign(designs, e.classData.model);
-      if (design) out.push({ id: e.id, model: cached(e.id, '', [design], () => buildInstance(design, e.id)), pos: e.pos, size: bodySize(e.classData) });
+      if (design) out.push({ id: e.id, model: cached(e.id, '', [design], () => buildInstance(design, e.id)), pos: e.pos, size: bodySize(e.classData), facing: startFacing(e.id) });
     }
     return out;
   }, [enemyKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const lootKey = loot.map((l) => `${l.id}:${l.pos.x},${l.pos.y}:${l.tint?.join(',') ?? ''}`).join('|');
-  /** Loot models are shared by every item of a design (in one color, for tinted ones). */
-  const lootCacheId = (l: MapLoot) => `item:${l.link}:${l.tint?.join(',') ?? ''}`;
+  const lootKey = loot.map((l) => `${l.id}:${l.pos.x},${l.pos.y}:${l.tint?.join(',') ?? ''}:${l.halo ?? ''}`).join('|');
+  /** Loot models are shared by every item of a design (in one color, for tinted ones; with one halo size). */
+  const lootCacheId = (l: MapLoot) => `item:${l.link}:${l.tint?.join(',') ?? ''}:${l.halo ?? ''}`;
   /** An object's colors, as text (its cache key and change key). */
   const tintKey = (o: MapObject) => `${o.tint?.join(',') ?? ''}${o.partTints?.map((t) => `${t.parts.join('+')}=${t.color.join(',')}`).join(';') ?? ''}`;
-  const objectKey = objects.map((o) => `${o.id}:${o.link}:${o.seed ?? ''}:${o.pos.x},${o.pos.y}:${o.facing}:${o.played?.join('+') ?? ''}:${tintKey(o)}:${o.aim?.seq ?? ''}`).join('|');
+  const objectKey = objects.map((o) => `${o.id}:${o.link}:${o.seed ?? ''}:${o.held?.link ?? ''}:${o.pos.x},${o.pos.y}:${o.facing}:${o.played?.join('+') ?? ''}:${tintKey(o)}:${o.aim?.seq ?? ''}`).join('|');
   const aimKey = Object.entries(aims).map(([id, a]) => `${id}:${a.seq}`).join('|');
   const flashKey = Object.entries(fx).map(([id, f]) => `${id}:${f.flash ?? ''}`).join('|');
   const units: MapUnit[] = useMemo(() => {
@@ -180,19 +204,20 @@ export default function ModelLayer({ board, party = [], enemies = [], loot = [],
     for (const o of objects) {
       const design = linkedDesign(designs, o.link);
       if (!design) continue;
-      const model = cached(o.look ?? o.id, `${o.link}:${tintKey(o)}:${o.seed ?? ''}`, [design], () => {
-        const built = o.seed !== undefined ? buildModel(design, o.seed) : buildInstance(design, o.look ?? o.id);
+      const model = cached(o.look ?? o.id, `${o.link}:${tintKey(o)}:${o.seed ?? ''}:${o.held?.link ?? ''}`, [design], () => {
+        const built = o.held ? buildCharacter(designs, design, o.seed ?? instanceSeed(design, o.look ?? o.id), o.held)
+          : o.seed !== undefined ? buildModel(design, o.seed) : buildInstance(design, o.look ?? o.id);
         if (o.partTints) return o.partTints.reduce((m, t) => tintModel(m, t.color, t.parts), built);
         return o.tint ? tintModel(built, o.tint) : built;
       });
-      out.push({ id: o.id, model, pos: o.pos, facing: o.facing, played: o.played, ...(o.aim ? { aim: o.aim } : {}), ...(o.size ? { size: o.size } : {}) });
+      out.push({ id: o.id, model, pos: o.pos, facing: o.facing, played: o.played, playIn: o.playIn, ...(o.aim ? { aim: o.aim } : {}), ...(o.size ? { size: o.size } : {}) });
     }
     for (const l of loot) {
       const design = linkedDesign(designs, l.link);
       if (!design) continue;
       const model = cached(lootCacheId(l), '', [design], () => {
-        const built = buildInstance(design, l.id);
-        return l.tint ? tintModel(built, l.tint) : built;
+        const built = buildInstance(design, l.id), tinted = l.tint ? tintModel(built, l.tint) : built;
+        return l.halo ? withHalos(tinted, l.halo) : tinted;
       });
       out.push({ id: l.id, model, pos: l.pos, lying: true });
     }
