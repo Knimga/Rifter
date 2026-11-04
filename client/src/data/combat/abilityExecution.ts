@@ -130,9 +130,13 @@ export const unitKey = (ref: UnitRef) => ref.side === 'party' ? `party-${ref.idx
 
 // ─── Effect helpers ───────────────────────────────────────────────────────────
 
-/** Decrement every entry's duration and drop the expired ones (buffs, HoTs, DoTs). */
-export function tickDurations<T extends { roundsRemaining: number }>(list: T[]): T[] {
-  return list.map(x => ({ ...x, roundsRemaining: x.roundsRemaining - 1 })).filter(x => x.roundsRemaining > 0);
+/**
+ * The end of a unit's turn: its effects (buffs, HoTs, DoTs) count down a turn, and those run out drop off. One that
+ * landed during this very turn (`fresh`: a buff the unit cast on itself) doesn't count it, so it lasts through the
+ * others' turns until the end of its next.
+ */
+export function countDownTurns<T extends { turnsLeft: number; fresh?: boolean }>(list: T[]): T[] {
+  return list.map(x => (x.fresh ? { ...x, fresh: undefined } : { ...x, turnsLeft: x.turnsLeft - 1 })).filter(x => x.turnsLeft > 0);
 }
 
 /** The last stack id handed out (effectToBuffs): each application of a buff or debuff effect gets its own. */
@@ -149,16 +153,16 @@ export function effectToBuffs(eff: BuffEffect, idPrefix: string, source: string,
   return ([
     ...(Object.entries(eff.stats ?? {}) as [BuffableStat, number][]).map(([stat, amount]) => ({
       id: `${idPrefix}-${stat}`, source, damageElement: eff.damageElement,
-      stat, amount: signed(amount), roundsRemaining: eff.rounds,
+      stat, amount: signed(amount), turnsLeft: eff.turns,
     })),
     ...(Object.entries(eff.statsPercent ?? {}) as [BuffableStat, number][]).map(([stat, pct]) => ({
       id: `${idPrefix}-${stat}-pct`, source, damageElement: eff.damageElement,
-      stat, amount: 0, percent: signed(pct), roundsRemaining: eff.rounds,
+      stat, amount: 0, percent: signed(pct), turnsLeft: eff.turns,
     })),
     // A trigger changes no stat (like a root)
     ...(eff.trigger ? [{
       id: `${idPrefix}-trigger`, source, damageElement: eff.damageElement,
-      stat: 'movement' as const, amount: 0, roundsRemaining: eff.rounds,
+      stat: 'movement' as const, amount: 0, turnsLeft: eff.turns,
       trigger: { def: eff.trigger, sourceKey, debuff: eff.type === 'debuff' },
     }] : []),
   ] as ActiveBuff[]).map(b => ({ ...b, stack }));
@@ -172,14 +176,14 @@ export function effectToBuffs(eff: BuffEffect, idPrefix: string, source: string,
 export const passiveTriggerBuffs = (passives: readonly PassiveTrigger[] | undefined, ownerKey: string): ActiveBuff[] =>
   (passives ?? []).map(p => ({
     id: `passive-${p.name}-trigger`, source: p.name, damageElement: p.damageElement,
-    stat: 'movement', amount: 0, roundsRemaining: Infinity,
+    stat: 'movement', amount: 0, turnsLeft: Infinity,
     trigger: { def: p.trigger, sourceKey: ownerKey, debuff: false },
   }));
 
 /** A root (Effect 'root') as an ActiveBuff: no stat change, it just holds the unit in place (isRooted). */
 export const rootToBuff = (eff: Extract<Effect, { type: 'root' }>, idPrefix: string, source: string): ActiveBuff => ({
   id: `${idPrefix}-root`, source, damageElement: eff.damageElement,
-  stat: 'movement', amount: 0, roots: true, roundsRemaining: eff.rounds,
+  stat: 'movement', amount: 0, roots: true, turnsLeft: eff.turns,
 });
 
 /** Threat a root or a trigger generates when it lands (like a debuff's, which is its total stat change). */
@@ -188,11 +192,11 @@ const TRIGGER_THREAT = 5;
 
 /**
  * A DoT `actor` puts on someone with `eff`: half its damage bonus (`off`, as of the attack or scaled trigger result
- * that lands it; none: flat) added per round, its penetration kept for the ticks.
+ * that lands it; none: flat) added per turn, its penetration kept for the ticks.
  */
 const newDot = (name: string, eff: Extract<Effect, { type: 'dot' }>, actor: CombatUnit, off?: Offense): ActiveDot => ({
-  name, damageElement: eff.damageElement, damagePerRound: Math.floor(eff.damagePerRound + (off?.damage ?? 0) / 2),
-  roundsRemaining: eff.rounds, sourceKey: threatKey(actor),
+  name, damageElement: eff.damageElement, damagePerTurn: Math.floor(eff.damagePerTurn + (off?.damage ?? 0) / 2),
+  turnsLeft: eff.turns, sourceKey: threatKey(actor),
   penetration: off?.penetration, elementPenetration: off?.elementPenetration, damagesMP: eff.damagesMP,
   ...tickStack(name, eff),
 });
@@ -246,14 +250,14 @@ export function applyThreatChange(threat: number, change: ThreatChange, threatMu
 export const changesThreat = (change: ThreatChange) => change.gain > 0 || !!change.loss || !!change.percent;
 
 /**
- * Sum one round of DoT damage against the target (after DR), split into HP and MP damage, with
+ * Sum one turn's DoT damage against the target (after DR), split into HP and MP damage, with
  * per-source threat totals.
  */
 export function tickDots(dots: ActiveDot[], target: Stats): { damage: number; mpDamage: number; threatBySource: Map<string, number> } {
   let damage = 0, mpDamage = 0;
   const threatBySource = new Map<string, number>();
   for (const dot of dots) {
-    const dmg = applyDR(dot.damagePerRound, dot.damageElement, target, dot.penetration, dot.elementPenetration);
+    const dmg = applyDR(dot.damagePerTurn, dot.damageElement, target, dot.penetration, dot.elementPenetration);
     if (dot.damagesMP) mpDamage += dmg;
     else damage += dmg;
     if (dot.sourceKey !== undefined) {
@@ -264,10 +268,10 @@ export function tickDots(dots: ActiveDot[], target: Stats): { damage: number; mp
 }
 
 /**
- * HoT heal for one round on a unit. Caster healing is baked into healPerRound when the HoT is created; half the
+ * HoT heal for one turn on a unit. Caster healing is baked into healPerTurn when the HoT is created; half the
  * unit's own healingReceived (rounded down, as it stands now) is added to each tick.
  */
-export const tickHots = (hots: ActiveHot[], target: Stats) => hots.reduce((sum, h) => sum + h.healPerRound + Math.floor(target.healingReceived / 2), 0);
+export const tickHots = (hots: ActiveHot[], target: Stats) => hots.reduce((sum, h) => sum + h.healPerTurn + Math.floor(target.healingReceived / 2), 0);
 
 // ─── Action normalisation ─────────────────────────────────────────────────────
 
@@ -404,7 +408,7 @@ export function executeAction(caster: CombatUnit, action: Ability, targets: Comb
       case 'hot':
         c.hots.push({
           name: o.ability, damageElement: eff.damageElement,
-          healPerRound: bonuses ? Math.floor(eff.healPerRound + actor.stats.healing / 2) : eff.healPerRound, roundsRemaining: eff.rounds,
+          healPerTurn: bonuses ? Math.floor(eff.healPerTurn + actor.stats.healing / 2) : eff.healPerTurn, turnsLeft: eff.turns,
           ...tickStack(o.ability, eff),
         });
         float(recipient, '+HoT', COMBAT_TEXT_COLOR.heal, 'glow', eff.damageElement);
@@ -415,7 +419,7 @@ export function executeAction(caster: CombatUnit, action: Ability, targets: Comb
         const dot = newDot(o.ability, eff, actor, off);
         c.dots.push(dot);
         float(recipient, `${o.ability}!`, COMBAT_TEXT_COLOR.dot, 'glow', eff.damageElement);
-        if (onOther) threat.gain += damageThreat(dot.damagePerRound, eff.damagesMP);
+        if (onOther) threat.gain += damageThreat(dot.damagePerTurn, eff.damagesMP);
         break;
       }
       case 'buff':
@@ -435,7 +439,7 @@ export function executeAction(caster: CombatUnit, action: Ability, targets: Comb
       }
       case 'summon':
         summons.push({
-          creature: eff.creature, rounds: eff.rounds, max: eff.max ?? 1, ability: o.ability,
+          creature: eff.creature, turns: eff.turns, max: eff.max ?? 1, ability: o.ability,
           ...(actor !== caster ? { by: actor } : action.target === 'tile' && aimAt ? { at: { ...aimAt } } : {}),
         });
         break;
@@ -546,7 +550,7 @@ export function executeAction(caster: CombatUnit, action: Ability, targets: Comb
       const dot = newDot(act.name, dotEffect, attacker, offense);
       c.dots.push(dot);
       // One tick's worth of threat on application; later ticks add threat via sourceKey
-      threat.gain += damageThreat(dot.damagePerRound, dotEffect.damagesMP);
+      threat.gain += damageThreat(dot.damagePerTurn, dotEffect.damagesMP);
     }
     if (dotEffects.length > 0 && damageEffects.length === 0) float(target, 'Hit!', COMBAT_TEXT_COLOR.dot, 'hit');
     for (const debuffEffect of debuffEffects) {
@@ -586,6 +590,10 @@ export function executeAction(caster: CombatUnit, action: Ability, targets: Comb
     changeFor(caster).slain = true;
     float(caster, '💀', COMBAT_TEXT_COLOR.damage);
   }
+
+  // What lands on the caster lands during its own turn: that turn doesn't count down (countDownTurns)
+  const own = changes.get(unitKey(caster.ref));
+  if (own) for (const list of [own.buffs, own.hots, own.dots]) for (const x of list) x.fresh = true;
 
   return {
     changes: [...changes.values()], floats,

@@ -10,7 +10,7 @@ import { warnIgnoredEffects, warnIgnoredTriggers } from '../combat/abilities';
 /** A creature an action summons (executeAction's outcome; placed where the outcome lands). */
 export interface SummonRequest {
   creature: string;  // a creature class id (summonClass)
-  rounds: number;
+  turns: number;
   max: number;       // at most this many out from its ability at once: casting it again replaces the oldest
   ability: string;   // the ability that summons it
   at?: Pos;          // the tile it appears on (a 'tile' ability's aim); none = beside the caster
@@ -69,7 +69,7 @@ export function createSummon(req: SummonRequest, owner: string, allied: boolean,
   return {
     ...generateEnemyInstance(classData, level, id, pos, zoneId, -1),
     aggroed: true,
-    summon: { owner, ability: req.ability, roundsLeft: req.rounds, allied },
+    summon: { owner, ability: req.ability, turnsLeft: req.turns, allied },
   };
 }
 

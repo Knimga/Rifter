@@ -10,10 +10,11 @@ export interface StatusMarker {
   name: string;
   /** Helps (buff, heal over time) or hurts (debuff, damage over time). */
   buff: boolean;
-  rounds: number;
+  /** Its bearer's turns left (the longest of its stacks). */
+  turns: number;
   /** How many stacks of it are on the unit (a buff, debuff, HoT or DoT landed more than once). */
   stacks: number;
-  /** What it does, e.g. '+3 Block' or '5 poison damage each round'. */
+  /** What it does, e.g. '+3 Block' or '5 poison damage each turn'. */
   effect: string;
   /** The effect's element (its ability's), if it has one: its marker's outline takes the element's color. */
   element?: DamageElement;
@@ -25,14 +26,14 @@ const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? '' : 's'}`;
 export function statusMarkers(buffs: ActiveBuff[], hots: ActiveHot[], dots: ActiveDot[]): StatusMarker[] {
   const bySource = new Map<string, ActiveBuff[]>();
   for (const b of buffs) {
-    if (!Number.isFinite(b.roundsRemaining)) continue; // permanent (gear) bonuses aren't effects
+    if (!Number.isFinite(b.turnsLeft)) continue; // permanent (gear) bonuses aren't effects
     const key = b.source ?? b.id;
     bySource.set(key, [...(bySource.get(key) ?? []), b]);
   }
   const markers: StatusMarker[] = [...bySource].map(([name, list]) => ({
     name,
     buff: !list.some((b) => b.amount < 0 || (b.percent ?? 0) < 0 || b.roots || b.trigger?.debuff),
-    rounds: Math.max(...list.map((b) => b.roundsRemaining)),
+    turns: Math.max(...list.map((b) => b.turnsLeft)),
     stacks: new Set(list.map((b) => b.stack?.id ?? b.id)).size,
     // Each line once: stacks of one effect read the same
     effect: [...new Set(list.flatMap((b) => [
@@ -44,23 +45,23 @@ export function statusMarkers(buffs: ActiveBuff[], hots: ActiveHot[], dots: Acti
     element: list.find((b) => b.damageElement)?.damageElement,
   }));
   // A HoT or DoT: one marker per ability and element, its stacks counted (the newest's amount, the longest time left)
-  const ticking = <T extends { name?: string; damageElement?: DamageElement; roundsRemaining: number }>(list: T[], marker: (t: T, stacks: number, rounds: number) => StatusMarker) => {
+  const ticking = <T extends { name?: string; damageElement?: DamageElement; turnsLeft: number }>(list: T[], marker: (t: T, stacks: number, turns: number) => StatusMarker) => {
     const groups = new Map<string, T[]>();
     for (const t of list) {
       const key = `${t.name ?? ''}:${t.damageElement ?? ''}`;
       groups.set(key, [...(groups.get(key) ?? []), t]);
     }
-    for (const g of groups.values()) markers.push(marker(g[g.length - 1], g.length, Math.max(...g.map((t) => t.roundsRemaining))));
+    for (const g of groups.values()) markers.push(marker(g[g.length - 1], g.length, Math.max(...g.map((t) => t.turnsLeft))));
   };
-  ticking(hots, (h, stacks, rounds) => ({
-    name: h.name ?? 'Regeneration', buff: true, rounds, stacks, effect: `Heals ${h.healPerRound} each round.`, element: h.damageElement,
+  ticking(hots, (h, stacks, turns) => ({
+    name: h.name ?? 'Regeneration', buff: true, turns, stacks, effect: `Heals ${h.healPerTurn} each turn.`, element: h.damageElement,
   }));
-  ticking(dots, (d, stacks, rounds) => ({
+  ticking(dots, (d, stacks, turns) => ({
     name: d.name ?? capitalize(d.damageElement),
     buff: false,
-    rounds,
+    turns,
     stacks,
-    effect: `${d.damagePerRound} ${d.damageElement} damage${d.damagesMP ? ' to MP' : ''} each round.`,
+    effect: `${d.damagePerTurn} ${d.damageElement} damage${d.damagesMP ? ' to MP' : ''} each turn.`,
     element: d.damageElement,
   }));
   return markers;
@@ -76,13 +77,13 @@ function Marker({ m }: { m: StatusMarker }) {
       content={
         <div className="w-[168px] box-border px-2.5 py-2 text-left">
           <span className="block font-display text-xs tracking-[0.04em] text-rift-bright">{m.name}{m.stacks > 1 && ` ×${m.stacks}`}</span>
-          <span className="block mt-[3px] text-[10px] tracking-[0.1em] uppercase text-rift-label">{m.buff ? 'Buff' : 'Debuff'} · {plural(m.rounds, 'round')} left</span>
+          <span className="block mt-[3px] text-[10px] tracking-[0.1em] uppercase text-rift-label">{m.buff ? 'Buff' : 'Debuff'} · {plural(m.turns, 'turn')} left</span>
           <span className="block mt-1.5 text-[11px] leading-[1.5] text-rift-soft">{m.stacks > 1 && 'Each stack: '}{m.effect}</span>
         </div>
       }
     >
       <span
-        aria-label={`${m.name}, ${m.buff ? 'buff' : 'debuff'}, ${plural(m.rounds, 'round')} remaining`}
+        aria-label={`${m.name}, ${m.buff ? 'buff' : 'debuff'}, ${plural(m.turns, 'turn')} remaining`}
         className="inline-flex items-center justify-center w-4 h-4 box-border bg-rift-raised rounded-sm text-rift-soft"
         // Solid for a buff, dashed for a debuff; in the effect's element color, else the plain buff/debuff color
         style={{

@@ -15,7 +15,7 @@ src/forge/
     _weapon.ts    shared helpers (files starting "_" are not designs)
   drafts/         new designs and requested changes go HERE, never into designs/
   terrain/        a map's 3D floor and walls (buildTerrain), from its tiles and its TerrainStyle; a zone's clutter (placeClutter)
-  dev/            builder page (ForgePage, forgeView, DungeonPreview, its controls in ui.tsx) + draft registry; dev-only, lazy-loaded
+  dev/            builder page (ForgePage, forgeView, the Maps view: MapView with DungeonPreview and SanctumPreview, its controls in ui.tsx) + draft registry; dev-only, lazy-loaded
   registry.vite.ts   import.meta.glob of designs/*/
   dataRefs.ts     designs <-> game data entries (used by lint and the builder page)
   equip.ts        characters holding their gear

@@ -36,12 +36,10 @@ import { Mesh, bake } from '../src/forge/core/mesh';
 import { box } from '../src/forge/core/primitives';
 import { buildTerrain } from '../src/forge/terrain/build';
 import { mulberry32 } from '../src/forge/core/rng';
-import { facingOpenSide } from '../src/forge/core/facing';
 import { buildInstance } from '../src/forge/core/link';
-import { sceneryObjects, zoneGround } from '../src/components/zoneScenery';
+import { doorObjects, sceneryObjects, zoneGround } from '../src/components/zoneScenery';
 import { DUNGEONS } from '../src/data/world/dungeons';
 import { buildDungeon } from '../src/data/world/dungeonGen';
-import { interactiveObjectModel } from '../src/data/world/interactiveObjects';
 
 const args = process.argv.slice(2);
 const flag = (n: string) => args.includes(`--${n}`);
@@ -96,7 +94,22 @@ function raster(W: number, H: number) {
       }
   };
 
-  return { color, zbuf, fillTri };
+  /**
+   * A halo (MeshData.halos), like the game's halo shader: a round glow of radius `R` px around (x, y) at depth `z`
+   * (brought forward by its radius), hidden where a nearer surface is, faded from its center (0.5, 0.16 at 40%, 0 at
+   * the edge) and added on. `c`: its color, 0..1.
+   */
+  const addHalo = (hx: number, hy: number, z: number, R: number, c: readonly number[]) => {
+    for (let y = Math.max(0, Math.floor(hy - R)); y <= Math.min(H - 1, Math.ceil(hy + R)); y++)
+      for (let x = Math.max(0, Math.floor(hx - R)); x <= Math.min(W - 1, Math.ceil(hx + R)); x++) {
+        const d = Math.hypot(x + 0.5 - hx, y + 0.5 - hy) / R, i = y * W + x;
+        if (d > 1 || zbuf[i] > z) continue;
+        const a = d < 0.4 ? 0.5 + (0.16 - 0.5) * (d / 0.4) : 0.16 * (1 - (d - 0.4) / 0.6);
+        for (let ch = 0; ch < 3; ch++) color[i * 3 + ch] = Math.min(255, color[i * 3 + ch] + c[ch] * 255 * a);
+      }
+  };
+
+  return { color, fillTri, addHalo };
 }
 
 /**
@@ -132,7 +145,7 @@ const view = (p: number[]): [number, number, number] => {
 
 function renderCell(model: Model, design: Design, yaw: number): Uint8Array {
   const S = CELL * SS;
-  const { color, zbuf, fillTri } = raster(S, S);
+  const { color, fillTri, addHalo } = raster(S, S);
 
   const cy = Math.cos(yaw), sy = Math.sin(yaw);
   // world-ish space: rotate model by yaw about Y (matches rotY in vec.ts)
@@ -206,18 +219,10 @@ function renderCell(model: Model, design: Design, yaw: number): Uint8Array {
   for (const t of opaque) draw(t, true);
   for (const t of clear) draw(t, false);
 
-  // Halos (MeshData.halos), like the game's halo shader: a round glow at each, brought forward by its radius,
-  // hidden where a nearer surface is, faded from its center (0.5, 0.16 at 40%, 0 at the edge) and added on
+  // Its halos (MeshData.halos)
   for (const h of anim ? posedHalos(model, { [anim]: 1 }) : model.mesh.halos) {
     const [hx, hy, hz] = toScreen(view(rot([h.p[0], h.p[1], h.p[2]])));
-    const R = h.r * k, z = hz + h.r;
-    for (let y = Math.max(0, Math.floor(hy - R)); y <= Math.min(S - 1, Math.ceil(hy + R)); y++)
-      for (let x = Math.max(0, Math.floor(hx - R)); x <= Math.min(S - 1, Math.ceil(hx + R)); x++) {
-        const d = Math.hypot(x + 0.5 - hx, y + 0.5 - hy) / R, i = y * S + x;
-        if (d > 1 || zbuf[i] > z) continue;
-        const a = d < 0.4 ? 0.5 + (0.16 - 0.5) * (d / 0.4) : 0.16 * (1 - (d - 0.4) / 0.6);
-        for (let ch = 0; ch < 3; ch++) color[i * 3 + ch] = Math.min(255, color[i * 3 + ch] + h.c[ch] * 255 * a);
-      }
+    addHalo(hx, hy, hz + h.r, h.r * k, h.c);
   }
 
   return downsample(color, CELL, CELL);
@@ -252,9 +257,8 @@ if (terrainKey) {
   const terrain = buildTerrain({ cols: zone.width, rows: zone.height, floors: zoneGround(zone), doors: zone.doors.map((d) => d.pos), style: config.terrain, seed: zone.id });
   const approved = Object.fromEntries((await loadDesigns()).map((l) => [l.design.id, l.design]));
   // Its doors (each facing the floor it opens onto, as on the map), then its obstacles and clutter (zoneScenery)
-  const isFloor = (p: { x: number; y: number }) => zone.floors.has(`${p.x},${p.y}`);
   const objects = [
-    ...zone.doors.map((d) => ({ id: d.id, link: interactiveObjectModel(config.doorObject), pos: d.pos, facing: facingOpenSide(d.pos, isFloor), size: undefined, look: undefined })),
+    ...doorObjects(zone, config.doorObject),
     ...sceneryObjects(zone, config.clutter, [...dungeon.rifts, ...dungeon.chests].filter((o) => o.zoneId === zone.id).map((o) => o.pos)),
   ].flatMap((o) => {
     const design = approved[o.link];
@@ -270,7 +274,7 @@ if (terrainKey) {
   const minX = Math.min(...corners.map((c) => c[0])), maxX = Math.max(...corners.map((c) => c[0]));
   const minY = Math.min(...corners.map((c) => c[1])), maxY = Math.max(...corners.map((c) => c[1]));
   const w = Math.ceil(((maxX - minX) * T) / SS), h = Math.ceil(((maxY - minY) * T) / SS);
-  const { color, fillTri } = raster(w * SS, h * SS);
+  const { color, fillTri, addHalo } = raster(w * SS, h * SS);
   const toScreen = (v: [number, number, number]) => [(v[0] - minX) * T, (maxY - v[1]) * T, v[2]];
   const drawModel = (model: Model, place: (p: number[]) => number[] = (p) => p) => {
     const { positions, alpha, triCount } = model.mesh;
@@ -280,9 +284,20 @@ if (terrainKey) {
       if (rgb) fillTri(...(P.map((q) => toScreen(view(q))) as [number[], number[], number[]]), rgb, alpha[t], true);
     }
   };
+  const drawHalos = (model: Model, place: (p: number[]) => number[] = (p) => p) => {
+    for (const h of model.mesh.halos) {
+      const [hx, hy, hz] = toScreen(view(place([h.p[0], h.p[1], h.p[2]])));
+      addHalo(hx, hy, hz + h.r, h.r * T, h.c);
+    }
+  };
+  const placeObject = (o: (typeof objects)[number]) => (q: number[]) => { const r = rotY([q[0], q[1], q[2]], o.yaw); return [r[0] + o.center[0], r[1], r[2] + o.center[1]]; };
   drawModel(terrain.floor);
   drawModel(terrain.walls);
-  for (const o of objects) drawModel(o.model, (q) => { const r = rotY([q[0], q[1], q[2]], o.yaw); return [r[0] + o.center[0], r[1], r[2] + o.center[1]]; });
+  for (const o of objects) drawModel(o.model, placeObject(o));
+  // Halos last, over every surface (as the game's, drawn after the opaque faces)
+  drawHalos(terrain.floor);
+  drawHalos(terrain.walls);
+  for (const o of objects) drawHalos(o.model, placeObject(o));
   writeFileSync(out, encodePNG(w, h, downsample(color, w, h)));
   console.log(`wrote ${out} (${w}x${h}): ${config.name}, zone ${zone.id} (${zone.width}x${zone.height}), floor ${terrain.floor.mesh.triCount} tris, walls ${terrain.walls.mesh.triCount} tris`);
   process.exit(0);

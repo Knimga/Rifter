@@ -19,6 +19,11 @@ const MS_PER_TILE = 200;
 const MAX_MOVE_MS = 1000;
 /** How long a hit's flash lasts. */
 const FLASH_MS = 120;
+/**
+ * How high (tiles) a map object's model may rise and still lie flat on the floor (a seal carved into it): such an
+ * object is drawn with the floor, under the map's tile overlays (highlights, the move line), not over them.
+ */
+const FLAT_HEIGHT = 0.03;
 
 /** One model on the map. `id` is stable for the unit's lifetime (e.g. an enemy instance id). */
 export interface MapUnit {
@@ -73,6 +78,8 @@ interface Entry {
   /** Its last flash (MapUnit.flash), and how much of a flash in progress is left (ms). */
   flashSeq?: number;
   flashMs: number;
+  /** It lies flat on the floor (FLAT_HEIGHT): drawn with the terrain's floor (groundCanvas), under the tile overlays. */
+  flat: boolean;
 }
 
 /** Each played animation's progress (0..1), for animateParts. */
@@ -92,11 +99,17 @@ function syncAnimations(e: Entry, played: string[] = [], snap: boolean): boolean
   return changed;
 }
 
-/** A unit's scene object, standing upright or (loot) laid flat on the floor, with the fog's materials. */
+/** Whether a unit lies flat on the floor (a carving, a marking): a map object no taller than FLAT_HEIGHT. Loot never does. */
+const isFlat = (u: MapUnit) => !u.lying && u.model.mesh.bounds.max[1] <= FLAT_HEIGHT;
+
+/**
+ * A unit's scene object, standing upright or (loot) laid flat on the floor, with the fog's materials. A flat one
+ * (isFlat) keeps its own: it is drawn with the floor, which the fog sheet covers.
+ */
 function makeObject(u: MapUnit, fog: FogOfWar): THREE.Group {
   const obj = toThree(u.model);
   if (u.lying) layItemOnGround(obj, u.model, lootYaw());
-  fog.apply(obj);
+  if (!isFlat(u)) fog.apply(obj);
   return obj;
 }
 
@@ -142,7 +155,11 @@ export class MapModelRenderer {
   private drawn = false;
 
   /** The terrain's floor, on its own canvas (created with the first terrain), drawn only when it or the board changes. */
-  private ground: { r: THREE.WebGLRenderer; scene: THREE.Scene; floor?: THREE.Object3D; dirty: boolean } | null = null;
+  /**
+   * The terrain's floor, on its own canvas (created with the first terrain), drawn only when it or the board changes.
+   * `flats`: the flat objects lying on it (isFlat), drawn over it whatever its own relief (a carving on raised stones).
+   */
+  private ground: { r: THREE.WebGLRenderer; scene: THREE.Scene; flats: THREE.Scene; floor?: THREE.Object3D; dirty: boolean } | null = null;
   /** The terrain's walls, in this scene. */
   private walls: THREE.Object3D | null = null;
 
@@ -155,7 +172,7 @@ export class MapModelRenderer {
     this.canvas = this.r.domElement;
     addForgeLights(this.scene, GAME_CAMERA);
     // The fog's color: the palette's (index.css --rift-fog)
-    const fogColor = getComputedStyle(document.documentElement).getPropertyValue('--rift-fog').trim() || '#050608';
+    const fogColor = getComputedStyle(document.documentElement).getPropertyValue('--rift-fog').trim() || '#000000';
     this.fog = new FogOfWar(fogColor);
     this.scene.add(this.fog.sheet);
   }
@@ -205,9 +222,13 @@ export class MapModelRenderer {
         const r = transparentRenderer();
         const size = this.r.getSize(new THREE.Vector2());
         r.setSize(size.x, size.y);
-        const scene = new THREE.Scene();
+        r.autoClear = false; // the floor, then its flat objects over it (frame)
+        const scene = new THREE.Scene(), flats = new THREE.Scene();
         addForgeLights(scene, GAME_CAMERA);
-        this.ground = { r, scene, dirty: true };
+        addForgeLights(flats, GAME_CAMERA);
+        this.ground = { r, scene, flats, dirty: true };
+        // Flat objects added before there was a floor to lie on move to it
+        for (const e of this.entries.values()) if (e.flat) { e.obj.removeFromParent(); this.addObject(e); }
       }
       // Not fogged: the fog sheet over the HTML floor covers it
       this.ground.floor = toThree(terrain.floor);
@@ -231,10 +252,10 @@ export class MapModelRenderer {
       let e = this.entries.get(u.id);
       if (e && e.model !== u.model) {
         // Same unit, rebuilt model (e.g. new gear, or a design update in dev): swap the mesh, keep its state
-        this.scene.remove(e.obj);
+        this.removeObject(e);
         disposeObject(e.obj);
-        e = { ...e, model: u.model, obj: makeObject(u, this.fog) };
-        this.scene.add(e.obj);
+        e = { ...e, model: u.model, obj: makeObject(u, this.fog), flat: isFlat(u) };
+        this.addObject(e);
         this.entries.set(u.id, e);
         // The new object where the unit is drawn now, facing its way (a fresh object starts at the origin)
         this.place(u.id, e);
@@ -245,8 +266,8 @@ export class MapModelRenderer {
       if (!e) {
         // A new unit adopts any existing aim without turning to it (a remount never replays an old attack)
         const yaw = u.lying ? lootYaw() : (u.facing ?? 0);
-        e = { model: u.model, obj: makeObject(u, this.fog), pos: u.pos, at: { ...u.pos }, yaw, targetYaw: yaw, aimSeq: u.aim?.seq, anims: {}, viewer: u.viewer, size: typeof u.size === 'object' ? u.size : [u.size ?? 1, u.size ?? 1], flashSeq: u.flash, flashMs: 0 };
-        this.scene.add(e.obj);
+        e = { model: u.model, obj: makeObject(u, this.fog), pos: u.pos, at: { ...u.pos }, yaw, targetYaw: yaw, aimSeq: u.aim?.seq, anims: {}, viewer: u.viewer, size: typeof u.size === 'object' ? u.size : [u.size ?? 1, u.size ?? 1], flashSeq: u.flash, flashMs: 0, flat: isFlat(u) };
+        this.addObject(e);
         this.entries.set(u.id, e);
         this.place(u.id, e);
         // A unit that appears in an animated state (a chest already looted) shows it done, not replayed
@@ -289,7 +310,7 @@ export class MapModelRenderer {
     }
     for (const [id, e] of this.entries) {
       if (seen.has(id)) continue;
-      this.scene.remove(e.obj);
+      this.removeObject(e);
       disposeObject(e.obj);
       this.entries.delete(id);
       changed = true;
@@ -297,9 +318,23 @@ export class MapModelRenderer {
     if (changed) this.requestFrame();
   }
 
+  /** Put an entry's object in its scene: the floor's (groundCanvas) for a flat one, once there is one; else this one. */
+  private addObject(e: Entry): void {
+    if (e.flat && this.ground) {
+      this.ground.flats.add(e.obj);
+      this.ground.dirty = true;
+    } else this.scene.add(e.obj);
+  }
+
+  private removeObject(e: Entry): void {
+    if (this.ground && e.obj.parent === this.ground.flats) this.ground.dirty = true;
+    e.obj.removeFromParent();
+  }
+
   private place(id: string, e: Entry): void {
     e.obj.position.x = e.at.x + e.size[0] / 2;
     e.obj.position.z = e.at.y + e.size[1] / 2;
+    if (e.flat && this.ground) this.ground.dirty = true;
     this.onPlace?.(id, e.at);
   }
 
@@ -353,7 +388,12 @@ export class MapModelRenderer {
     if (this.fog.step(now, viewerMoving)) animating = true;
     this.r.render(this.scene, this.cam);
     if (this.ground?.dirty) {
-      this.ground.r.render(this.ground.scene, this.cam);
+      // The floor, then (its depth cleared) the flat objects lying on it, always over it
+      const g = this.ground;
+      g.r.clear();
+      g.r.render(g.scene, this.cam);
+      g.r.clearDepth();
+      g.r.render(g.flats, this.cam);
       this.ground.dirty = false;
     }
     if (!this.drawn) { this.drawn = true; this.onFirstFrame?.(); }

@@ -92,7 +92,10 @@ export interface ActiveBuff {
   stat: BuffableStat;
   amount: number;          // flat delta — positive = buff, negative = debuff (0 if percent-only)
   percent?: number;        // percentage delta applied after flats — e.g. 10 = +10%, -20 = -20%
-  roundsRemaining: number;
+  /** Its bearer's turns left (Infinity: gear's, for good). Counts down at the end of each of its turns (countDownTurns). */
+  turnsLeft: number;
+  /** It landed during its bearer's own turn: that turn doesn't count down (countDownTurns), so it lasts through the others'. */
+  fresh?: boolean;
   /** A root (Effect 'root'): while it lasts the unit can't move (isRooted). Its stat change is none. */
   roots?: boolean;
   /**
@@ -174,16 +177,20 @@ export function addTicking<T extends { stack?: TickStack }>(list: T[], added: re
 export interface ActiveHot {
   name?: string;
   damageElement?: DamageElement;
-  healPerRound: number;
-  roundsRemaining: number;
+  healPerTurn: number;
+  /** Its bearer's turns left: it heals at the start of each, counts down at the end (as ActiveBuff). */
+  turnsLeft: number;
+  fresh?: boolean;
   stack?: TickStack;
 }
 
 export interface ActiveDot {
   name?: string;
   damageElement: DamageElement;
-  damagePerRound: number;
-  roundsRemaining: number;
+  damagePerTurn: number;
+  /** Its bearer's turns left: it deals damage at the start of each, counts down at the end (as ActiveBuff). */
+  turnsLeft: number;
+  fresh?: boolean;
   sourceKey?: string;         // threat key of the party-side unit that applied it (party member or summon: threatKey)
   penetration?: number;       // % points reducing armor/MR DR on each tick
   elementPenetration?: number; // % points reducing element resistance on each tick

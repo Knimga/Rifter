@@ -17,8 +17,8 @@
 import type { DataRef } from '../core/types';
 import type { Mesh } from '../core/mesh';
 import { slug } from '../core/slug';
-import { blob, box, frustum, loft } from '../core/primitives';
-import { add, cross, lerp3, mul, mulC, norm, rotX, rotY, sub, type RGB, type Vec3 } from '../core/vec';
+import { blob, box, frustum, jointedLimb, loft, tube } from '../core/primitives';
+import { add, cross, lerp3, mul, mulC, norm, rotX, rotY, rotZ, sub, type RGB, type Vec3 } from '../core/vec';
 import { CLASSES, type ClassKey } from '../../data/units/classes';
 import type { WeaponType } from '../../data/gear/types';
 import { band, ell } from './_armor';
@@ -108,6 +108,11 @@ export interface BodyBuild {
    * not swung back for a weapon. Overrides `hold`.
    */
   restArms?: boolean;
+  /**
+   * In the shoulder-carry pose: how much higher (local units) the carried two-hander rests, and the fist holding it
+   * (default 0): over bigger shoulder pads (the Barbarian's), so the haft lies on them instead of through them.
+   */
+  carryLift?: number;
 }
 
 /** Each figure's shoulder half-width, arm thickness (BodyBuild.shoulderX / arms when a build gives none), leg thickness and foot size (its boots). */
@@ -160,9 +165,9 @@ const CARRY_ANGLE = (30 * Math.PI) / 180;
 const CARRY_REACH = 0.45; // puts the shoulder at about the middle of a two-hander's haft
 const UPPER_ARM = 0.225; // segment length used to place the elbow
 
-/** Top of the right shoulder, where a carried two-hander rests (shoulder-carry pose). */
+/** Top of the right shoulder, where a carried two-hander rests (shoulder-carry pose), raised by the build's carryLift. */
 function carryRest(shoulder: Vec3, build: BodyBuild): Vec3 {
-  return add(shoulder, [0.01, 0.075 * bodyFrame(build).arms + 0.03, -0.02]);
+  return add(shoulder, [0.01, 0.075 * bodyFrame(build).arms + 0.03 + (build.carryLift ?? 0), -0.02]);
 }
 
 /** An elbow for a shoulder and wrist: halfway between them, pushed out along `dir` by as much as the arm's length needs. */
@@ -445,9 +450,24 @@ export function cuirass(m: Mesh, look: CuirassLook, ridge: boolean): void {
   box(m, [0, T.hip + 0.04, 0.116], [0.05, 0.045, 0.014], look.buckle);
 }
 
-/** A small domed pauldron capping the shoulder joint at `shoulder`. */
-export function pauldron(m: Mesh, shoulder: Vec3, color: RGB): void {
-  blob(m, [shoulder[0] * 1.04, shoulder[1] + 0.03, 0], [0.085, 0.07, 0.1], 1, 0, color, { floorY: shoulder[1] - 0.015 });
+/** A sloped pauldron's colors: its top plate, the rim around it, and its two lames (upper, lower). */
+export interface PauldronLook { plate: RGB; rim: RGB; lames: [RGB, RGB] }
+
+/**
+ * A sloped pauldron over the shoulder joint at `shoulder` (side `sx`): a low domed plate, rimmed, with two lames
+ * stepping down below it, the whole pad sloping down and out from the neck (each shell open underneath). `k` scales
+ * it (a broader build's bigger pads); `step` scales how far each lame steps down from the one above (smaller: closer
+ * together, so nothing shows between them).
+ */
+export function pauldron(m: Mesh, sx: 1 | -1, shoulder: Vec3, look: PauldronLook, k = 1, step = 1): void {
+  const s0 = m.faces.length;
+  blob(m, [0, 0, 0], [0.105 * k, 0.05 * k, 0.112 * k], 1, 0.04, look.plate, { floorY: 0 });
+  blob(m, [0, 0.004 * k, 0], [0.111 * k, 0.014 * k, 0.118 * k], 0, 0.04, look.rim);
+  for (let l = 1; l <= 2; l++) {
+    const at: Vec3 = [sx * 0.045 * l * k * step, -0.03 * l * k * step, 0];
+    blob(m, at, [(0.085 - 0.008 * l) * k, 0.03 * k, (0.104 - 0.008 * l) * k], 0, 0.04, look.lames[l - 1], { floorY: at[1] });
+  }
+  m.xf(s0, (p) => add(rotZ(p, -sx * 0.5), [shoulder[0] * 0.98, shoulder[1] + 0.04 * k, 0]));
 }
 
 /**
@@ -463,11 +483,24 @@ export function fittedJerkin(m: Mesh, leather: RGB, belt: RGB, buckle: RGB): voi
 }
 
 /**
+ * A shawl's bunched folds (shawl's `bunched`): thick rolls of fabric wrapped around the neck and resting on the
+ * shoulders, each lower one wider, hanging lower in front and drooping over the shoulders, their reach and height
+ * wavering around them; every other one a shade lighter, so the folds read apart.
+ * [height, half-width, half-depth, how far it hangs lower in front, thickness]
+ */
+const SHAWL_FOLDS: [y: number, rx: number, rz: number, dip: number, r: number][] = [
+  [TORSO.collar + 0.035, 0.15, 0.125, 0.03, 0.024],
+  [TORSO.shoulder + 0.05, 0.245, 0.16, 0.07, 0.028],
+  [TORSO.shoulder - 0.02, 0.305, 0.172, 0.11, 0.026],
+];
+
+/**
  * A shawl draped over the shoulders and capping the tops of the arms, gathered around the neck. With
  * `coversFace` it is pulled up over the mouth to just below the nose; otherwise it ends in a gathered
  * collar under the chin. 12-sided rings with room to spare, so the head's squarish jaw never pokes through.
+ * `bunched`: the fabric lies on the shoulders in thick folds (SHAWL_FOLDS) rather than as a smooth covering.
  */
-export function shawl(m: Mesh, color: RGB, coversFace: boolean): void {
+export function shawl(m: Mesh, color: RGB, coversFace: boolean, bunched = false): void {
   const T = TORSO;
   m.part('shawl', [0, T.collar, 0]);
   const [hx, hy, hz] = HEAD.center;
@@ -484,6 +517,21 @@ export function shawl(m: Mesh, color: RGB, coversFace: boolean): void {
     rings.push(ell(T.collar + 0.075, 0.13, 0.108, N)); // a soft collar under the chin
   }
   loft(m, rings, color, { caps: false });
+  if (!bunched) return;
+  // The folds: each a closed roll around the body, its path wavering and sagging unevenly, swelling and thinning as it
+  // goes (slow waves, out of step from fold to fold)
+  const STEPS = 14;
+  SHAWL_FOLDS.forEach(([y, rx, rz, dip, r], k) => {
+    const angle = (i: number) => (i / STEPS) * Math.PI * 2;
+    const path = Array.from({ length: STEPS + 1 }, (_, i): Vec3 => {
+      const a = angle(i), front = Math.max(0, Math.sin(a)), side = Math.abs(Math.cos(a));
+      const wave = Math.sin(a * 2 + k * 1.7) * 0.016 + Math.sin(a * 3 + k * 0.9) * 0.01;
+      const sag = Math.sin(a * 2 + k * 2.6) * 0.022;
+      return [Math.cos(a) * (rx + wave), y - dip * front ** 2 - 0.03 * side ** 3 + sag, Math.sin(a) * (rz + wave) + 0.005];
+    });
+    const thick = (i: number) => r * (0.72 + 0.28 * (1 + Math.sin(angle(i) * 3 + k * 2.1)));
+    jointedLimb(m, path, (s) => [thick(s), thick(s + 1)], k % 2 ? mulC(color, 1.12) : color, { sides: 5, j: 0.06 });
+  });
 }
 
 // ─── Hoods ────────────────────────────────────────────────────────────────────
@@ -754,12 +802,17 @@ export interface CasterRobeLook {
   lining: RGB;
   /** Draws the hair instead of the default short spiky hair (spikyHair in `hair`), e.g. the Acolyte's. */
   drawHair?: (m: Mesh) => void;
+  /**
+   * Worn open in front (Ardas's), with no sash: down its middle the shirt shows above the hips and the trousers below,
+   * the opening edged in `trim` from the hem to the collar.
+   */
+  open?: { shirt: RGB };
 }
 
 /**
  * A caster in robes (the Arcanist and the Occultist): the standard body in `build`'s arm pose, a robe
  * fitted at the waist and falling to the ankles (clear of the legs) with edging at the hem, a sash with
- * knotted ends, bell sleeves widening toward the bare hands, small shoulder caps blending the sleeves
+ * knotted ends (or, `look.open`, worn open in front with no sash), bell sleeves widening toward the bare hands, small shoulder caps blending the sleeves
  * into the robe, short spiky hair (or `look.drawHair`), and the hood pushed back. `rf` jitters the hair.
  */
 export function casterRobe(m: Mesh, rf: (a: number, b: number) => number, look: CasterRobeLook, build: BodyBuild = {}): void {
@@ -775,17 +828,31 @@ export function casterRobe(m: Mesh, rf: (a: number, b: number) => number, look: 
   const T = TORSO;
   m.part('robe', [0, T.waist, 0]);
   const N = 10;
-  loft(m, [
+  const rings = [
     ell(0.05, 0.3, 0.2, N), ell(0.45, 0.25, 0.165, N), ell(T.hip, 0.21, 0.136, N), ell(T.waist, 0.15, 0.1, N),
     ell(T.chest, 0.178, 0.114, N), ell(T.shoulder + 0.01, 0.2, 0.12, N), ell(T.collar, 0.135, 0.095, N),
-  ], look.robe);
-  band(m, 0.11, 0.04, 0.29, 0.193, 0.302, 0.202, look.trim); // hem edging
-  // Sash at the waist, its knotted ends hanging at one side
-  // (10-sided like the robe, and just outside it, so the robe never pokes through)
-  loft(m, [ell(T.waist + 0.035, 0.162, 0.108, N), ell(T.waist - 0.035, 0.165, 0.11, N)], look.sash, { caps: false });
-  blob(m, [0.07, T.waist - 0.01, 0.1], [0.035, 0.03, 0.025], 0, 0.1, look.sash);
-  for (const [dx, len] of [[-0.012, 0.2], [0.02, 0.16]] as const) {
-    frustum(m, [0.07 + dx, T.waist - 0.03, 0.105], [0.07 + dx * 2, T.waist - 0.03 - len, 0.12], 0.012, 0.01, 4, look.sash);
+  ];
+  const open = look.open;
+  if (!open) {
+    loft(m, rings, look.robe);
+    band(m, 0.11, 0.04, 0.29, 0.193, 0.302, 0.202, look.trim); // hem edging
+    // Sash at the waist, its knotted ends hanging at one side
+    // (10-sided like the robe, and just outside it, so the robe never pokes through)
+    loft(m, [ell(T.waist + 0.035, 0.162, 0.108, N), ell(T.waist - 0.035, 0.165, 0.11, N)], look.sash, { caps: false });
+    blob(m, [0.07, T.waist - 0.01, 0.1], [0.035, 0.03, 0.025], 0, 0.1, look.sash);
+    for (const [dx, len] of [[-0.012, 0.2], [0.02, 0.16]] as const) {
+      frustum(m, [0.07 + dx, T.waist - 0.03, 0.105], [0.07 + dx * 2, T.waist - 0.03 - len, 0.12], 0.012, 0.01, 4, look.sash);
+    }
+  } else {
+    // Open in front: the face straddling the front of each band (10-sided rings: between the corners at 72° and
+    // 108°) shows what is worn under it, widening a little toward the hem as the robe flares
+    // (By its angle around the body: both triangles of each such face, their centers off to either side of the
+    // front, are within 20° of it; the faces beside them are 40° off)
+    const opening = (c: Vec3) => c[2] > 0 && Math.abs(Math.atan2(c[0], c[2])) < 0.35;
+    loft(m, rings, (c: Vec3, n: Vec3): RGB => (opening(c) && Math.abs(n[1]) < 0.9 ? (c[1] > T.hip ? open.shirt : look.pants) : look.robe));
+    loft(m, [ell(0.11, 0.29, 0.193, N), ell(0.04, 0.302, 0.202, N)], (c: Vec3): RGB => (opening(c) ? look.pants : look.trim), { caps: false }); // hem edging
+    // The opening's two edges, trimmed from the hem to the collar
+    for (const i of [2, 3]) tube(m, rings.map((r): Vec3 => [r[i][0] * 1.03, r[i][1], r[i][2] * 1.03]), 0.014, 0.014, 4, look.trim);
   }
 
   // Bell sleeves: from just below the elbow, widening toward the hands, edged

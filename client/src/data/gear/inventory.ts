@@ -82,6 +82,15 @@ export function equipSlotFor(gear: GearSlots, item: Item, slot?: GearSlot): Gear
   return slots.find((s) => !gear[s]) ?? slots[0];
 }
 
+/**
+ * For an item that goes in either of two slots (a ring): the one equipping it doesn't pick (equipSlotFor), to compare
+ * against too; else null.
+ */
+export function otherEquipSlot(gear: GearSlots, item: Item): GearSlot | null {
+  const slots = gearSlotsFor(item.slot), picked = equipSlotFor(gear, item);
+  return slots.find((s) => s !== picked) ?? null;
+}
+
 /** Whether `item` goes in gear slot `slot` at all (a ring in either ring slot). */
 export const fitsGearSlot = (item: Item, slot: GearSlot) => gearSlotsFor(item.slot).includes(slot);
 

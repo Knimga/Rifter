@@ -1,6 +1,6 @@
 import { CLASSES, type ClassKey } from './classes';
 import { EMPTY_GEAR, generateArmor, generateOffhand, generateShield, generateWeapon, getGearArmorBonus, getGearBuffs, heldWeapon, isWeaponItem, type GearSlots, type Item, type WeaponItem } from '../gear';
-import { equipSlotFor, gearWith, isProficient } from '../gear/inventory';
+import { equipSlotFor, gearWith, isProficient, otherEquipSlot } from '../gear/inventory';
 import { ATTRIBUTE_KEYS, ATTRIBUTE_POINTS_PER_LEVEL, BUFFABLE_STATS, SKILL_KEYS, SKILL_POINTS_PER_LEVEL, recomputeStats, type ActiveBuff, type BuffableStat, type ActiveDot, type ActiveHot, type AttributeKey, type PlayerStatInput, type SkillKey, type Stats } from './stats';
 import { getOffense } from '../combat/attackResolution';
 import { scaledRange } from '../random';
@@ -59,6 +59,8 @@ export interface StatDelta { stat: BuffableStat; delta: number }
  */
 export interface EquipCompare {
   equipped: Item | null;
+  /** It goes in either of two slots (a ring): it can be compared against the other one too (Ctrl+Alt). */
+  hasOther: boolean;
   deltas: StatDelta[];
   /** A weapon's: the held weapon's damage range now (null: none held) and with it equipped. */
   damage?: { before: [number, number] | null; after: [number, number] };
@@ -75,13 +77,17 @@ function gearStatTotals(gear: GearSlots): Map<BuffableStat, number> {
  * What comparing `item` shows for a member (gearWith: as equipping it would, the other hand's item pushed off
  * too), or null when they aren't proficient with it. Its stat changes in BUFFABLE_STATS order, unchanged ones left
  * out; for a weapon, its damage (EquipCompare.damage). `stats`: the member's now (its buffs count toward its damage).
+ * `other`: against the slot equipping it wouldn't pick (a ring's other ring slot: otherEquipSlot), if it has one.
  */
-export function equipCompare(m: PartyMemberConfig, item: Item, stats: Stats): EquipCompare | null {
+export function equipCompare(m: PartyMemberConfig, item: Item, stats: Stats, other = false): EquipCompare | null {
   if (!isProficient(CLASSES[m.selectedClass], item)) return null;
-  const gear = gearWith(m.gear, item);
+  const otherSlot = otherEquipSlot(m.gear, item);
+  const slot = equipSlotFor(m.gear, item, (other && otherSlot) || undefined);
+  const gear = gearWith(m.gear, item, slot);
   const before = gearStatTotals(m.gear), after = gearStatTotals(gear);
   return {
-    equipped: m.gear[equipSlotFor(m.gear, item)],
+    equipped: m.gear[slot],
+    hasOther: !!otherSlot,
     deltas: BUFFABLE_STATS.map(stat => ({ stat, delta: (after.get(stat) ?? 0) - (before.get(stat) ?? 0) })).filter(d => d.delta !== 0),
     ...(isWeaponItem(item) ? { damage: weaponDamageCompare(m, gear, stats) } : {}),
   };

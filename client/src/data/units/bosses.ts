@@ -12,8 +12,8 @@ export const BOSS_CLASSES: EnemyClassData[] = [
     attributes: { toughness: 4, mind: 8, spirit: 8 },
     highAttributes: ['mind', 'toughness'],
     lowAttributes: ['finesse', 'speed'],
-    baseHp: 25,
-    baseArmor: 12,
+    baseHp: 30,
+    baseArmor: 15,
     resistances: { shadow: 20 },
     abilities: [
       {
@@ -35,7 +35,7 @@ export const BOSS_CLASSES: EnemyClassData[] = [
         target: 'enemy',
         attackCategory: 'magic',
         effects: [
-          { type: 'dot', appliesTo: 'target', damageElement: 'shadow', damagePerRound: 6, rounds: 2 }
+          { type: 'dot', appliesTo: 'target', damageElement: 'shadow', damagePerTurn: 6, turns: 3 }
         ]
       },
       {
@@ -45,7 +45,7 @@ export const BOSS_CLASSES: EnemyClassData[] = [
         range: 1,
         target: 'tile',
         effects: [
-          { type: 'summon', appliesTo: 'caster', creature: 'skeleton', rounds: 3, max: 2 }
+          { type: 'summon', appliesTo: 'caster', creature: 'skeleton', turns: 3, max: 2 }
         ]
       }
     ],
@@ -78,7 +78,7 @@ export const BOSS_CLASSES: EnemyClassData[] = [
         area: 'blast2',
         attackCategory: 'magic',
         effects: [
-          { type: 'dot', appliesTo: 'target', damageElement: 'fire', damagePerRound: 6, rounds: 3 }
+          { type: 'dot', appliesTo: 'target', damageElement: 'fire', damagePerTurn: 6, turns: 3 }
         ]
       },
       {
@@ -133,7 +133,7 @@ export const BOSS_CLASSES: EnemyClassData[] = [
         range: 1,
         target: 'tile',        
         effects: [
-          { type: 'summon', appliesTo: 'caster', creature: 'fungal-spore', rounds: 3, max: 2 }
+          { type: 'summon', appliesTo: 'caster', creature: 'fungal-spore', turns: 3, max: 2 }
         ]
       },
       {
@@ -145,8 +145,8 @@ export const BOSS_CLASSES: EnemyClassData[] = [
         area: 'blast2',
         displayElement: 'nature',
         effects: [
-          { type: 'hot', appliesTo: 'allies', damageElement: 'nature', healPerRound: 6, rounds: 3 },
-          { type: 'buff', appliesTo: 'allies', stats: { armor: 20 }, rounds: 3 }
+          { type: 'hot', appliesTo: 'allies', damageElement: 'nature', healPerTurn: 6, turns: 3 },
+          { type: 'buff', appliesTo: 'allies', stats: { armor: 20 }, turns: 3 }
         ]
       },
       {
@@ -192,7 +192,7 @@ export const BOSS_CLASSES: EnemyClassData[] = [
         displayElement: 'nature',
         effects: [
           // Each hit the bonded ally lands heals the tamer
-          { type: 'buff', appliesTo: 'target', maxStacks: 1, rounds: 3, trigger: { when: 'attacking', on: 'hit',
+          { type: 'buff', appliesTo: 'target', maxStacks: 1, turns: 3, trigger: { when: 'attacking', on: 'hit',
             effects: [{ type: 'heal', appliesTo: 'source', damageElement: 'nature', minHeal: 4, maxHeal: 6 }] } }
         ]
       },
@@ -229,7 +229,7 @@ export const BOSS_CLASSES: EnemyClassData[] = [
         attackCategory: 'ranged',
         effects: [
           { type: 'damage', appliesTo: 'target', damageElement: 'physical', minDamage: 4, maxDamage: 6 },
-          { type: 'debuff', appliesTo: 'target', damageElement: 'poison', stats: { apMax: -2 }, rounds: 2 }
+          { type: 'debuff', appliesTo: 'target', damageElement: 'poison', stats: { apMax: -2 }, turns: 1 }
         ]
       }      
     ],
@@ -256,7 +256,7 @@ export const BOSS_CLASSES: EnemyClassData[] = [
       { name: 'Potent Venom', damageElement: 'poison', trigger: {
         when: 'attacking', on: 'hit', categories: ['melee'], chance: 50,
         effects: [
-          {type: 'dot', appliesTo: 'target', damageElement: 'poison', damagePerRound: 6, rounds: 3, maxStacks: 3 }]
+          {type: 'dot', appliesTo: 'target', damageElement: 'poison', damagePerTurn: 6, turns: 3, maxStacks: 3 }]
       }}
     ],
     abilities: [
@@ -267,7 +267,7 @@ export const BOSS_CLASSES: EnemyClassData[] = [
         range: 1,
         target: 'tile',
         effects: [
-          { type: 'summon', appliesTo: 'caster', creature: 'pale-creeper', rounds: 3, max: 3 }
+          { type: 'summon', appliesTo: 'caster', creature: 'pale-creeper', turns: 3, max: 3 }
         ]
       },
       {
@@ -292,9 +292,9 @@ export const BOSS_CLASSES: EnemyClassData[] = [
         area: 'blast2',
         displayElement: 'physical',
         effects: [
-          { type: 'buff', appliesTo: 'target', rounds: 5, trigger: {
+          { type: 'buff', appliesTo: 'target', turns: 5, trigger: {
             when: 'attacked', on: 'hit', effects: [
-              { type: 'buff', appliesTo: 'source', stats: { meleeDamage: 3 }, rounds: 5 }
+              { type: 'buff', appliesTo: 'source', stats: { meleeDamage: 3 }, turns: 5 }
             ]
           }}
         ]

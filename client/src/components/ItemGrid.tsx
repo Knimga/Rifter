@@ -38,8 +38,11 @@ export default function ItemGrid({ items, cols, size, canUse, action, onAction, 
   stats?: Stats;
   /** Screen-reader note on an item the viewer can't use, e.g. ', not proficient'. */
   unusableNote: string;
-  /** Comparing `item` with what a member wears (equipCompare; null: they can't equip it), shown by holding Ctrl. */
-  compareWith?: (item: Item) => EquipCompare | null;
+  /**
+   * Comparing `item` with what a member wears (equipCompare; null: they can't equip it), shown by holding Ctrl;
+   * `other` (Ctrl+Alt): against a ring's other ring slot.
+   */
+  compareWith?: (item: Item, other: boolean) => EquipCompare | null;
   /** The item's side of a trade (the vendor window): its price and what right-clicking does. */
   trade?: (item: Item, idx: number) => ItemTrade;
   /** The marks a trading cell shows (with `trade`; they replace the plain red tint of `canUse`). */
@@ -56,6 +59,7 @@ export default function ItemGrid({ items, cols, size, canUse, action, onAction, 
   drag?: { dragging: ItemSpot | null; start: (from: ItemSpot, e: PointerEvent<HTMLElement>) => void };
 }) {
   const comparing = useKeyHeld('Control');
+  const otherSlot = useKeyHeld('Alt');
   return (
     <div role={trade ? 'grid' : undefined} aria-label={label} className="grid gap-1" style={{ gridTemplateColumns: `repeat(${cols}, 46px)` }}>
       {leading}
@@ -85,7 +89,7 @@ export default function ItemGrid({ items, cols, size, canUse, action, onAction, 
           // Keyed by slot, not item: when an item leaves and the next one moves into this slot, the tooltip
           // under the cursor stays open and shows it (a new Tooltip would wait for the mouse to enter again)
           <Tooltip key={i} gap={10} bare={!!compareWith} placement={tooltipBelow?.(i) ? 'below' : 'above'}
-            content={compareWith ? <ItemCompareTooltip {...tip} compareWith={compareWith} comparing={comparing} /> : <ItemTooltipContent {...tip} />}>
+            content={compareWith ? <ItemCompareTooltip {...tip} compareWith={compareWith} comparing={comparing} other={otherSlot} /> : <ItemTooltipContent {...tip} />}>
             <div className={`rf-cell is-filled ${glow.className} ${cls}`} style={glow.style} aria-label={aria} {...drop}
               tabIndex={deal ? 0 : undefined} onContextMenu={rightClick} onKeyDown={key} onPointerDown={drag ? (e) => drag.start({ kind: 'inventory', idx: i }, e) : undefined}>
               <ItemIcon item={item} className="w-[30px] h-[30px]" />

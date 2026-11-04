@@ -183,14 +183,14 @@ export const CLASSES: Record<ClassKey, ClassData> = {
           {
             type: 'buff',
             appliesTo: 'target',
-            rounds: 4,
+            turns: 4,
             trigger: {
               when: 'attacking',
               categories: ['melee'],
               weaponOnly: true,
               chance: 40,
               effects: [
-                { type: 'dot', appliesTo: 'target', damageElement: 'poison', damagePerRound: 4, rounds: 3 },
+                { type: 'dot', appliesTo: 'target', damageElement: 'poison', damagePerTurn: 4, turns: 3 },
               ],
             },
           },
@@ -209,7 +209,7 @@ export const CLASSES: Record<ClassKey, ClassData> = {
             type: 'buff', 
             appliesTo: 'caster', 
             stats: { dodge: 30 }, 
-            rounds: 3,
+            turns: 3,
             trigger: {
               when: 'attacked', on: 'dodge', chance: 100,
               effects: [
@@ -258,7 +258,7 @@ export const CLASSES: Record<ClassKey, ClassData> = {
         range: 0,
         target: 'self',
         effects: [
-          { type: 'buff', appliesTo: 'target', stats: { hpRegen: 3, strength: 6 }, rounds: 3 },
+          { type: 'buff', appliesTo: 'target', stats: { hpRegen: 3, strength: 6 }, turns: 3 },
         ],
       },
       {
@@ -317,13 +317,13 @@ export const CLASSES: Record<ClassKey, ClassData> = {
         attackCategory: 'magic',
         effects: [
           { type: 'damage', appliesTo: 'target', damageElement: 'ice', minDamage: 6, maxDamage: 8 },
-          { type: 'root', appliesTo: 'target', rounds: 3 }
+          { type: 'root', appliesTo: 'target', turns: 3 }
         ],
       },
       {
         name: 'Lightning Bolt',
         icon: GiFocusedLightning,
-        mpCost: 7,
+        mpCost: 8,
         apCost: 2,
         range: 5,
         target: 'enemy',
@@ -331,7 +331,7 @@ export const CLASSES: Record<ClassKey, ClassData> = {
         attackCategory: 'magic',
         effects: [
           { type: 'damage', appliesTo: 'target', damageElement: 'lightning', minDamage: 8, maxDamage: 10 },
-          { type: 'debuff', appliesTo: 'target', damageElement: 'lightning', stats: { apMax: -1 }, rounds: 2 }
+          { type: 'debuff', appliesTo: 'target', damageElement: 'lightning', stats: { apMax: -1 }, turns: 1 }
         ]
       }
     ],
@@ -363,7 +363,7 @@ export const CLASSES: Record<ClassKey, ClassData> = {
         target: 'self',
         displayElement: 'physical',
         effects: [
-          { type: 'buff', appliesTo: 'target', stats: { rangedHit: 5, rangedDamage: 5 }, rounds: 2 },
+          { type: 'buff', appliesTo: 'target', stats: { rangedHit: 5, rangedDamage: 5 }, turns: 1 },
         ],
       },
       {
@@ -376,7 +376,7 @@ export const CLASSES: Record<ClassKey, ClassData> = {
         attackCategory: 'ranged',
         useWeapon: true,
         effects: [
-          { type: 'root', appliesTo: 'target', rounds: 3 }
+          { type: 'root', appliesTo: 'target', turns: 3 }
         ]
       },
       {
@@ -391,7 +391,7 @@ export const CLASSES: Record<ClassKey, ClassData> = {
         attackCategory: 'ranged',
         effects: [
           { type: 'damage', appliesTo: 'target', damageElement: 'fire', minDamage: 3, maxDamage: 3 },
-          { type: 'dot', appliesTo: 'target', damageElement: 'fire', damagePerRound: 5, rounds: 3 }
+          { type: 'dot', appliesTo: 'target', damageElement: 'fire', damagePerTurn: 5, turns: 3 }
         ],
       },
     ],
@@ -424,7 +424,7 @@ export const CLASSES: Record<ClassKey, ClassData> = {
         target: 'ally',
         effects: [
           { type: 'heal', appliesTo: 'target', damageElement: 'nature', minHeal: 4, maxHeal: 6 },
-          { type: 'hot', appliesTo: 'target', damageElement: 'nature', healPerRound: 4, rounds: 3 },
+          { type: 'hot', appliesTo: 'target', damageElement: 'nature', healPerTurn: 4, turns: 3 },
         ],
       },
       {
@@ -451,7 +451,7 @@ export const CLASSES: Record<ClassKey, ClassData> = {
         displayElement: 'nature',
         target: 'ally',
         effects: [
-          { type: 'buff', appliesTo: 'target', stats: { armor: 20 }, rounds: 3 }
+          { type: 'buff', appliesTo: 'target', stats: { armor: 20 }, turns: 3 }
         ]
       }
     ],
@@ -485,7 +485,7 @@ export const CLASSES: Record<ClassKey, ClassData> = {
         attackCategory: 'magic',
         effects: [
           { type: 'damage', appliesTo: 'target', damageElement: 'shadow', minDamage: 6, maxDamage: 9 },
-          { type: 'debuff', appliesTo: 'target', damageElement: 'shadow', stats: { shadowResistance: -20}, rounds: 3 }
+          { type: 'debuff', appliesTo: 'target', damageElement: 'shadow', stats: { shadowResistance: -20}, turns: 3 }
         ],
       },
       {
@@ -499,7 +499,7 @@ export const CLASSES: Record<ClassKey, ClassData> = {
         displayElement: 'shadow',
         attackCategory: 'magic',
         effects: [
-          { type: 'dot', appliesTo: 'target', damageElement: 'shadow', damagePerRound: 8, rounds: 3 },
+          { type: 'dot', appliesTo: 'target', damageElement: 'shadow', damagePerTurn: 8, turns: 3 },
         ],
       },
       {
@@ -511,7 +511,7 @@ export const CLASSES: Record<ClassKey, ClassData> = {
         target: 'tile',
         displayElement: 'shadow',
         effects: [
-          { type: 'summon', appliesTo: 'caster', creature: 'void-wisp', rounds: 3 },
+          { type: 'summon', appliesTo: 'caster', creature: 'void-wisp', turns: 3 },
         ],
       },
     ],
@@ -556,8 +556,8 @@ export const CLASSES: Record<ClassKey, ClassData> = {
         area: 'blast1',
         displayElement: 'holy',
         effects: [
-          { type: 'dot', appliesTo: 'target', damageElement: 'holy', damagePerRound: 5, rounds: 3 },
-          { type: 'hot',   appliesTo: 'allies', damageElement: 'holy', healPerRound: 5, rounds: 3 }
+          { type: 'dot', appliesTo: 'target', damageElement: 'holy', damagePerTurn: 5, turns: 3 },
+          { type: 'hot',   appliesTo: 'allies', damageElement: 'holy', healPerTurn: 5, turns: 3 }
         ]
       },
       {
@@ -570,7 +570,7 @@ export const CLASSES: Record<ClassKey, ClassData> = {
         area: 'blast2',
         displayElement: 'holy',
         effects: [
-          { type: 'buff', appliesTo: 'target', stats: { magicResistance: 20 }, rounds: 3 }
+          { type: 'buff', appliesTo: 'target', stats: { magicResistance: 20 }, turns: 3 }
         ]
       }
     ]

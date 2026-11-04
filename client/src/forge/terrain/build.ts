@@ -46,6 +46,12 @@ const ROUGH_SEGS = 3, FLOOR_SEGS = 4, ROUGH_ROW = 0.3;
 const FINE_FLOOR_SEGS = 8;
 /** Flagstones: stone thickness (tiles) and the joint between two stones. */
 const STONE = 0.014, JOINT = 0.03;
+/**
+ * Glowing veins' halos: the share of floor tiles and wall faces with a glowing vein showing that get one (on one of
+ * their vein facets, so they lie scattered along the veins), its radius (tiles), how far it floats off the surface,
+ * and how much hotter (toward white-gold) it is than the veins, so it blooms over their own glow.
+ */
+const VEIN_HALO_CHANCE = 0.3, VEIN_HALO_R = 0.32, VEIN_HALO_LIFT = 0.04, VEIN_HALO_HEAT = 0.25;
 
 // ─── Noise ────────────────────────────────────────────────────────────────────
 
@@ -157,6 +163,21 @@ export function buildTerrain({ cols, rows, floors, doors, style, seed }: Terrain
   const veinOpts: FaceOpts = style.veins?.glow ? { e: 0.85, j: 0.1 } : { j: 0.18 };
   const veinColor: RGB = style.veins?.color ?? [0, 0, 0];
 
+  /**
+   * Halos over glowing veins (VEIN_HALO_*): each surface (a floor tile, a wall face) notes where its vein facets are
+   * (`litAt`, the spot off the surface), then `haloOne` gives it a halo at one of them on a roll of its own (keyed by
+   * a, b, c, so the same surface always rolls the same).
+   */
+  const haloSeed = S.shade ^ 0x2c1b3c6d;
+  const haloColor = mixC(veinColor, [255, 236, 190], VEIN_HALO_HEAT);
+  let lit: Vec3[] = [];
+  const litAt = (p: Vec3) => { if (style.veins?.glow) lit.push(p); };
+  const haloOne = (m: Mesh, a: number, b: number, c: number) => {
+    if (lit.length && lattice(haloSeed, a, b, c) < VEIN_HALO_CHANCE)
+      m.halo(lit[Math.floor(lattice(haloSeed, a, b, c + 1) * lit.length)], VEIN_HALO_R, haloColor);
+    lit = [];
+  };
+
   const key = (x: number, y: number) => `${x},${y}`;
   const inGrid = (x: number, y: number) => x >= 0 && y >= 0 && x < cols && y < rows;
   const isFloor = (x: number, y: number) => floors.has(key(x, y));
@@ -258,6 +279,7 @@ export function buildTerrain({ cols, rows, floors, doors, style, seed }: Terrain
   /** A flagstone tile: a joint-colored bed (lava, in a veined patch) under 1 to 4 stones. */
   const flagstoneTile = (x: number, y: number) => {
     const vein = veinAt([x + 0.5, 0, y + 0.5]);
+    if (vein) litAt([x + 0.5, VEIN_HALO_LIFT, y + 0.5]);
     floor.quad([x, 0, y], [x + 1, 0, y], [x + 1, 0, y + 1], [x, 0, y + 1], vein ? veinColor : fs.seam, [x + 0.5, -1, y + 0.5], vein ? veinOpts : { j: 0.04 });
     const r = floor.R(), h = floor.R() < 0.5;
     const cut = 0.35 + floor.R() * 0.3;
@@ -303,7 +325,10 @@ export function buildTerrain({ cols, rows, floors, doors, style, seed }: Terrain
         const tris: [Vec3, Vec3, Vec3][] = (i ^ j) ? [[a, b, d], [b, c, d]] : [[a, b, c], [a, c, d]];
         for (const [p, q, r] of tris) {
           const m = centroid(p, q, r);
-          if (veinAt(m)) floor.tri(p, q, r, veinColor, [m[0], -1, m[2]], veinOpts);
+          if (veinAt(m)) {
+            floor.tri(p, q, r, veinColor, [m[0], -1, m[2]], veinOpts);
+            litAt([m[0], m[1] + VEIN_HALO_LIFT, m[2]]);
+          }
           else floor.tri(p, q, r, mixC(fs.color, fs.seam, smooth(noiseAt(S.shade, m, 0.8))), [m[0], -1, m[2]], { j: 0.1 });
         }
       }
@@ -315,6 +340,7 @@ export function buildTerrain({ cols, rows, floors, doors, style, seed }: Terrain
    */
   const cyclopeanTile = (x: number, y: number) => {
     const vein = veinAt([x + 0.5, 0, y + 0.5]);
+    if (vein) litAt([x + 0.5, VEIN_HALO_LIFT, y + 0.5]);
     floor.quad([x, 0, y], [x + 1, 0, y], [x + 1, 0, y + 1], [x, 0, y + 1], vein ? veinColor : fs.seam, [x + 0.5, -1, y + 0.5], vein ? veinOpts : { j: 0.04 });
     cycStones(FLOOR_PLANE, x, x + 1, y, y + 1, ({ part, rise, roll }) => {
       const swell = (0.006 + 0.012 * fs.bumpiness) * (0.6 + 0.8 * roll(3));
@@ -328,7 +354,10 @@ export function buildTerrain({ cols, rows, floors, doors, style, seed }: Terrain
   const floorTile = { flagstones: flagstoneTile, cyclopean: cyclopeanTile, rough: roughTile, 'rough-fine': roughTile }[fs.pattern];
   for (let x = 0; x < cols; x++)
     for (let y = 0; y < rows; y++)
-      if (isFloor(x, y) || isDoor(x, y)) floorTile(x, y);
+      if (isFloor(x, y) || isDoor(x, y)) {
+        floorTile(x, y);
+        haloOne(floor, x, y, 0);
+      }
 
   // ── Walls ──
   const walls = new Mesh(mulberry32(seedOf()));
@@ -346,10 +375,16 @@ export function buildTerrain({ cols, rows, floors, doors, style, seed }: Terrain
       p[2] + (noiseAt(S.bulge ^ 0x7f4a7c15, p, 1.7) - 0.5) * amp,
     ];
   };
-  /** A rough wall facet's color: the wall's (or its top's) in noise patches, or (on its faces, `veins`) a vein. */
-  const roughFacet = (p: Vec3, q: Vec3, r: Vec3, base: RGB, ctr: Vec3, veins = true) => {
+  /**
+   * A rough wall facet's color: the wall's (or its top's) in noise patches, or (on its faces, facing `n`; none on its
+   * top) a vein.
+   */
+  const roughFacet = (p: Vec3, q: Vec3, r: Vec3, base: RGB, ctr: Vec3, n: Vec3 | null) => {
     const m = centroid(p, q, r);
-    if (veins && veinAt(m)) walls.tri(p, q, r, veinColor, ctr, veinOpts);
+    if (n && veinAt(m)) {
+      walls.tri(p, q, r, veinColor, ctr, veinOpts);
+      litAt([m[0] + n[0] * VEIN_HALO_LIFT, m[1], m[2] + n[2] * VEIN_HALO_LIFT]);
+    }
     else walls.tri(p, q, r, mulC(base, 0.8 + 0.35 * noiseAt(S.shade, m, 0.9)), ctr, { j: 0.12 });
   };
 
@@ -363,6 +398,7 @@ export function buildTerrain({ cols, rows, floors, doors, style, seed }: Terrain
       const swell = (0.012 + 0.022 * ws.bumpiness) * (0.6 + 0.8 * roll(3));
       const at = (p: Pt): Vec3 => onSide(f, p[0] - u0, p[1], 0.006 + swell * rise(p));
       const vein = veinAt(at(center));
+      if (vein) litAt(onSide(f, center[0] - u0, center[1], VEIN_HALO_LIFT));
       const col = vein ? veinColor : mulC(ws.color, 0.8 + roll(0) * (0.2 + 0.2 * ws.bumpiness));
       const mid = polyCenter(part);
       for (let k = 0; k < part.length; k++) walls.tri(at(mid), at(part[k]), at(part[(k + 1) % part.length]), col, ctr, vein ? veinOpts : { j: 0.06 });
@@ -370,11 +406,20 @@ export function buildTerrain({ cols, rows, floors, doors, style, seed }: Terrain
   };
 
   /**
-   * A wall face from height y0 to y1. A `step` is the small rise between two neighbouring wall tops of a rough wall
-   * (both full or both stubs: their heights vary a little): part of the top, so drawn in its color, never veined.
+   * A wall face from height y0 to y1. Only a face toward floor or a doorway is the wall's own; every other one is drawn
+   * `asTop`, plain rock in the top's color, never veined, running into the dark with the tops: a step between two
+   * neighbouring wall tops (a rough wall's heights vary a little), a full wall's face over a stub (a room's corner
+   * touching its floor only diagonally), a face toward deep rock (the wall mass's outside, never walked to). A face
+   * with glowing veins showing may get a halo over one (haloOne).
    */
-  const side = (f: Side, y0: number, y1: number, step = false) => {
+  const side = (f: Side, y0: number, y1: number, asTop = false) => {
     const ctr: Vec3 = onSide(f, 0.5, (y0 + y1) / 2, -0.5);
+    const u0 = f.a[0] * f.t[0] + f.a[2] * f.t[2]; // where the face starts along the wall line
+    sideFaces(f, y0, y1, asTop, ctr, u0);
+    haloOne(walls, f.line, Math.round(u0), 1 + Math.round(y0 * 10));
+  };
+  /** A wall face's facets (side), by the wall's finish. */
+  const sideFaces = (f: Side, y0: number, y1: number, asTop: boolean, ctr: Vec3, u0: number) => {
     if (rough) {
       const ys = [y0];
       for (let y = Math.floor(y0 / ROUGH_ROW + 1) * ROUGH_ROW; y < y1 - 0.05; y += ROUGH_ROW) ys.push(y);
@@ -383,14 +428,17 @@ export function buildTerrain({ cols, rows, floors, doors, style, seed }: Terrain
         for (let i = 0; i < ROUGH_SEGS; i++) {
           const s0 = i / ROUGH_SEGS, s1 = (i + 1) / ROUGH_SEGS;
           const a = bulge(onSide(f, s0, ys[k])), b = bulge(onSide(f, s1, ys[k])), c = bulge(onSide(f, s1, ys[k + 1])), d = bulge(onSide(f, s0, ys[k + 1]));
-          roughFacet(a, b, c, step ? top : ws.color, ctr, !step);
-          roughFacet(a, c, d, step ? top : ws.color, ctr, !step);
+          roughFacet(a, b, c, asTop ? top : ws.color, ctr, asTop ? null : f.n);
+          roughFacet(a, c, d, asTop ? top : ws.color, ctr, asTop ? null : f.n);
         }
+      return;
+    }
+    if (asTop) {
+      walls.quad(onSide(f, 0, y0), onSide(f, 1, y0), onSide(f, 1, y1), onSide(f, 0, y1), mulC(top, 0.92 + walls.R() * 0.12), ctr, { j: 0.04 });
       return;
     }
     // Masonry and cyclopean: mortar behind, then the stones
     walls.quad(onSide(f, 0, y0), onSide(f, 1, y0), onSide(f, 1, y1), onSide(f, 0, y1), mortar, ctr, { j: 0.04 });
-    const u0 = f.a[0] * f.t[0] + f.a[2] * f.t[2]; // where the face starts along the wall line
     if (ws.finish === 'cyclopean') {
       cyclopean(f, u0, y0, y1, ctr);
       return;
@@ -408,8 +456,10 @@ export function buildTerrain({ cols, rows, floors, doors, style, seed }: Terrain
         const h0 = c0 + (c0 === k * COURSE && c0 > 0 ? SEAM / 2 : 0), h1 = c1 - (c1 === (k + 1) * COURSE && c1 < y1 ? SEAM / 2 : 0);
         if (s1 - s0 < 0.02) continue;
         const v = lattice(S.blocks, i, k, f.line + 1);
-        const col = veinAt(onSide(f, (s0 + s1) / 2, (h0 + h1) / 2)) ? veinColor : mulC(ws.color, 0.84 + v * (0.16 + 0.2 * ws.bumpiness));
+        const vein = veinAt(onSide(f, (s0 + s1) / 2, (h0 + h1) / 2));
+        const col = vein ? veinColor : mulC(ws.color, 0.84 + v * (0.16 + 0.2 * ws.bumpiness));
         const out = 0.006 + lattice(S.blocks, i, k, f.line + 2) * 0.014 * ws.bumpiness;
+        if (vein) litAt(onSide(f, (s0 + s1) / 2, (h0 + h1) / 2, out + VEIN_HALO_LIFT));
         walls.quad(onSide(f, s0, h0, out), onSide(f, s1, h0, out), onSide(f, s1, h1, out), onSide(f, s0, h1, out), col, ctr, { j: 0.06 });
       }
     }
@@ -426,8 +476,8 @@ export function buildTerrain({ cols, rows, floors, doors, style, seed }: Terrain
     for (let i = 0; i < ROUGH_SEGS; i++)
       for (let j = 0; j < ROUGH_SEGS; j++) {
         const a = at(i, j), b = at(i + 1, j), c = at(i + 1, j + 1), d = at(i, j + 1);
-        roughFacet(a, b, c, top, ctr, false);
-        roughFacet(a, c, d, top, ctr, false);
+        roughFacet(a, b, c, top, ctr, null);
+        roughFacet(a, c, d, top, ctr, null);
       }
   };
 
@@ -437,8 +487,8 @@ export function buildTerrain({ cols, rows, floors, doors, style, seed }: Terrain
       if (!h) continue;
       cap(x, y, h);
       for (const { d, side: f } of sidesOf(x, y)) {
-        const nh = wallHeight(x + d[0], y + d[1]);
-        if (nh < h) side(f, nh, h, nh > 0 && isCut(x + d[0], y + d[1]) === isCut(x, y));
+        const nx = x + d[0], ny = y + d[1], nh = wallHeight(nx, ny);
+        if (nh < h) side(f, nh, h, !isFloor(nx, ny) && !isDoor(nx, ny));
       }
     }
 

@@ -1,5 +1,5 @@
-// The game: the Sanctum or a dungeon, the party moving and fighting in it, and the HUD. Each concern lives in
-// its own hook (party member state, inventory, chests, experience, round ticks, action outcomes, keys, the
+﻿// The game: the Sanctum or a dungeon, the party moving and fighting in it, and the HUD. Each concern lives in
+// its own hook (party member state, inventory, chests, experience, turn ticks, action outcomes, keys, the
 // enemy turn); this screen holds where everyone is and the fight, wires the hooks together, and draws it all.
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 
@@ -38,7 +38,7 @@ import VendorWindow from '../components/VendorWindow';
 import EnchanterWindow from '../components/EnchanterWindow';
 import EdgePulse from '../components/hud/EdgePulse';
 import type { UnitAim } from '../components/ModelLayer';
-import { DORMANT_RIFTER, type RifterState } from '../components/SanctumMap';
+import { DORMANT_RIFTER, type RifterState } from '../components/sanctumScene';
 import { RIFT_CLOSE_MS } from '../forge/designs/_rifter';
 import { bossKeyDrop, riftGlowCss } from '../data/world/rifts';
 import { usePartyMembers } from '../hooks/usePartyMembers';
@@ -49,7 +49,7 @@ import { useExperience } from '../hooks/useExperience';
 import { useEnemyDeaths } from '../hooks/useEnemyDeaths';
 import { usePendingPoints } from '../hooks/usePendingPoints';
 import { useGameKeys } from '../hooks/useGameKeys';
-import { useRoundTick } from '../hooks/useRoundTick';
+import { useTurnTicks } from '../hooks/useTurnTicks';
 import { useActionOutcomes } from '../hooks/useActionOutcomes';
 import { useFogOfWar } from '../hooks/useFogOfWar';
 import { useReach } from '../hooks/useReach';
@@ -107,7 +107,7 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
   const [currentZone, setCurrentZone] = useState(0);
   const [followerPositions, setFollowerPositions] = useState<Pos[]>([...SANCTUM.followerStarts]);
 
-  // ─── Party ───────────────────────────────────────────────────────────────
+  // â”€â”€â”€ Party â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   // Each member's HP/MP/effects and effective stats
   const { members, updateMembers, partyHp, partyBuffs, partyHots, partyDots, partyAllStats, reviveDowned, restoreAll, clearEffects } = usePartyMembers(party, progress);
@@ -180,7 +180,7 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
     ? (steps: number) => moveCost(steps, combat.paidTiles, activeStats.movement).apSpent
     : undefined;
 
-  // Selected action, normalised (weapon folded in) — drives map targeting and range
+  // Selected action, normalised (weapon folded in) â€” drives map targeting and range
   const activeAction = activeAbility ? toAction(activeAbility, activeWeapon) : null;
 
   const { moveTargets, tileTargets } = useReach({
@@ -191,7 +191,7 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
     tileRange: activeAction?.target === 'tile' ? activeAction.range : null,
   });
 
-  // ─── Latest values, for callbacks, timers and the enemy turn ─────────────
+  // â”€â”€â”€ Latest values, for callbacks, timers and the enemy turn â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   const enemiesRef = useLatest(enemies);
   const zoneRef = useLatest(zone);
@@ -236,7 +236,7 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
     if (combat.active) setBarViewIdx(activePartyIdx);
   }, [combat.active, activePartyIdx]);
 
-  // ─── Loot, inventory and chests ──────────────────────────────────────────
+  // â”€â”€â”€ Loot, inventory and chests â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   /** Whether someone in the party can use an item (proficient): loot favours it, and windows fade what no one can use. */
   const partyCanUse = useCallback((item: Item) => partyCanUseItem(partyRef.current, item), [partyRef]);
@@ -252,13 +252,13 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
   const { endVisit, restock: restockVendor } = vendor;
   // The rift keys (shared, apart from the inventory, never lost)
   const keyring = useKeyring();
-  const { shards, addShard, gainShards, spendShard } = useShards();
+  const { shards, hasNew: hasNewShards, addShard, gainShards, pickUpShards, spendShard, seeShards } = useShards();
   /** Shards picked up at a tile (off the floor, out of a chest): into the party's shards, and how many floats up. */
   const takeShards = useCallback((found: ShardCounts, at: Pos) => {
-    gainShards(found);
+    pickUpShards(found);
     const n = totalShards(found);
     spawnFloat(at.x, at.y, `+${n} ${n === 1 ? 'Shard' : 'Shards'}`, COMBAT_TEXT_COLOR.loot);
-  }, [gainShards, spawnFloat]);
+  }, [pickUpShards, spawnFloat]);
   // The Sanctum enchanter's services on the party's items, gold and shards (and the shards sold to her this session)
   const enchanter = useEnchanter({ partyLevel: progress.level, inventory, setInventory, gold, addGold, shards, addShard, gainShards, spendShard });
   const { addKey } = keyring;
@@ -401,13 +401,13 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
     });
   }, [partyCanUse, updateCurrentZone, restockVendor]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ─── Actions, ticks, experience, keys ────────────────────────────────────
+  // â”€â”€â”€ Actions, ticks, experience, keys â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   const { unitAims, unitFx, applyActionOutcome, applyOutcomeRef, cancelPendingOutcomes } = useActionOutcomes({
     spawnFloat, updateMembers, partyStatsRef, partyPosRef, partyLevelRef, enemiesRef, dungeonRef, currentZoneRef, setEnemies, setCombat,
   });
-  useRoundTick({
-    combatActive: combat.active, round: combat.round, membersRef, updateMembers, partyStatsRef, partyPosRef,
+  useTurnTicks({
+    combatActive: combat.active, round: combat.round, currentCombatant, membersRef, updateMembers, partyStatsRef, partyPosRef,
     enemiesRef, currentZoneRef, setEnemies, setCombat, spawnFloat,
   });
   const { xpGain, levelUps, addXp, awardKills } = useExperience({ progress, setProgress, party, setParty, spawnFloat, leaderPosRef });
@@ -439,7 +439,7 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
     },
   });
 
-  // ─── Location transitions ──────────────────────────────────────────────
+  // â”€â”€â”€ Location transitions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   /** Go back to the Sanctum, or into a dungeon (a fresh one, generated from its preset). */
   const handleLocationChange = (next: 'sanctum' | DungeonKey) => {
@@ -478,7 +478,7 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
     }
   };
 
-  // ─── Death checks ────────────────────────────────────────────────────────
+  // â”€â”€â”€ Death checks â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   /**
    * Bring fallen members back (reviveDowned: 10% HP), each on a tile of its own: one that was stood on while it
@@ -521,7 +521,7 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [combat.active, currentCombatant, partyHp]);
 
-  // ─── Aggro detection ─────────────────────────────────────────────────────
+  // â”€â”€â”€ Aggro detection â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   /**
    * Aggro every unaggroed group with a member visible from `pos`, then start combat with them
@@ -540,7 +540,7 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
       : startCombat(party.map((m, i) => ({ stats: partyStatsRef.current[i], name: m.characterName })), newlyAggroed));
   }, [party, partyStatsRef]);
 
-  // ─── Door transitions ─────────────────────────────────────────────────
+  // â”€â”€â”€ Door transitions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   const handleDoorClick = useCallback((doorId: string) => {
     if (!zone || !dungeon || combat.active) return;
@@ -565,7 +565,7 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
     triggerAggro(spawnPos, enemies.filter(e => e.zoneId === door.targetZoneId), targetZone.sight, false);
   }, [zone, dungeon, combat.active, enemies, triggerAggro, clearFloats]);
 
-  // ─── Fading between maps ──────────────────────────────────────────────
+  // â”€â”€â”€ Fading between maps â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // Every change of map (a rift into a dungeon or back to the Sanctum, a door to another zone, a party wipe) first
   // fades the map to black (useFadeOut); the new one fades in once its 3D layer has drawn (useSceneReady)
   const { fading, fadeOut } = useFadeOut();
@@ -574,7 +574,7 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
   const travel = (next: 'sanctum' | DungeonKey) => fadeOut(() => changes.current.handleLocationChange(next));
   const goThroughDoor = (doorId: string) => fadeOut(() => changes.current.handleDoorClick(doorId));
 
-  // ─── Movement handler ────────────────────────────────────────────────────
+  // â”€â”€â”€ Movement handler â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   const handleMove = useCallback((newPos: Pos) => {
     const steps = moveTargets.get(posKey(newPos));
@@ -610,7 +610,7 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
     if (zone) triggerAggro(newPos, zoneEnemies, zone.sight, combat.active);
   }, [combat.active, moveTargets, isPlayerTurn, activePartyIdx, activeStats.movement, playerPos, zoneEnemies, zone, dungeon, triggerAggro]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ─── End turn ────────────────────────────────────────────────────────────
+  // â”€â”€â”€ End turn â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   const handleEndTurn = useCallback(() => {
     if (!combat.active || !isPlayerTurn) return;
@@ -618,7 +618,7 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
     setCombat(prev => advanceTurn(prev, zoneEnemies, deadPartyIndices(partyHp)));
   }, [combat.active, isPlayerTurn, activePartyIdx, zoneEnemies, partyHp]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ─── Player action ───────────────────────────────────────────────────────
+  // â”€â”€â”€ Player action â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   const handlePlayerAttack = useCallback((targetPos: Pos) => {
     if (combat.active && !isPlayerTurn) return;
@@ -660,7 +660,7 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
 
   // A member's turn ends by itself once it has nothing left to spend (no AP, no paid tiles). One that starts
   // its turn with no AP (stunned) loses it, the same as an enemy (useEnemyTurn). Waits a moment first, and
-  // rechecks whenever its AP changes: the top-of-round tick may still be ending a stun.
+  // rechecks whenever its AP changes (its buffs may still be landing).
   const outOfAp = combat.active && isPlayerTurn && (partyHp[activePartyIdx] ?? 0) > 0 && activeAp === 0 && combat.paidTiles === 0;
   const stunned = outOfAp && combat.apSpent === 0;
   // The timers below fire after a delay: they end the turn with the handler as it is then, not when they were set
@@ -677,7 +677,7 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
     return () => timers.forEach(clearTimeout);
   }, [outOfAp, stunned, combat.currentTurnIndex, combat.round]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ─── Enemy AI turn ───────────────────────────────────────────────────────
+  // â”€â”€â”€ Enemy AI turn â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   const enemyTurnRefs = useMemo(() => ({
     enemies: enemiesRef,
@@ -699,7 +699,7 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
     setEnemies, setCombat, setEnemyAoePreview, setEnemyTargetKey, showEnemyActivity,
   );
 
-  // ─── Combat end detection ────────────────────────────────────────────────
+  // â”€â”€â”€ Combat end detection â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   // Every enemy in the fight is dead (summoned ones too): it's over, and every summoned creature vanishes with it
   useEffect(() => {
@@ -711,7 +711,7 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
     setEnemies(prev => prev.filter(e => !e.summon));
   }, [combat.active, zoneEnemies]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ─── Map loading ─────────────────────────────────────────────────────────
+  // â”€â”€â”€ Map loading â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // The map stays under a dark cover until its 3D layer has drawn (useSceneReady), after fading to black before a
   // change of map (useFadeOut, above)
   const mapKey = `${location}:${zone?.id ?? ''}`;
@@ -720,18 +720,18 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
   const zoneBoard = useMemo(() => (zone ? boardLayout(zone.width, zone.height) : null), [zone?.width, zone?.height]); // eslint-disable-line react-hooks/exhaustive-deps -- zone tracked by its size
   const viewFocus = location === 'dungeon' && zoneBoard ? zoneBoard.toScreen(playerPos.x + 0.5, playerPos.y + 0.5, 0.5) : undefined;
 
-  // ─── Render ──────────────────────────────────────────────────────────────
+  // â”€â”€â”€ Render â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   const activeTarget = activeAction?.target ?? null;
 
-  // ─── HUD state ───────────────────────────────────────────────────────────
+  // â”€â”€â”€ HUD state â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // A creature the AI runs (an enemy or a summoned ally) is taking its turn
   const aiActing = combat.active && !!currentCombatant && !currentCombatant.isPlayer;
   // The action bar's member: the acting one in combat (none on an enemy's turn), the selected one out of it
   const dockIdx = combat.active ? (isPlayerTurn ? activePartyIdx : null) : barViewIdx;
   const dockSlotContent = dockIdx !== null ? partySlots[dockIdx]?.[partyActiveSlot[dockIdx] ?? -1] ?? null : null;
   const armedName = dockSlotContent === 'weapon-attack' ? (activeWeapon?.name ?? 'Attack') : dockSlotContent?.name;
-  const locationName = location === 'sanctum' ? 'The Sanctum' : zone ? `${preset.name} · Zone ${zone.id + 1}` : '';
+  const locationName = location === 'sanctum' ? 'The Sanctum' : zone ? `${preset.name} Â· Zone ${zone.id + 1}` : '';
 
   return (
     <Backdrop variant="game" className="h-screen">
@@ -817,7 +817,7 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
           when the new one is ready */}
       <LoadingCover loading={mapLoading || fading} fadeIn={fading} className="absolute inset-0 z-20" />
 
-      {/* ─── HUD ─── */}
+      {/* â”€â”€â”€ HUD â”€â”€â”€ */}
 
       {/* Where the party is */}
       <div className="absolute top-5 left-6 z-30 rf-label pointer-events-none">{locationName}</div>
@@ -865,7 +865,7 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
       {/* An ability is armed: how to use or cancel it */}
       {armedName && (
         <div role="status" className="rf-hud absolute left-1/2 -translate-x-1/2 bottom-[144px] z-30 px-4 py-2 whitespace-nowrap text-xs tracking-[0.04em] text-rift-soft">
-          {armedName} — choose a target. Click it again or press Esc to cancel.
+          {armedName} â€” choose a target. Click it again or press Esc to cancel.
         </div>
       )}
 
@@ -936,6 +936,8 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
           keys={keyring.keys}
           hasNewKey={keyring.hasNew}
           onSeeKeys={keyring.seeKeys}
+          hasNewShards={hasNewShards}
+          onSeeShards={seeShards}
           onClose={() => setShowCharSheet(false)}
           onEquipItem={equipItem}
           onUnequipItem={unequipItem}

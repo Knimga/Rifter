@@ -163,7 +163,8 @@ const finish = (s: Sentence): Sentence => [{ ...s[0], text: capitalize(s[0].text
 
 const span = (min: number, max: number) => (min === max ? `${min}` : `${min}–${max}`);
 const aOrAn = (phrase: string) => `${/^[aeiou]/i.test(phrase) ? 'an' : 'a'} ${phrase}`;
-const forRounds = (n: number) => `for ${n} round${n === 1 ? '' : 's'}`;
+/** How long an effect lasts: its bearer's turns. */
+const forTurns = (n: number) => `for ${n} turn${n === 1 ? '' : 's'}`;
 /** Phrases as a list: 'a', 'a and b', 'a, b and c'. */
 const listOf = (items: string[]) => (items.length < 2 ? items.join('') : `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`);
 /** Parts as a list, the same way. */
@@ -213,20 +214,20 @@ function effectPhrase(eff: TriggerEffect, whom: string | null, third: boolean, a
             return damagePhrase([eff], whom, third);
         case 'dot': {
             const tone = eff.damagesMP ? 'mpDamage' : 'dot';
-            return [plain(`${v('deal')} `), ...amountOf(`${eff.damagePerRound}`, eff.damageElement, tone),
-                plain(`${eff.damagesMP ? ' MP' : ''} damage per round ${forRounds(eff.rounds)}`), ...to('to')];
+            return [plain(`${v('deal')} `), ...amountOf(`${eff.damagePerTurn}`, eff.damageElement, tone),
+                plain(`${eff.damagesMP ? ' MP' : ''} damage per turn ${forTurns(eff.turns)}`), ...to('to')];
         }
         case 'heal':
             return eff.restoresMP
                 ? [plain(`${v('restore')} `), hl(`${span(eff.minHeal, eff.maxHeal)} MP`, 'mpRestore'), ...to('to')]
                 : [plain(`${v('heal')}${obj} for `), hl(span(eff.minHeal, eff.maxHeal), 'heal')];
         case 'hot':
-            return [plain(`${v('heal')}${obj} for `), hl(`${eff.healPerRound} per round`, 'hot'), plain(` ${forRounds(eff.rounds)}`)];
+            return [plain(`${v('heal')}${obj} for `), hl(`${eff.healPerTurn} per turn`, 'hot'), plain(` ${forTurns(eff.turns)}`)];
         case 'buff':
         case 'debuff': {
             const debuff = eff.type === 'debuff';
             const stats = statChanges(eff, debuff) || (debuff ? 'a debuff' : 'a buff');
-            return [plain(`${v(debuff ? 'inflict' : 'grant')} `), hl(stats, debuff ? 'debuff' : 'buff'), ...to(debuff ? 'on' : 'to'), plain(` ${forRounds(eff.rounds)}`)];
+            return [plain(`${v(debuff ? 'inflict' : 'grant')} `), hl(stats, debuff ? 'debuff' : 'buff'), ...to(debuff ? 'on' : 'to'), plain(` ${forTurns(eff.turns)}`)];
         }
         case 'threat': {
             // 'gains +10 Threat', 'loses 50% Threat', 'gains +10 and +25% Threat', 'gains +10 Threat and loses 50% Threat'
@@ -240,12 +241,12 @@ function effectPhrase(eff: TriggerEffect, whom: string | null, third: boolean, a
             return changes.flatMap((c, i) => [...(i ? [plain(' and ')] : []), verb(c.n), hl(`${amount(c.n, c.unit)}${extra} Threat`, 'threat')]);
         }
         case 'root':
-            return [hl(v('root'), 'debuff'), plain(`${obj} ${forRounds(eff.rounds)}`)];
+            return [hl(v('root'), 'debuff'), plain(`${obj} ${forTurns(eff.turns)}`)];
         case 'summon': {
             // The creature's id, which is its name ('fungal-spore' → 'Fungal Spore'; data/units/summons.ts, not
             // imported here: it imports this module's), and how many can be out at once when more than one
             const name = capitalizeWords(eff.creature.replace(/-/g, ' '));
-            return [plain(`${v('summon')} `), hl(aOrAn(name), 'buff'), plain(` ${forRounds(eff.rounds)}${(eff.max ?? 1) > 1 ? `, up to ${eff.max} at once` : ''}`)];
+            return [plain(`${v('summon')} `), hl(aOrAn(name), 'buff'), plain(` ${forTurns(eff.turns)}${(eff.max ?? 1) > 1 ? `, up to ${eff.max} at once` : ''}`)];
         }
     }
 }
@@ -269,11 +270,11 @@ const TRIGGER_OTHER: Record<Trigger['when'], string> = {
 };
 
 /**
- * A trigger as a sentence: what sets it off, its chance, and what it does to whom. E.g. 'For 4 rounds, on a melee
- * weapon hit, 40% chance to deal 4 poison damage per round for 3 rounds to the target.' `rounds`: how long it
+ * A trigger as a sentence: what sets it off, its chance, and what it does to whom. E.g. 'For 4 turns, on a melee
+ * weapon hit, 40% chance to deal 4 poison damage per turn for 3 turns to the target.' `turns`: how long it
  * lasts, put first. `bearer`: what to call the unit that has it ('you' on a buff the caster gets, else 'itself').
  */
-export function triggerSentence(t: Trigger, rounds?: number, bearer = 'itself'): Sentence {
+export function triggerSentence(t: Trigger, turns?: number, bearer = 'itself'): Sentence {
     const attack = isAttackTrigger(t);
     const ons = Array.isArray(t.on) ? t.on : [t.on ?? 'hit'];
     const kind = attack ? [(t.categories ?? []).join(' or '), t.weaponOnly ? 'weapon' : ''].filter(Boolean).join(' ') : '';
@@ -285,13 +286,13 @@ export function triggerSentence(t: Trigger, rounds?: number, bearer = 'itself'):
         eff.appliesTo === 'caster' ? bearer : eff.appliesTo === 'source' ? (bearer === 'you' ? 'you' : 'its caster') : TRIGGER_OTHER[t.when];
     const does = t.effects.flatMap((e, i) => [...(i ? [plain(' and ')] : []), ...effectPhrase(e, whom(e), chance === null)]);
     return finish([
-        plain(`${rounds !== undefined ? `${forRounds(rounds)}, ` : ''}${when}, `),
+        plain(`${turns !== undefined ? `${forTurns(turns)}, ` : ''}${when}, `),
         ...(chance !== null ? [hl(`${chance}% chance`, 'buff'), plain(' to ')] : []),
         ...does,
     ]);
 }
 
-/** A trigger as plain text (status marker tooltips: the rounds left show on their own). */
+/** A trigger as plain text (status marker tooltips: the turns left show on their own). */
 export const describeTrigger = (t: Trigger): string => sentenceText(triggerSentence(t));
 
 /** Who an ability's effect lands on: the ability's own target kind, the caster ('self'), or its allies in the area. */
@@ -313,8 +314,8 @@ const stacking = (eff: { maxStacks?: number; trigger?: unknown }) =>
 /**
  * An ability's effects as sentences for its card, in order. Who gets an effect is named only when it isn't the
  * ability's own target. Damage effects in a row on the same units make one phrase ('deals 8–10 physical and 4–5
- * fire damage'), and a DoT or HoT right after damage or a heal joins it ('heals for 4–6, then 4 per round for 3
- * rounds'). On an area ability, the effects on the units in the area make one sentence ending in where they land
+ * fire damage'), and a DoT or HoT right after damage or a heal joins it ('heals for 4–6, then 4 per turn for 3
+ * turns'). On an area ability, the effects on the units in the area make one sentence ending in where they land
  * ('Deals 10–12 fire damage and inflicts −5% Dodge in an area.'). A weapon ability's do too, after 'Weapon attack
  * that', its damage and threat being on top of the weapon's ('Weapon attack that deals 10–12 additional physical
  * damage.', 'Weapon attack that gains +15 additional Threat.').
@@ -335,10 +336,10 @@ export function abilitySentences(ability: Pick<Ability, 'target' | 'area' | 'use
             const dot = next();
             if (dot?.type === 'dot' && !!dot.damagesMP === !!eff.damagesMP) {
                 i++;
-                // Its element only when it differs from the damage's ('then 5 per round', 'then 3 poison per round')
+                // Its element only when it differs from the damage's ('then 5 per turn', 'then 3 poison per turn')
                 const sameElement = together[together.length - 1].damageElement === dot.damageElement;
-                phrase.push(plain(', then '), ...(sameElement ? [hl(`${dot.damagePerRound}`, 'dot')] : amountOf(`${dot.damagePerRound}`, dot.damageElement, 'dot')),
-                    plain(` per round ${forRounds(dot.rounds)}`), ...stacking(dot));
+                phrase.push(plain(', then '), ...(sameElement ? [hl(`${dot.damagePerTurn}`, 'dot')] : amountOf(`${dot.damagePerTurn}`, dot.damageElement, 'dot')),
+                    plain(` per turn ${forTurns(dot.turns)}`), ...stacking(dot));
             }
             pieces.push({ phrase, gets });
             continue;
@@ -348,14 +349,14 @@ export function abilitySentences(ability: Pick<Ability, 'target' | 'area' | 'use
             const hot = next();
             if (hot?.type === 'hot') {
                 i++;
-                phrase.push(plain(', then '), hl(`${hot.healPerRound} per round`, 'hot'), plain(` ${forRounds(hot.rounds)}`), ...stacking(hot));
+                phrase.push(plain(', then '), hl(`${hot.healPerTurn} per turn`, 'hot'), plain(` ${forTurns(hot.turns)}`), ...stacking(hot));
             }
             pieces.push({ phrase, gets });
             continue;
         }
         if (eff.type === 'buff' || eff.type === 'debuff') {
             if (statChanges(eff, eff.type === 'debuff') || !eff.trigger) pieces.push({ phrase: [...effectPhrase(eff, whom, true), ...stacking(eff)], gets });
-            if (eff.trigger) pieces.push({ sentence: triggerSentence(eff.trigger, eff.rounds, gets === 'self' ? 'you' : 'itself') });
+            if (eff.trigger) pieces.push({ sentence: triggerSentence(eff.trigger, eff.turns, gets === 'self' ? 'you' : 'itself') });
             continue;
         }
         // A weapon ability's threat is on top of the hit's, and joins its sentence

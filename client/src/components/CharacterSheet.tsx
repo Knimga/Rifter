@@ -53,6 +53,10 @@ interface Props {
   hasNewKey: boolean;
   /** The Keys tab was opened (the new key has been seen). */
   onSeeKeys: () => void;
+  /** Shards were picked up since the Shards tab was last opened: the tab glows gold, as the Keys tab does. */
+  hasNewShards: boolean;
+  /** The Shards tab was opened (the new shards have been seen). */
+  onSeeShards: () => void;
   onClose: () => void;
   /** Equip an inventory item on a member: in its own slot, or `slot` (dragged onto it). */
   onEquipItem?: (inventoryIdx: number, charIdx: number, slot?: GearSlot) => void;
@@ -171,11 +175,12 @@ function GearSlotBox({ slot, item: worn, stats, onUnequip, drag }: {
   );
 }
 
-export default function CharacterSheet({ party, partyHp, partyMp, partyStats, partyBuffs, inventory, gold, shards, keys, hasNewKey, onSeeKeys, onClose, onEquipItem, onUnequipItem, onMoveItem, onSwapGear, progress, pending: pendingAll, onPendingChange, onConfirmPoints }: Props) {
+export default function CharacterSheet({ party, partyHp, partyMp, partyStats, partyBuffs, inventory, gold, shards, keys, hasNewKey, onSeeKeys, hasNewShards, onSeeShards, onClose, onEquipItem, onUnequipItem, onMoveItem, onSwapGear, progress, pending: pendingAll, onPendingChange, onConfirmPoints }: Props) {
   const [selectedIdx, setSelectedIdx] = useState(0);
   // The Inventory panel's tab: the shared inventory, the party's shards, or the keyring
   const [tab, setTab] = useState<'items' | 'shards' | 'keys'>('items');
   const showKeys = () => { setTab('keys'); onSeeKeys(); };
+  const showShards = () => { setTab('shards'); onSeeShards(); };
   // The Shards tab's selected category and Carried / All toggle: kept while the window stays open, and (the window
   // being new each time it opens) starting at All and Carried every time
   const [shardCategory, setShardCategory] = useState<ShardFilter>('all');
@@ -363,7 +368,7 @@ export default function CharacterSheet({ party, partyHp, partyMp, partyStats, pa
                       Inventory <span className="font-tech text-[10px] tracking-[0.1em] text-rift-label">Shared</span>
                     </button>
                     <span aria-hidden="true" className="rf-tabsep" />
-                    <button type="button" role="tab" aria-selected={tab === 'shards'} className={`rf-h rf-tab ${tab === 'shards' ? 'is-on' : ''}`} onClick={() => setTab('shards')}>
+                    <button type="button" role="tab" aria-selected={tab === 'shards'} className={`rf-h rf-tab ${tab === 'shards' ? 'is-on' : ''} ${hasNewShards ? 'is-new' : ''}`} onClick={showShards}>
                       Shards
                     </button>
                     <span aria-hidden="true" className="rf-tabsep" />
@@ -382,7 +387,7 @@ export default function CharacterSheet({ party, partyHp, partyMp, partyStats, pa
                     canUse={(item) => isProficient(classData, item)}
                     action={(item) => (onEquipItem && canEquip(classData, item, inventory, gear) ? 'Equip' : null)}
                     onAction={(i) => onEquipItem?.(i, selectedIdx)} unusableNote=", not proficient"
-                    compareWith={(item) => equipCompare(shown, item, stats)} drag={drag} />
+                    compareWith={(item, other) => equipCompare(shown, item, stats, other)} drag={drag} />
                 ) : <Keyring keys={keys} />}
               </section>
             </div>

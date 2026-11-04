@@ -30,7 +30,7 @@ export interface TerrainStyle {
     bumpiness: number;
   };
   /**
-   * Another color running through the floor and walls: lava (`glow`: lit from within), moss. `share` (0..1) of the
+   * Another color running through the floor and walls: lava (`glow`: lit from within, with halos scattered along it), moss. `share` (0..1) of the
    * surface, as thin winding `cracks` or connected `patches`; a flagstone floor shows them in its joints.
    */
   veins?: { color: RGB; share: number; pattern: 'cracks' | 'patches'; glow?: boolean };

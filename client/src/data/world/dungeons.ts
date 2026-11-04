@@ -42,7 +42,7 @@ export const DUNGEONS: Record<string, DungeonConfig> = {
     },
     clutter: {
       wall: { objects: ['cobwebs', 'blue-wall-torch'], density: 0.12 },
-      ground: { objects: ['scattered-bones', 'skull'], density: 0.05 },
+      ground: { objects: ['scattered-bones'], density: 0.05 },
     },
     doorObject: 'heavy-door',
     riftColor: [178, 236, 192], // pale, ghostly necrotic green, washed toward white-grey
@@ -87,12 +87,12 @@ export const DUNGEONS: Record<string, DungeonConfig> = {
     height: 39,
     terrain: {
       // Red-black cave rock, cracked with glowing lava
-      floor: { color: [70, 34, 30], seam: [34, 16, 15], pattern: 'rough', bumpiness: 0.7 },
+      floor: { color: [60, 30, 25], seam: [34, 16, 15], pattern: 'rough-fine', bumpiness: 0.7 },
       walls: { color: [64, 28, 24], finish: 'rough', height: 'high', bumpiness: 0.7 },
       veins: { color: [255, 112, 26], share: 0.09, pattern: 'cracks', glow: true },
     },
     clutter: {
-      ground: { objects: ['brown-rubble', 'smoldering-embers'], density: 0.06 },
+      ground: { objects: ['brown-rubble', 'smoldering-embers'], density: 0.07 },
     },
     doorObject: 'heavy-door',
     riftColor: [255, 168, 72],  // fiery orange, deepening to ember red
@@ -107,7 +107,7 @@ export const DUNGEONS: Record<string, DungeonConfig> = {
         islands: { roomChance: 0.33, size: [3, 6], density: 0.1 },
         obstacles: { objects: ['lava-plume'], roomChance: 0.5, density: 0.04 },
         enemyGroups: [
-          [lavaSlime, lavaSlime, lavaSlime],
+          [lavaSlime, lavaSlime, lavaSlime, lavaSlime],
           [hellhound, hellhound, hellhound],
           [flameGolem, lavaSlime, lavaSlime]
         ],

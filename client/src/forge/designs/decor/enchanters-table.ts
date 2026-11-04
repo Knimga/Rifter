@@ -15,8 +15,9 @@ import type { Mesh } from '../../core/mesh';
 import { bipyr, blob, box, frustum, tube } from '../../core/primitives';
 import { embed } from '../../core/embed';
 import { paintTint } from '../../core/tint';
-import { add, mulC, rotY, rotZ, sub, type RGB, type Vec3 } from '../../core/vec';
+import { add, mulC, rotY, sub, type RGB, type Vec3 } from '../../core/vec';
 import { decorEntry } from '../_decor';
+import { LEATHER, PARCHMENT, book, bookStack, candle, openTome, scroll } from '../_books';
 import affixShard from '../loot/affix-shard';
 import { SHARD_CATEGORIES } from '../../../data/gear/shards';
 
@@ -26,12 +27,7 @@ const STONE_DEEP: RGB = [12, 12, 16]; // the carving's recesses
 const LEY: RGB = [70, 186, 255]; // the leylines' light: a cool, semi-neon blue
 const LEY_HALO: RGB = [40, 120, 220];
 const CRYSTAL: RGB = [200, 238, 255];
-const PARCHMENT: RGB = [150, 134, 102];
-const PAGE: RGB = [176, 160, 124];
-const LEATHER: RGB[] = [[74, 30, 34], [32, 56, 46], [36, 42, 70], [66, 48, 30]];
 const BRASS: RGB = [146, 116, 58];
-const WAX: RGB = [190, 178, 150];
-const FLAME: RGB = [255, 196, 110];
 /** The jars' glowing contents: teal, violet, amber. */
 const JAR_GLOW: RGB[] = [[90, 224, 204], [184, 124, 255], [255, 172, 84]];
 const GLASS: RGB = [40, 48, 56];
@@ -59,31 +55,6 @@ function strip(m: Mesh, p: Vec3, q: Vec3, w: number, col: RGB): void {
 function arc(m: Mesh, c: Vec3, r: number, a0: number, a1: number, segs: number, w: number, col: RGB): void {
   const at = (a: number): Vec3 => [c[0] + Math.cos(a) * r, c[1], c[2] + Math.sin(a) * r];
   for (let i = 0; i < segs; i++) strip(m, at(a0 + ((a1 - a0) * i) / segs), at(a0 + ((a1 - a0) * (i + 1)) / segs), w, col);
-}
-
-/** A book lying flat: its cover, and its page block showing along its front and sides. Centered on `c` (its bottom). */
-function book(m: Mesh, c: Vec3, size: Vec3, yaw: number, cover: RGB): void {
-  const from = m.faces.length;
-  box(m, [0, size[1] / 2, 0], size, cover, 0.1);
-  box(m, [0.008, size[1] / 2, 0.006], [size[0] - 0.012, size[1] * 0.72, size[2] - 0.004], PAGE, 0.06);
-  m.xf(from, (p) => add(rotY(p, yaw), c));
-}
-
-/** A stack of books on `c`, each turned a little its own way. */
-function bookStack(m: Mesh, c: Vec3, books: { size: Vec3; yaw: number; cover: RGB }[]): void {
-  let y = 0;
-  for (const b of books) {
-    book(m, add(c, [0, y, 0]), b.size, b.yaw, b.cover);
-    y += b.size[1];
-  }
-}
-
-/** A rolled scroll lying along `dir` (yaw) on `c`: parchment with darker rolled ends. */
-function scroll(m: Mesh, c: Vec3, len: number, r: number, yaw: number): void {
-  const from = m.faces.length;
-  frustum(m, [-len / 2, r, 0], [len / 2, r, 0], r, r, 6, PARCHMENT, { j: 0.1 });
-  for (const s of [-1, 1]) frustum(m, [s * (len / 2), r, 0], [s * (len / 2 + 0.012), r, 0], r * 0.55, r * 0.55, 6, LEATHER[3], { j: 0.06 });
-  m.xf(from, (p) => add(rotY(p, yaw), c));
 }
 
 /** A glass jar on `c`: dark glass, its glowing contents showing through, a cork; a small glow around it. */
@@ -195,22 +166,10 @@ const design: Design = {
       paintTint(m, from, tint);
       m.halo(add(at, [0, 0.04, 0]), 0.07, tint);
     }
-    // The open tome: a dark leather cover, two page blocks rising a little from the spine, a glowing glyph on the
-    // right-hand page; built facing +z, then turned toward the reader standing at the circle
+    // The open tome, a glowing glyph on its right-hand page, turned toward the reader standing at the circle
     {
       const at: Vec3 = [-0.6, TOP, 0.0];
-      const from = m.faces.length;
-      box(m, [0, 0.008, 0], [0.32, 0.016, 0.23], LEATHER[0], 0.06);
-      for (const s of [-1, 1]) {
-        const p0 = m.faces.length;
-        box(m, [s * 0.075, 0.018, 0], [0.145, 0.022, 0.21], PAGE, 0.05);
-        m.xf(p0, (p) => rotZ(p, -s * 0.07));
-      }
-      box(m, [0, 0.03, 0], [0.012, 0.012, 0.21], mulC(PAGE, 0.6), 0); // the gutter
-      box(m, [0.075, 0.034, 0.01], [0.06, 0.003, 0.06], LEY, 0, { e: 0.8 });
-      const yaw = Math.atan2(READER[0] - at[0], READER[2] - at[2]);
-      m.xf(from, (p) => add(rotY(p, yaw), at));
-      m.halo(add(at, [0, 0.05, 0]), 0.1, LEY_HALO);
+      openTome(m, at, Math.atan2(READER[0] - at[0], READER[2] - at[2]), LEATHER[0], { color: LEY, halo: LEY_HALO });
     }
 
     // The right: a brass armillary on its stand, a mortar and pestle, a candle, glowing jars and a stack of books
@@ -230,9 +189,7 @@ const design: Design = {
     frustum(m, [1.24, TOP, 0.13], [1.24, TOP + 0.06, 0.13], 0.045, 0.06, 7, STONE_TOP, { j: 0.12 });
     frustum(m, [1.24, TOP + 0.04, 0.13], [1.29, TOP + 0.13, 0.1], 0.012, 0.016, 5, mulC(STONE_TOP, 1.2), { j: 0.1 });
     // A candle with its flame
-    frustum(m, [0.56, TOP, 0.16], [0.56, TOP + 0.11, 0.16], 0.022, 0.02, 6, WAX, { j: 0.08 });
-    bipyr(m, [0.56, TOP + 0.135, 0.16], 0.012, 0.022, 4, FLAME, { e: 1 });
-    m.halo([0.56, TOP + 0.14, 0.16], 0.1, FLAME);
+    candle(m, [0.56, TOP, 0.16]);
     // Glowing jars, clustered toward the back
     jar(m, [0.62, TOP, -0.28], 0.15, 0.045, JAR_GLOW[0]);
     jar(m, [0.76, TOP, -0.33], 0.11, 0.04, JAR_GLOW[1]);

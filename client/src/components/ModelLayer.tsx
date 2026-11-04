@@ -5,6 +5,7 @@ import { bodySize, type EnemyInstance } from '../data/units/enemies';
 import { CLASSES, type ClassKey } from '../data/units/classes';
 import type { Design, Model, ModelLink } from '../forge/core/types';
 import { buildInstance, instanceSeed, linkedDesign } from '../forge/core/link';
+import { buildModel } from '../forge/core/build';
 import { tintModel } from '../forge/core/tint';
 import type { RGB } from '../forge/core/vec';
 import { TILE_SIZE, type BoardLayout } from '../viewEngine/board';
@@ -45,6 +46,8 @@ export interface MapObject {
    * design, placeClutter).
    */
   look?: string;
+  /** A fixed seed for its look (one picked in the forge for a hand-placed object), instead of seeding it from `look` or its id. */
+  seed?: number;
   /** Its model's animations its state calls for, e.g. ['open'] for a looted chest (see MapUnit.played). */
   played?: string[];
   /** The color a tinted model (a rift) is drawn in: the color of where it leads (core/tint.ts). */
@@ -169,7 +172,7 @@ export default function ModelLayer({ board, party = [], enemies = [], loot = [],
   const lootCacheId = (l: MapLoot) => `item:${l.link}:${l.tint?.join(',') ?? ''}`;
   /** An object's colors, as text (its cache key and change key). */
   const tintKey = (o: MapObject) => `${o.tint?.join(',') ?? ''}${o.partTints?.map((t) => `${t.parts.join('+')}=${t.color.join(',')}`).join(';') ?? ''}`;
-  const objectKey = objects.map((o) => `${o.id}:${o.link}:${o.pos.x},${o.pos.y}:${o.facing}:${o.played?.join('+') ?? ''}:${tintKey(o)}:${o.aim?.seq ?? ''}`).join('|');
+  const objectKey = objects.map((o) => `${o.id}:${o.link}:${o.seed ?? ''}:${o.pos.x},${o.pos.y}:${o.facing}:${o.played?.join('+') ?? ''}:${tintKey(o)}:${o.aim?.seq ?? ''}`).join('|');
   const aimKey = Object.entries(aims).map(([id, a]) => `${id}:${a.seq}`).join('|');
   const flashKey = Object.entries(fx).map(([id, f]) => `${id}:${f.flash ?? ''}`).join('|');
   const units: MapUnit[] = useMemo(() => {
@@ -177,8 +180,8 @@ export default function ModelLayer({ board, party = [], enemies = [], loot = [],
     for (const o of objects) {
       const design = linkedDesign(designs, o.link);
       if (!design) continue;
-      const model = cached(o.look ?? o.id, `${o.link}:${tintKey(o)}`, [design], () => {
-        const built = buildInstance(design, o.look ?? o.id);
+      const model = cached(o.look ?? o.id, `${o.link}:${tintKey(o)}:${o.seed ?? ''}`, [design], () => {
+        const built = o.seed !== undefined ? buildModel(design, o.seed) : buildInstance(design, o.look ?? o.id);
         if (o.partTints) return o.partTints.reduce((m, t) => tintModel(m, t.color, t.parts), built);
         return o.tint ? tintModel(built, o.tint) : built;
       });

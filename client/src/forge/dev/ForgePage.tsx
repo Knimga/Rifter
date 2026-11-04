@@ -20,6 +20,11 @@ import { ForgeView, GAME_VIEW_ANCHOR, type CameraPreset, type Cell } from './for
 import { floorMatrix } from '../../viewEngine/camera';
 import { TILE_SIZE } from '../../viewEngine/board';
 import DungeonPreview from './DungeonPreview';
+import SanctumPreview from './SanctumPreview';
+
+/** A map the Maps view shows: the Sanctum or a dungeon. */
+type MapKey = 'sanctum' | DungeonKey;
+const isMapKey = (k: string): k is MapKey => k === 'sanctum' || k in DUNGEONS;
 import { BTN, INPUT, Toggle } from './ui';
 
 // Cell size follows the game's tile size (TILE_SIZE, the one constant the maps use), so the game view
@@ -54,8 +59,8 @@ function readUrl() {
     count: Number(q.get('count') ?? 12),
     camera: (q.get('cam') as CameraPreset) ?? 'game',
     tint: q.get('tint') ?? TINT_KEYS[0],
-    /** Open on a dungeon's look (the Dungeons view), e.g. ?dungeon=crypt. */
-    dungeon: (q.get('dungeon') ?? '') in DUNGEONS ? (q.get('dungeon') as DungeonKey) : null,
+    /** Open on a map (the Maps view): ?map=sanctum, or a dungeon's key (?map=crypt; ?dungeon=crypt too). */
+    map: ((k) => (isMapKey(k) ? k : null))(q.get('map') ?? q.get('dungeon') ?? ''),
   };
 }
 
@@ -82,8 +87,8 @@ export default function ForgePage() {
   }, [registry]);
 
   const [selectedId, setSelectedId] = useState(initial.design || entries[0]?.id || '');
-  /** A dungeon whose look is shown (the Dungeons view) instead of the selected design. */
-  const [dungeonKey, setDungeonKey] = useState<DungeonKey | null>(initial.dungeon);
+  /** A map shown (the Maps view: the Sanctum or a dungeon) instead of the selected design. */
+  const [mapKey, setMapKey] = useState<MapKey | null>(initial.map);
   const [seedStart, setSeedStart] = useState(initial.seed);
   const [count, setCount] = useState(initial.count);
   const [camera, setCamera] = useState<CameraPreset>(initial.camera);
@@ -296,8 +301,8 @@ export default function ForgePage() {
                 <button
                   key={e.id}
                   title={dataEntry((e.approved ?? e.draft)!.source)?.path}
-                  onClick={() => { setSelectedId(e.id); setFocusSeed(null); setDungeonKey(null); }}
-                  className={`w-full text-left px-2 py-1.5 rounded flex items-center justify-between gap-2 ${!dungeonKey && e.id === entry?.id ? 'bg-gray-700' : 'hover:bg-gray-700/50'}`}
+                  onClick={() => { setSelectedId(e.id); setFocusSeed(null); setMapKey(null); }}
+                  className={`w-full text-left px-2 py-1.5 rounded flex items-center justify-between gap-2 ${!mapKey && e.id === entry?.id ? 'bg-gray-700' : 'hover:bg-gray-700/50'}`}
                 >
                   <span className="truncate">{(e.draft ?? e.approved)!.label}</span>
                   <span className="flex gap-1 shrink-0">
@@ -311,21 +316,21 @@ export default function ForgePage() {
           );
         })}
         <div>
-          <h2 className="text-xs font-bold uppercase tracking-widest text-gray-500 mb-1">Dungeons</h2>
-          {(Object.keys(DUNGEONS) as DungeonKey[]).map((k) => (
-            <button key={k} onClick={() => setDungeonKey(k)}
-              className={`w-full text-left px-2 py-1.5 rounded ${dungeonKey === k ? 'bg-gray-700' : 'hover:bg-gray-700/50'}`}>
-              {DUNGEONS[k].name}
+          <h2 className="text-xs font-bold uppercase tracking-widest text-gray-500 mb-1">Maps</h2>
+          {(['sanctum', ...Object.keys(DUNGEONS)] as MapKey[]).map((k) => (
+            <button key={k} onClick={() => setMapKey(k)}
+              className={`w-full text-left px-2 py-1.5 rounded ${mapKey === k ? 'bg-gray-700' : 'hover:bg-gray-700/50'}`}>
+              {k === 'sanctum' ? 'The Sanctum' : DUNGEONS[k].name}
             </button>
           ))}
         </div>
       </aside>
 
-      {/* ── Center: seed grid (or a dungeon's look) ── */}
+      {/* ── Center: seed grid (or a map) ── */}
       <main className="flex-1 overflow-auto p-4">
-        {dungeonKey && <DungeonPreview dungeonKey={dungeonKey} />}
-        {/* Kept mounted while a dungeon is shown: its 3D view lives in it */}
-        <div className={dungeonKey ? 'hidden' : ''}>
+        {mapKey === 'sanctum' ? <SanctumPreview /> : mapKey && <DungeonPreview dungeonKey={mapKey} />}
+        {/* Kept mounted while a map is shown: its 3D view lives in it */}
+        <div className={mapKey ? 'hidden' : ''}>
         {entry && (
           <div className="mb-3">
             <h1 className="text-lg font-bold">{(entry.approved ?? entry.draft)!.label}</h1>
@@ -460,7 +465,7 @@ function animationLoop(t: number, ms: number): number {
 // ─── Game-view floor ──────────────────────────────────────────────────────────
 // In the game, models draw on a transparent canvas over the map's clear DOM tiles and its 3D floor. The
 // game view does the same over plain tiles of the game's size, in the Crypt's floor color, with the grid's border
-// as a scale reference (the Dungeons view shows the real terrain).
+// as a scale reference (the Maps view shows the real terrain).
 
 const FLOOR = `rgb(${DUNGEONS.crypt.terrain.floor.color.join(', ')})`;
 const PAGE_BG = '#111827'; // Tailwind gray-900, the page background

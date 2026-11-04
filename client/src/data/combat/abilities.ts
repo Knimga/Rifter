@@ -31,26 +31,26 @@ export type Effect =
   | { type: 'damage';  appliesTo: EffectTarget; damageElement: DamageElement; minDamage: number; maxDamage: number; damagesMP?: boolean }
   // A DoT or HoT: each one landed is a stack, at most `maxStacks` of it on a unit at once (default: no limit), from any
   // caster; one more replaces the oldest (addTicking in units/stats.ts)
-  | { type: 'dot';     appliesTo: EffectTarget; damageElement: DamageElement; damagePerRound: number; rounds: number; damagesMP?: boolean; maxStacks?: number }
+  | { type: 'dot';     appliesTo: EffectTarget; damageElement: DamageElement; damagePerTurn: number; turns: number; damagesMP?: boolean; maxStacks?: number }
   // restoresMP: it restores MP instead of HP (worked out exactly like an HP heal)
   | { type: 'heal';    appliesTo: EffectTarget; damageElement: DamageElement; minHeal: number; maxHeal: number; restoresMP?: boolean }
-  | { type: 'hot';     appliesTo: EffectTarget; damageElement: DamageElement; healPerRound: number; rounds: number; maxStacks?: number }
-  // A buff or debuff changes stats, and/or sets a trigger on the unit for its rounds (Trigger). Each cast is a
+  | { type: 'hot';     appliesTo: EffectTarget; damageElement: DamageElement; healPerTurn: number; turns: number; maxStacks?: number }
+  // A buff or debuff changes stats, and/or sets a trigger on the unit for its turns (Trigger). Each cast is a
   // stack: a unit can have at most `maxStacks` of it at once (default: no limit; one if it has a trigger), from
   // any caster; one more replaces the oldest (addBuffs in units/stats.ts).
-  | { type: 'buff';    appliesTo: EffectTarget; damageElement?: DamageElement; stats?: StatChanges; statsPercent?: StatChanges; trigger?: Trigger; rounds: number; maxStacks?: number }
-  | { type: 'debuff';  appliesTo: EffectTarget; damageElement?: DamageElement; stats?: StatChanges; statsPercent?: StatChanges; trigger?: Trigger; rounds: number; maxStacks?: number }
+  | { type: 'buff';    appliesTo: EffectTarget; damageElement?: DamageElement; stats?: StatChanges; statsPercent?: StatChanges; trigger?: Trigger; turns: number; maxStacks?: number }
+  | { type: 'debuff';  appliesTo: EffectTarget; damageElement?: DamageElement; stats?: StatChanges; statsPercent?: StatChanges; trigger?: Trigger; turns: number; maxStacks?: number }
   // The caster's threat: `amount` flat, `percent` of their current threat; negative reduces it (to 0 at
   // least). Gains are scaled by the caster's threatMultiplier, reductions aren't (see applyThreatChange).
   | { type: 'threat'; appliesTo: EffectTarget; damageElement?: DamageElement; amount?: number; percent?: number }
   // Calls up a creature (by id: units/summons.ts SUMMON_CLASSES, or an enemy class), fighting on the caster's
-  // side for `rounds` rounds (combat only; it vanishes when combat ends; no XP or loot). On a 'tile' ability it
+  // side for `turns` of its own turns (combat only; it vanishes when combat ends; no XP or loot). On a 'tile' ability it
   // appears on the aimed tile; otherwise beside the caster. At most `max` of them out at once (default 1):
   // casting it with that many out replaces the oldest.
-  | { type: 'summon'; appliesTo: 'caster'; damageElement?: DamageElement; creature: string; rounds: number; max?: number }
-  // Roots the unit in place for `rounds` rounds: it can't move (it can still attack and use abilities).
+  | { type: 'summon'; appliesTo: 'caster'; damageElement?: DamageElement; creature: string; turns: number; max?: number }
+  // Roots the unit in place for `turns` of its turns: it can't move (it can still attack and use abilities).
   // Lands like a debuff (on an enemy-targeting ability, only on a hit), and shows as one.
-  | { type: 'root'; appliesTo: EffectTarget; damageElement?: DamageElement; rounds: number };
+  | { type: 'root'; appliesTo: EffectTarget; damageElement?: DamageElement; turns: number };
 
 /** An attack's outcome a trigger reacts to: one of rollHit's, or 'stopped' (any of miss, dodge, parry, block). */
 export type TriggerOutcome = HitOutcome | 'stopped';

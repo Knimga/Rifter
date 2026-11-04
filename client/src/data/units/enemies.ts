@@ -71,12 +71,12 @@ export interface EnemyClassData extends CreatureClassData {
 
 /**
  * How a summoned creature came to be (absent on creatures placed on the map). A summon is a spell effect: it
- * gives no XP or loot when it dies, and vanishes when its rounds run out or the fight ends.
+ * gives no XP or loot when it dies, and vanishes when its turns run out or the fight ends.
  */
 export interface SummonInfo {
   owner: string;      // its summoner's unitKey (a party member's 'party-<idx>', a creature's id); it stays if they die
   ability: string;    // the ability that summoned it (casting it again with its max out replaces the oldest)
-  roundsLeft: number; // it vanishes when this runs out (counted down at the top of each round)
+  turnsLeft: number; // its own turns left: it vanishes when this runs out (counted down at the end of each, creatureTurnEnd)
   allied: boolean;    // on the party's side (summoned by a party member or one of its allies); else the enemies'
 }
 
@@ -287,7 +287,7 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
         displayElement: 'poison',
         effects: [
           {type: 'damage', appliesTo: 'target', damageElement: 'poison', minDamage: 4, maxDamage: 5 },
-          {type: 'dot', appliesTo: 'target', damageElement: 'poison', damagePerRound: 5, rounds: 3}
+          {type: 'dot', appliesTo: 'target', damageElement: 'poison', damagePerTurn: 5, turns: 3}
         ]
       }
     ],
@@ -334,7 +334,7 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
         attackCategory: 'magic',
         effects: [
           { type: 'damage', appliesTo: 'target', damageElement: 'shadow', minDamage: 4, maxDamage: 7 },
-          { type: 'debuff', appliesTo: 'target', damageElement: 'ice', stats: { dodge: -10 }, rounds: 2 }
+          { type: 'debuff', appliesTo: 'target', damageElement: 'ice', stats: { dodge: -10 }, turns: 1 }
         ]
       }
     ],
@@ -386,7 +386,7 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
         displayElement: 'ice',
         attackCategory: 'magic',
         effects: [
-          { type: 'root', appliesTo: 'target', damageElement: 'ice', rounds: 3 },
+          { type: 'root', appliesTo: 'target', damageElement: 'ice', turns: 3 },
           {type: 'damage', appliesTo: 'target', damageElement: 'ice', minDamage: 3, maxDamage: 4 }
         ]
       }
@@ -429,8 +429,8 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
         attackCategory: 'magic',
         displayElement: 'fire',
         effects: [
-          { type: 'dot', appliesTo: 'target', damageElement: 'fire', damagePerRound: 5, rounds: 3 },
-          { type: 'debuff', appliesTo: 'target', stats: { fireResistance: -20 }, rounds: 2}
+          { type: 'dot', appliesTo: 'target', damageElement: 'fire', damagePerTurn: 5, turns: 3 },
+          { type: 'debuff', appliesTo: 'target', stats: { fireResistance: -20 }, turns: 1}
         ]
       }
     ],
@@ -539,7 +539,7 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
         attackCategory: 'magic',
         effects: [
           { type: 'damage', appliesTo: 'target', damageElement: 'fire', minDamage: 3, maxDamage: 5 },
-          { type: 'debuff', appliesTo: 'target', stats: { fireResistance: -20 }, rounds: 2 }
+          { type: 'debuff', appliesTo: 'target', stats: { fireResistance: -20 }, turns: 1 }
         ]
       },
       {
@@ -613,7 +613,7 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
         range: 1,
         target: 'tile',        
         effects: [
-          { type: 'summon', appliesTo: 'caster', creature: 'fungal-spore', rounds: 3, max: 2 }
+          { type: 'summon', appliesTo: 'caster', creature: 'fungal-spore', turns: 3, max: 2 }
         ]
       },
       {
@@ -634,7 +634,7 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
         target: 'enemy',
         effects: [
           { type: 'damage', appliesTo: 'target', damageElement: 'nature', minDamage: 3, maxDamage: 5 },
-          { type: 'dot', appliesTo: 'target', damageElement: 'poison', damagePerRound: 3, rounds: 3 }
+          { type: 'dot', appliesTo: 'target', damageElement: 'poison', damagePerTurn: 3, turns: 3 }
         ]
       }
     ],
@@ -679,8 +679,8 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
         attackCategory: 'magic',
         displayElement: 'nature',
         effects: [
-          { type: 'dot', appliesTo: 'target', damageElement: 'nature', damagePerRound: 4, rounds: 3 },
-          { type: 'debuff', appliesTo: 'target', damageElement: 'nature', stats: { meleeHit: -5 }, rounds: 3 }
+          { type: 'dot', appliesTo: 'target', damageElement: 'nature', damagePerTurn: 4, turns: 3 },
+          { type: 'debuff', appliesTo: 'target', damageElement: 'nature', stats: { meleeHit: -5 }, turns: 3 }
         ]
       }
     ],
@@ -769,7 +769,7 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
         displayElement: 'poison',
         effects: [
           { type: 'damage', appliesTo: 'target', damageElement: 'poison', minDamage: 6, maxDamage: 8 },
-          { type: 'dot', appliesTo: 'target', damageElement: 'poison', damagePerRound: 5, rounds: 3 }
+          { type: 'dot', appliesTo: 'target', damageElement: 'poison', damagePerTurn: 5, turns: 3 }
         ]
       }
     ],
@@ -811,7 +811,7 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
         target: 'ally',
         area: 'blast2',
         effects: [
-          { type: 'buff', appliesTo: 'allies', stats: { meleeDamage: 1, armor: 5 }, rounds: 3 }
+          { type: 'buff', appliesTo: 'allies', stats: { meleeDamage: 1, armor: 5 }, turns: 3 }
         ]
       },
       {
@@ -823,7 +823,7 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
         attackCategory: 'melee',
         displayElement: 'physical',
         effects: [
-          { type: 'debuff', appliesTo: 'target', stats: { meleeHit: -5 }, rounds: 2 }
+          { type: 'debuff', appliesTo: 'target', stats: { meleeHit: -5 }, turns: 1 }
         ]
       }
     ],
@@ -869,7 +869,7 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
         displayElement: 'physical',
         effects: [
           { type: 'damage', appliesTo: 'target', damageElement: 'physical', minDamage: 2, maxDamage: 3 },
-          { type: 'dot', appliesTo: 'target', damageElement: 'physical', damagePerRound: 4, rounds: 3, maxStacks: 3 }
+          { type: 'dot', appliesTo: 'target', damageElement: 'physical', damagePerTurn: 4, turns: 3, maxStacks: 3 }
         ]
       }
     ],
@@ -902,7 +902,7 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
         attackCategory: 'magic',
         displayElement: 'shadow',
         effects: [
-          { type: 'dot', appliesTo: 'target', damageElement: 'shadow', damagePerRound: 3, rounds: 3 }
+          { type: 'dot', appliesTo: 'target', damageElement: 'shadow', damagePerTurn: 3, turns: 3 }
         ],
       },
       {
@@ -924,7 +924,7 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
         target: 'ally',
         displayElement: 'shadow',
         effects: [
-          { type: 'buff', appliesTo: 'target', rounds: 3, 
+          { type: 'buff', appliesTo: 'target', turns: 3, 
             trigger: {
               when: 'attacking', 
               categories: ['melee','ranged'], 
@@ -1028,7 +1028,7 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
         attackCategory: 'melee',
         displayElement: 'physical',
         effects: [
-          { type: 'debuff', appliesTo: 'target', damageElement: 'physical', stats: { magicHit: -10, mpRegen: -3 }, rounds: 3, maxStacks: 1 }
+          { type: 'debuff', appliesTo: 'target', damageElement: 'physical', stats: { magicHit: -10, mpRegen: -3 }, turns: 3, maxStacks: 1 }
         ]
       }
     ],
@@ -1075,7 +1075,7 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
         attackCategory: 'melee',
         displayElement: 'poison',
         effects: [
-          { type: 'dot', appliesTo: 'target', damageElement: 'poison', damagePerRound: 10, rounds: 3 }
+          { type: 'dot', appliesTo: 'target', damageElement: 'poison', damagePerTurn: 10, turns: 3 }
         ]
       }
     ],
@@ -1101,7 +1101,7 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
       { name: 'Venomous', damageElement: 'poison', trigger: {
         when: 'attacking', on: 'hit', categories: ['melee'], chance: 60,
         effects: [
-          {type: 'dot', appliesTo: 'target', damageElement: 'poison', damagePerRound: 5, rounds: 3, maxStacks: 3 }]
+          {type: 'dot', appliesTo: 'target', damageElement: 'poison', damagePerTurn: 5, turns: 3, maxStacks: 3 }]
       }}
     ],
     abilities: [
@@ -1126,7 +1126,7 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
         displayElement: 'physical',
         target: 'enemy',
         effects: [
-          { type: 'debuff', appliesTo: 'target', damageElement: 'physical', stats: { movement: -1, dodge: -5 }, rounds: 3, maxStacks: 3}
+          { type: 'debuff', appliesTo: 'target', damageElement: 'physical', stats: { movement: -1, dodge: -5 }, turns: 3, maxStacks: 3}
         ]
       }
     ],
@@ -1152,7 +1152,7 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
       { name: 'Spelleater', damageElement: 'shadow', trigger: {
         when: 'attacked', on: 'hit', categories: ['magic'], chance: 100,
         effects: [
-          {type: 'buff', appliesTo: 'caster', damageElement: 'shadow', stats: { shadowDamage: 3, armor: 5 }, rounds: 3 }]
+          {type: 'buff', appliesTo: 'caster', damageElement: 'shadow', stats: { shadowDamage: 3, armor: 5 }, turns: 3 }]
       }}
     ],
     abilities: [

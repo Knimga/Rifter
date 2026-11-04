@@ -1,8 +1,11 @@
-﻿// A dungeon zone's scenery as the map draws it: the ground its terrain covers, its obstacles (placed by the game:
-// ZoneData.obstacles) and its clutter (placed here, by the view: forge/terrain/clutter.ts). Shared by the game's map
-// (DungeonMap) and the forge's Dungeons view, which also draws objects whose design is still a draft.
+﻿// A dungeon zone's scenery as the map draws it: the ground its terrain covers, its doors and rift, its obstacles (placed
+// by the game: ZoneData.obstacles) and its clutter (placed here, by the view: forge/terrain/clutter.ts). Shared by the
+// game's map (DungeonMap), the forge's Maps view (which also draws objects whose design is still a draft) and forge:sheet.
 import type { ModelLink } from '../forge/core/types';
-import { yawFromGridMove } from '../forge/core/facing';
+import type { RGB } from '../forge/core/vec';
+import { facingOpenSide, yawFromGridMove } from '../forge/core/facing';
+import { interactiveObjectModel } from '../data/world/interactiveObjects';
+import { RIFT_MODELS, SANCTUM_RIFT_COLOR } from '../data/world/rifts';
 import { placeClutter, type ClutterKind } from '../forge/terrain/clutter';
 import { decorObject, type DecorObjectData } from '../data/world/decorObjects';
 import type { ClutterConfig, DungeonConfig, ZoneData } from '../data/world/dungeonGen';
@@ -19,13 +22,25 @@ export interface SceneryObject {
   facing: number;
   size?: readonly [number, number];
   look?: string;
+  tint?: RGB;
 }
+
+/** Whether a zone's tile is floor (a door or the rift faces the floor it opens onto). */
+const floorOf = (zone: ZoneData) => (p: Pos) => zone.floors.has(posKey(p));
+
+/** A zone's doors: its dungeon's door model (`doorObject`, an interactive object), each in its wall tile facing the floor it opens onto. */
+export const doorObjects = (zone: ZoneData, doorObject: string): SceneryObject[] =>
+  zone.doors.map((d) => ({ id: d.id, link: interactiveObjectModel(doorObject), pos: d.pos, facing: facingOpenSide(d.pos, floorOf(zone)) }));
+
+/** A zone's rift back to the Sanctum, at `pos`: the Rift in SANCTUM_RIFT_COLOR, facing the floor it opens onto. */
+export const riftObject = (zone: ZoneData, pos: Pos, id: string): SceneryObject =>
+  ({ id, link: RIFT_MODELS.rift.model, pos, facing: facingOpenSide(pos, floorOf(zone)), tint: SANCTUM_RIFT_COLOR });
 
 /** The tiles a zone's terrain draws as open ground: its floor, and its obstacles' tiles (they stand on floor). */
 export const zoneGround = (zone: ZoneData): ReadonlySet<string> =>
   zone.obstacles.length ? new Set([...zone.floors, ...zone.obstacles.flatMap((o) => o.tiles.map(posKey))]) : zone.floors;
 
-/** The model a decorative object is drawn with ('' none): its own (the game), or a draft's (the forge's Dungeons view). */
+/** The model a decorative object is drawn with ('' none): its own (the game), or a draft's (the forge's Maps view). */
 export type DecorLink = (o: DecorObjectData) => ModelLink;
 export const gameDecorLink: DecorLink = (o) => o.model;
 

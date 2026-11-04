@@ -1,6 +1,6 @@
 // Model for Rogue (data/units/classes.ts › rogue). Holds the member's weapon (src/forge/equip.ts).
 // Same body and pose as the Knight, but no armor: a slim dark gray jerkin, dark trousers and boots, and a
-// near-black shawl wrapped around the shoulders and neck, pulled up over the mouth, with its black hood up
+// near-black shawl wrapped around the shoulders and neck in thick bunched folds, pulled up over the mouth, with its black hood up
 // over the head (a lip framing the face). Slightly darker skin.
 import type { Design } from '../../core/types';
 import { box } from '../../core/primitives';
@@ -18,7 +18,7 @@ const design: Design = {
   id, label, source,
   category: 'character',
   fit: { kind: 'standing', height: CHARACTER_HEIGHT, maxRadius: 0.54 },
-  budget: 1200,
+  budget: 1600,
   build(c) {
     const m = c.mesh;
     buildBody(m, {
@@ -31,8 +31,9 @@ const design: Design = {
 
     fittedJerkin(m, JERKIN, [40, 32, 28], BUCKLE);
 
-    // Shawl pulled up over the mouth, with a loose end hanging over the left shoulder
-    shawl(m, SHAWL, true);
+    // Shawl lying on the shoulders in bunched folds, pulled up over the mouth, with a loose end hanging over the
+    // left shoulder
+    shawl(m, SHAWL, true, true);
     const s0 = m.faces.length;
     box(m, [0, -0.13, 0], [0.075, 0.26, 0.022], SHAWL, 0.15);
     const tail: Vec3 = [0.12, TORSO.shoulder - 0.02, 0.13];

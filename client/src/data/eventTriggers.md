@@ -1,4 +1,4 @@
-# Event triggers
+﻿# Event triggers
 
 A **trigger** makes a unit react to events while a buff or debuff lasts. Examples are striking back when parried, poisoning on a hit, or rewarding a healer. The same rules apply to party members, summons and enemies.
 
@@ -6,7 +6,7 @@ The types are in [`combat/abilities.ts`](combat/abilities.ts) (`Trigger`, `Trigg
 
 ## Where a trigger goes
 
-A trigger lives on a `buff` or `debuff` effect of an ability, in its `trigger` field. The buff's `rounds` is how long the trigger lasts. `stats` / `statsPercent` are optional, so a buff can be only a trigger.
+A trigger lives on a `buff` or `debuff` effect of an ability, in its `trigger` field. The buff's `turns` is how long the trigger lasts (its bearer's turns). `stats` / `statsPercent` are optional, so a buff can be only a trigger.
 
 - **On a buff,** the trigger goes on the unit the buff lands on: an ally, or the caster with `target: 'self'`.
 - **On a debuff,** it goes on an enemy, only if the attack hits. The enemy then reacts as the *bearer*, for example punishing itself whenever it attacks.
@@ -31,7 +31,7 @@ passiveTriggers: [
 - **Same rules otherwise:** chance, events, recipients, no chains and threat all work as for a trigger buff, and the same load warnings apply.
 - **Shown:** a class's passive triggers are listed with its passives on the character select screen, in words.
 
-**Triggers never stack.** A buff or debuff with a trigger counts as `maxStacks: 1`, stats included: casting it again on the same unit, by anyone, replaces the one already there. The new one starts its full `rounds` again, and its `source` is the newest caster. Setting `maxStacks` above 1 on it is warned about at load. (Without a trigger, a buff or debuff stacks without limit unless it sets `maxStacks`. At the cap, the oldest stack is replaced.)
+**Triggers never stack.** A buff or debuff with a trigger counts as `maxStacks: 1`, stats included: casting it again on the same unit, by anyone, replaces the one already there. The new one starts its full `turns` again, and its `source` is the newest caster. Setting `maxStacks` above 1 on it is warned about at load. (Without a trigger, a buff or debuff stacks without limit unless it sets `maxStacks`. At the cap, the oldest stack is replaced.)
 
 ## `Trigger` fields
 
@@ -56,7 +56,7 @@ passiveTriggers: [
 **What counts as an event:**
 - **Attacks:** an attack event comes from an `enemy`-target ability. An area attack makes one event per unit it rolls against.
 - **Self-heals:** a self-heal is both a `'healing'` and a `'healed'` event.
-- **Not events:** HoT and DoT ticks, which happen at the top of the round.
+- **Not events:** HoT and DoT ticks, which happen at the start of their bearer's turn.
 
 ## Effects (`TriggerEffect`)
 
@@ -86,7 +86,7 @@ Inside a trigger, `appliesTo` is read from the bearer's side:
 - **Heals** are flat, plus the recipient's `healingReceived`. A `heal` with `restoresMP: true` restores MP instead of HP.
 - **Self-cast buffs scale.** When the bearer cast the buff on itself (a Rogue's poison proc), its own bonuses count, the same way as for its abilities:
   - **Damage:** gets its damage bonus and penetration for that element. Physical damage counts as the category of the attack that set it off: melee, ranged, or magic for heal events.
-  - **DoTs:** get half the bonus per round.
+  - **DoTs:** get half the bonus per turn.
   - **Heals:** get its healing stat (a HoT gets half).
   - **Still no crit.** A buff someone else put on the bearer, and any debuff, stays flat.
 - **The bearer must still be alive** after the damage it has taken in this action so far. A defender killed by the hit doesn't strike back.
@@ -111,7 +111,7 @@ A self-buff: +10 parry, and every parried attack is answered with a weapon attac
       type: 'buff',
       appliesTo: 'target',
       stats: { parry: 10 },
-      rounds: 3,
+      turns: 3,
       trigger: {
         when: 'attacked',
         on: 'parry',
@@ -125,7 +125,7 @@ A self-buff: +10 parry, and every parried attack is answered with a weapon attac
 ```
 
 ### 2. Envenom: a chance to poison on melee hits
-A self-buff: each melee hit has a 30% chance to poison the target for 5 damage a round, for 3 rounds.
+A self-buff: each melee hit has a 30% chance to poison the target for 5 damage a turn, for 3 turns.
 
 ```ts
 {
@@ -139,13 +139,13 @@ A self-buff: each melee hit has a 30% chance to poison the target for 5 damage a
     {
       type: 'buff',
       appliesTo: 'target',
-      rounds: 4,
+      turns: 4,
       trigger: {
         when: 'attacking',
         categories: ['melee'],
         chance: 30,
         effects: [
-          { type: 'dot', appliesTo: 'target', damageElement: 'poison', damagePerRound: 5, rounds: 3 },
+          { type: 'dot', appliesTo: 'target', damageElement: 'poison', damagePerTurn: 5, turns: 3 },
         ],
       },
     },
@@ -154,7 +154,7 @@ A self-buff: each melee hit has a 30% chance to poison the target for 5 damage a
 ```
 
 ### 3. Shared Light: a heal-event buff that rewards its caster
-Cast on an ally. Whenever that ally is healed by anyone, the one healed gets +5 armor for 2 rounds, and the caster of Shared Light regains 3 MP.
+Cast on an ally. Whenever that ally is healed by anyone, the one healed gets +5 armor for 2 turns, and the caster of Shared Light regains 3 MP.
 
 ```ts
 {
@@ -168,11 +168,11 @@ Cast on an ally. Whenever that ally is healed by anyone, the one healed gets +5 
     {
       type: 'buff',
       appliesTo: 'target',
-      rounds: 4,
+      turns: 4,
       trigger: {
         when: 'healed',
         effects: [
-          { type: 'buff', appliesTo: 'caster', stats: { armor: 5 }, rounds: 2 },
+          { type: 'buff', appliesTo: 'caster', stats: { armor: 5 }, turns: 2 },
           { type: 'heal', appliesTo: 'source', damageElement: 'holy', minHeal: 3, maxHeal: 3, restoresMP: true },
         ],
       },

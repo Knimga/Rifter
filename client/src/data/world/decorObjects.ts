@@ -25,7 +25,8 @@ export interface DecorObjectData {
   /**
    * How many tiles it fills side by side across the way it faces (its placed tile in the middle; spanTiles in
    * data/world/sanctum.ts): 1 (default) for one tile, e.g. 3 for a long shelf against a wall. Its design is built that
-   * many tiles wide.
+   * many tiles wide. Clutter fills no tiles: its span is only how far its design may reach along its wall or floor
+   * (a large faded wall sigil, 3).
    */
   span?: number;
   placement?: DecorPlacement;
@@ -51,6 +52,12 @@ export const DECOR_OBJECTS: DecorObjectData[] = [
   // The enchanter's stores: a dark wood treasure chest, and in front of it a very small barrel heaped with affix shards
   // to one side and a few small tied sacks to the other
   { id: 'enchanters-supplies', name: "Enchanter's Supplies", model: 'decor.enchanters-supplies' },
+  // A round wooden table strewn with open tomes and a stack of them, a candle lit for reading, and a single chair
+  // pulled out and turned aside, as if someone just got up from it
+  { id: 'round-reading-table', name: 'Round Reading Table', model: 'decor.round-reading-table' },
+  // A waist-high bookshelf, its back against a wall: tomes and scrolls on its shelves (some leaning, some held by a
+  // bookend), and on top a small glowing crystal ball, a few small crystals and a loose scroll or two
+  { id: 'sages-bookshelf', name: "Sage's Bookshelf", model: 'decor.sages-bookshelf' },
 
   // ── Wall clutter ──
   // Grey cobwebs strung in the corner where the wall meets the floor, and a strand or two higher up
@@ -63,6 +70,10 @@ export const DECOR_OBJECTS: DecorObjectData[] = [
   { id: 'bracket-fungus', name: 'Bracket Fungus', model: 'decor.bracket-fungus', placement: 'wall' },
   // Deep claw marks raked across the wall, rubble fallen at its foot
   { id: 'claw-scratches', name: 'Claw Scratches', model: 'decor.claw-scratches', placement: 'wall' },
+  // An ancient ward carved into the wall, faded almost to nothing, in the Large Arcane Seal's manner: one of several
+  // forms, small ones within the wall, large ones cut off by the floor or the wall's top. It reaches up to a tile and a
+  // half either way along the wall (span 3). Placed by hand, in the Sanctum
+  { id: 'faded-wall-sigil', name: 'Faded Wall Sigil', model: 'decor.faded-wall-sigil', placement: 'wall', span: 3 },
 
   // ── Ground clutter ──
   { id: 'scattered-bones', name: 'Scattered Bones', model: 'decor.scattered-bones', placement: 'ground' },
@@ -73,6 +84,8 @@ export const DECOR_OBJECTS: DecorObjectData[] = [
   { id: 'mushroom-cluster', name: 'Mushroom Cluster', model: 'decor.mushroom-cluster', placement: 'ground' },
   { id: 'fallen-log', name: 'Fallen Log', model: 'decor.fallen-log', placement: 'ground' },
   { id: 'low-shrub', name: 'Low Shrub', model: 'decor.low-shrub', placement: 'ground' },
+  // An ancient arcane seal carved into the floor across 5 x 5 tiles: rings, leylines and runes, black and worn. Placed by hand
+  { id: 'large-arcane-seal', name: 'Large Arcane Seal', model: 'decor.large-arcane-seal', placement: 'ground', span: 5, depth: 5 },
   { id: 'smoldering-embers', name: 'Smoldering Embers', model: 'decor.smoldering-embers', placement: 'ground' },
 
   // ── Obstacles ──
@@ -96,6 +109,15 @@ export function decorObject(id: string): DecorObjectData {
 
 /** The model of a decorative object, by id. */
 export const decorObjectModel = (id: string): ModelLink => decorObject(id).model;
+
+/**
+ * Whether a decorative object fills its tiles (nobody walks onto them): furniture and obstacles do; clutter (placement
+ * 'wall' or 'ground': a wall torch, bones) doesn't, wherever it is placed, by hand or by a dungeon.
+ */
+export const decorBlocks = (id: string): boolean => {
+  const placement = decorObject(id).placement;
+  return placement !== 'wall' && placement !== 'ground';
+};
 
 /** How many tiles a decorative object fills across its front (DecorObjectData.span). */
 export const decorObjectSpan = (id: string): number => decorObject(id).span ?? 1;

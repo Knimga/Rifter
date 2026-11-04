@@ -66,7 +66,7 @@ export function getGearBuffs(gear: GearSlots): ActiveBuff[] {
       id: `gear_${slotIdx}_${i}`,
       stat: mod.stat,
       amount: mod.value,
-      roundsRemaining: Infinity,
+      turnsLeft: Infinity,
     }));
   });
 }

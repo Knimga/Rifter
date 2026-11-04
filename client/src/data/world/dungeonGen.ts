@@ -1182,7 +1182,7 @@ const LAYOUT_TRIES = 10;
 
 /**
  * Options for generating a dungeon: which decorative objects may be placed (default: those with a design,
- * hasDecorDesign); the forge's Dungeons view also places ones whose design is still a draft.
+ * hasDecorDesign); the forge's Maps view also places ones whose design is still a draft.
  */
 export interface GenOptions {
   placeable: (o: DecorObjectData) => boolean;

@@ -129,6 +129,7 @@ interface ItemTooltipProps {
   proficient?: boolean;           // false marks the item type pink: the viewer can't use it
   clickAction?: ItemClickAction;  // shows the right-click hint
   canCompare?: boolean;           // shows the Ctrl "Compare" hint (the viewer can equip it: equipCompare)
+  canCompareOther?: boolean;      // shows the Ctrl+Alt "Other ring" hint (it goes in either of two slots: a ring)
   trade?: ItemTrade;              // its price and trade action (the vendor window), in place of its sell value
   /** While comparing: what equipping it changes (equipCompare): a weapon's damage, then the stats it adds and removes, at the very bottom. */
   compare?: Pick<EquipCompare, 'deltas' | 'damage'>;
@@ -168,7 +169,7 @@ export function KeyHint({ keyName, children, className = '' }: { keyName: string
  * armor), rolled affixes, what it sells for, then the hints: right-click at the left, Ctrl to compare at the right.
  * While comparing, how equipping it changes the stats comes last: gains green, losses red.
  */
-function ItemTip({ item, type, proficient, clickAction, canCompare, trade, compare, affixTiers, children }: Omit<ItemTooltipProps, 'stats'> & { item: Item; type: string; children?: ReactNode }) {
+function ItemTip({ item, type, proficient, clickAction, canCompare, canCompareOther, trade, compare, affixTiers, children }: Omit<ItemTooltipProps, 'stats'> & { item: Item; type: string; children?: ReactNode }) {
   return (
     <div className="w-[236px] box-border px-3.5 py-3 text-xs">
       <div className="font-display text-sm tracking-[0.03em]" style={{ color: RARITY_COLOR[item.rarity] }}>{item.name}</div>
@@ -206,6 +207,7 @@ function ItemTip({ item, type, proficient, clickAction, canCompare, trade, compa
           {canCompare && <KeyHint keyName="Ctrl" className="ml-auto">Compare</KeyHint>}
         </div>
       )}
+      {canCompareOther && <KeyHint keyName="Ctrl+Alt" className="mt-1 justify-end">Other ring</KeyHint>}
       {compare && (
         <div className="mt-2 pt-2 border-t border-rift-line text-[11px] leading-[1.6]">
           {compare.damage && <DamageDelta {...compare.damage} />}
@@ -261,16 +263,17 @@ function JewelryTooltipContent({ item, stats: _stats, ...rest }: ItemTooltipProp
 
 /**
  * An item's tooltip with, while `comparing` (Ctrl held), how equipping it changes the stats at its bottom, and
- * the equipped item's tooltip (if any) beside it on the right, bottoms aligned. The hovered one stays where it
+ * the equipped item's tooltip (if any) beside it on the right, bottoms aligned; with `other` too (Alt held), a ring
+ * against the other ring slot. The hovered one stays where it
  * would be alone. Each in its own tooltip frame (use with a `bare` Tooltip). `compareWith` runs only once the
  * tooltip shows; when it gives null (the viewer can't equip it), no comparing, just the item.
  */
-export function ItemCompareTooltip({ compareWith, comparing, ...props }: ItemTooltipProps & { item: Item; compareWith: (item: Item) => EquipCompare | null; comparing: boolean }) {
-  const compare = compareWith(props.item);
+export function ItemCompareTooltip({ compareWith, comparing, other, ...props }: ItemTooltipProps & { item: Item; compareWith: (item: Item, other: boolean) => EquipCompare | null; comparing: boolean; other: boolean }) {
+  const compare = compareWith(props.item, comparing && other);
   const on = comparing && compare;
   return (
     <div className="relative">
-      <div className="rf-tip text-sm overflow-hidden"><ItemTooltipContent {...props} canCompare={!!compare} compare={on ? compare : undefined} /></div>
+      <div className="rf-tip text-sm overflow-hidden"><ItemTooltipContent {...props} canCompare={!!compare} canCompareOther={!!compare?.hasOther} compare={on ? compare : undefined} /></div>
       {on && compare.equipped && (
         <div className="rf-tip text-sm overflow-hidden absolute left-full bottom-0 ml-2">
           <ItemTooltipContent item={compare.equipped} stats={props.stats} />

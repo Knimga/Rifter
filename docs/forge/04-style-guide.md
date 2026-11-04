@@ -41,9 +41,11 @@ their rarity glow is the renderer's, never the design's.
 ### Dungeon terrain
 Each dungeon's floor and walls (`DungeonConfig.terrain`, contract "Terrain") stay dark and low in saturation, so
 units, highlights and glows read over them; walls a touch lighter than the floor. Wall tops are almost black, faintly tinted
-with the wall's own hue (derived from its color, never set), and veins never run over them: solid rock running into the dark. Bright tops turned
+with the wall's own hue (derived from its color, never set), and veins never run over them: solid rock running into the dark. A wall face shows the wall's color only toward floor or a
+doorway; every other one (toward deep rock, a corner pillar over a stub) is drawn the same, so the map's outer edge
+and its corners are that same dark mass, not a lit wall facing nothing. Bright tops turned
 into a heavy grid of outlines around every room. Glowing veins are the one bright note, and only in
-dungeons whose creatures share that glow. First looks (judge them in `/dev/forge` → Dungeons):
+dungeons whose creatures share that glow. First looks (judge them in `/dev/forge` → Maps):
 - **The Crypt:** grey flagstones and coursed masonry.
 - **The Firelands:** red-black rough cave rock, cracked with glowing lava.
 - **The Fungal Forest:** damp olive rough rock, with dark moss in patches (not a bright green: it read as grass).
@@ -59,6 +61,11 @@ readable (densities around 0.05 on the floor, 0.1 on the walls). Light from it i
 one bright note, embers and spores a speck. Obstacles are bolder (they shape the room) but still dark, and tall
 sight-blocking ones read as solid masses (a trunk, a spire), see-through ones stay low (a sarcophagus, a lava spout's
 glow you can see past).
+
+### Wood
+Wood is always dark: start from `DARK_WOOD` (`designs/_decor.ts`) or darker (a lit top at most about 1.25x it), for
+furniture, crates, barrels, chairs and staffs alike. Never lighten wood so it reads on the floor; set its parts apart by
+shade, trim or what lies on it instead.
 
 ## Rules
 

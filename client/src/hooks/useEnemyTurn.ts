@@ -87,7 +87,7 @@ export function useEnemyTurn(
      * One step of its turn (enemyAI computeEnemyTurn: a move and/or an ability), then the next, until it has
      * no AP left or nothing useful to do. Each step plays out in three beats (move, show its target, land);
      * the first at ENEMY_STEP_PAUSE_MS each, follow-ups faster. Planned when the step starts, not when the
-     * turn does: the top-of-round tick (buffs running out, e.g. a stun on its AP) has landed by then, and
+     * turn does: its turn's start tick (regen, HoTs, DoTs: useTurnTicks) has landed by then, and
      * each step sees where everyone is after the last.
      */
     const step = (apSpent: number, paidTiles: number) => {

@@ -22,7 +22,15 @@ export const NPCS: NpcData[] = [
   { id: 'denisel', name: 'Denisel', title: 'Vendor', service: 'vendor', model: 'npc.denisel' },
   // The Sanctum's enchanter: enchants, disenchants and shatters gear, and trades shards (EnchanterWindow, gear/enchanting.ts)
   { id: 'ethela', name: 'Ethela', title: 'Enchanter', service: 'enchanting', model: 'npc.ethela' },
+  // An old sage: no service or dialogue yet (a quest-giver, later)
+  { id: 'ardas', name: 'Ardas', title: 'Sage', model: 'npc.ardas' },
 ];
+
+/**
+ * Whether the party can speak to an NPC: it offers a service. One without (Ardas, for now) ignores the party: it
+ * doesn't glow when the leader is beside it, and nothing happens when it is clicked.
+ */
+export const canTalkTo = (id: string): boolean => !!npc(id).service;
 
 /** An NPC by id. */
 export function npc(id: string): NpcData {

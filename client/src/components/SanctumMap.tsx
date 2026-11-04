@@ -3,75 +3,18 @@ import { FaCoins } from 'react-icons/fa';
 import { GiMagicPalm } from 'react-icons/gi';
 import type { TargetType } from '../data/combat/abilities';
 import { isAdjacent, posKey, samePos, type Pos } from '../data/world/grid';
-import { SANCTUM, SANCTUM_FLOORS, SANCTUM_RECEPTACLE, SANCTUM_SHOWN, SANCTUM_TERRAIN, isSanctumWall, sanctumNpcAt } from '../data/world/sanctum';
-import { npc, type NpcData } from '../data/world/npcs';
-import { decorObjectModel } from '../data/world/decorObjects';
-import { interactiveObjectGlow, interactiveObjectModel } from '../data/world/interactiveObjects';
+import { SANCTUM, SANCTUM_RECEPTACLE, isSanctumWall, sanctumNpcAt } from '../data/world/sanctum';
+import { canTalkTo, npc, type NpcData } from '../data/world/npcs';
+import { interactiveObjectGlow } from '../data/world/interactiveObjects';
 import { DUNGEONS, type DungeonKey } from '../data/world/dungeons';
 import { riftGlowCss } from '../data/world/rifts';
-import { yawFromGridMove } from '../forge/core/facing';
-import { buildTerrain } from '../forge/terrain/build';
-import { RIFTER_TINT_PARTS } from '../forge/designs/_rifter';
 import { Board, FloorGrid, FloorTile, HoverEdgeGlow, MapFloats, MoveLineOverlay, ObjectTag, RIFT_TAG_HEIGHT, TileHighlight, UsableGlow, riftTag, toMapMember, useBoard, useHoveredTile, useStableHandler, type PartyTokenData } from './mapParts';
-import type { MapObject, UnitAim, UnitFx } from './ModelLayer';
-import type { FogInput } from '../viewEngine/three/fog';
+import type { UnitAim, UnitFx } from './ModelLayer';
+import { SANCTUM_3D, SANCTUM_DECOR, SANCTUM_FOG, npcObjects, rifterObjects, type RifterState } from './sanctumScene';
 import type { FloatingText } from './FloatingCombatText';
 
 // 3D party models over the tile grid. Lazy: it pulls in three.js (GameScreen preloads it on mount).
 const ModelLayer = lazy(() => import('./ModelLayer'));
-
-/**
- * The Sanctum's fog: everything in it always in sight (its floor and the walls around it), so it only darkens the
- * wall mass beyond, as the dungeons' fog does at their edges. Not fog of war: nothing is hidden or explored, and it
- * never changes (`still`: its clouds don't drift as the party moves, so it costs nothing per frame). A constant:
- * the renderer takes it once.
- */
-const SANCTUM_FOG: FogInput = { cols: SANCTUM.width, rows: SANCTUM.height, visible: SANCTUM_SHOWN, explored: SANCTUM_SHOWN, still: true };
-
-/** The Sanctum's 3D floor and walls (forge/terrain): it never changes, so it is built once. */
-const SANCTUM_3D = buildTerrain({ cols: SANCTUM.width, rows: SANCTUM.height, floors: SANCTUM_FLOORS, doors: [], style: SANCTUM_TERRAIN, seed: 0 });
-
-/**
- * What the Rifter is doing: the key set in it (shown in its socket), the key whose rift it shows (null: dormant, no
- * rift), and where its rift is: opening (`activate`, waking it, or `reopen`, after a swap) or, swapping keys,
- * closing (`close`: the old key's rift collapsing while the new key is already in the socket).
- */
-export interface RifterState {
-  key: DungeonKey | null;
-  rift: DungeonKey | null;
-  phase: 'activate' | 'close' | 'reopen';
-}
-
-/** A dormant Rifter: no key set, no rift. */
-export const DORMANT_RIFTER: RifterState = { key: null, rift: null, phase: 'activate' };
-
-/** The animations each phase lists: activation stays listed (its lights stay awake) while the rift closes and reopens. */
-const PHASE_PLAYED: Record<RifterState['phase'], string[]> = {
-  activate: ['activate'], close: ['activate', 'close'], reopen: ['activate', 'reopen'],
-};
-
-/**
- * The Sanctum's interactive objects: the Rifter, drawn on its middle tile (its model spans all three). Dormant, or, a rift
- * open, the active model: its keystone in the set key's color, its rift in the rift's key's color (the two differ
- * while a swap's old rift closes), playing its phase's animations (activation plays as it swaps in).
- */
-const sanctumObjects = ({ key, rift, phase }: RifterState): MapObject[] => [{
-  id: 'rifter', pos: SANCTUM.rifter.pos, facing: yawFromGridMove(...SANCTUM.rifter.facing),
-  ...(rift && key
-    ? {
-        link: interactiveObjectModel('rifter-active'), played: PHASE_PLAYED[phase],
-        partTints: [
-          { color: DUNGEONS[key].riftColor, parts: RIFTER_TINT_PARTS.keystone },
-          { color: DUNGEONS[rift].riftColor, parts: RIFTER_TINT_PARTS.rift },
-        ],
-      }
-    : { link: interactiveObjectModel('rifter') }),
-}];
-
-/** The Sanctum's decorative objects: fixed, each on its middle tile facing its own way (its model spans its tiles). */
-const DECOR: MapObject[] = SANCTUM.decor.map((d, i) => ({
-  id: `decor-${i}-${d.id}`, link: decorObjectModel(d.id), pos: d.pos, facing: yawFromGridMove(...d.facing),
-}));
 
 /** How high (world tiles) an NPC's name tag sits: over a standing person's head (CHARACTER_HEIGHT 1.12). */
 const NPC_TAG_HEIGHT = 1.35;
@@ -82,15 +25,6 @@ const SERVICE_ICON: Record<NonNullable<NpcData['service']>, ReactNode> = {
   enchanting: <GiMagicPalm aria-hidden="true" className="w-3 h-3 shrink-0" style={{ color: 'var(--rift-enchant)' }} />,
 };
 const npcIcon = (data: NpcData) => (data.service ? SERVICE_ICON[data.service] : undefined);
-
-/**
- * The Sanctum's NPCs as fixed map objects, each facing its own way; one with an aim (npcAims) turns to it: to the
- * leader talking to it, then back to the tile in front of it.
- */
-const npcObjects = (npcAims: Record<string, UnitAim>): MapObject[] => SANCTUM.npcs.map((n) => ({
-  id: n.id, link: npc(n.id).model, pos: n.pos, facing: yawFromGridMove(...n.facing),
-  ...(npcAims[n.id] ? { aim: npcAims[n.id] } : {}),
-}));
 
 interface Props {
   playerPos: Pos;
@@ -135,8 +69,8 @@ export default function SanctumMap({ playerPos, activeMoverPos, party, moveTarge
   const memberByKey = useMemo(() => new Map(party.map(m => [posKey(m.pos), m])), [party]);
   // Party members drawn as their class models (HP/MP bars above their heads)
   const modelParty = useMemo(() => party.map(m => toMapMember(m)), [party]);
-  const rifterObjects = useMemo(() => sanctumObjects(rifter), [rifter.key, rifter.rift, rifter.phase]); // eslint-disable-line react-hooks/exhaustive-deps -- rifter tracked by its fields
-  const objects = useMemo(() => [...rifterObjects, ...DECOR, ...npcObjects(npcAims)], [rifterObjects, npcAims]);
+  const rifterNow = useMemo(() => rifterObjects(rifter), [rifter.key, rifter.rift, rifter.phase]); // eslint-disable-line react-hooks/exhaustive-deps -- rifter tracked by its fields
+  const objects = useMemo(() => [...rifterNow, ...SANCTUM_DECOR, ...npcObjects(npcAims)], [rifterNow, npcAims]);
   const canMoveTo = (p: Pos) => moveTargets.has(posKey(p));
 
   const handleClick = (p: Pos) => {
@@ -150,10 +84,10 @@ export default function SanctumMap({ playerPos, activeMoverPos, party, moveTarge
     }
     // Clicking a party member selects their action bar
     if (member) { onMemberSelect(member.partyIndex); return; }
-    // An NPC, the leader beside it: speak to it
+    // An NPC, the leader beside it: speak to it (if it has anything to say: canTalkTo)
     const standing = sanctumNpcAt(p);
     if (standing) {
-      if (isAdjacent(playerPos, p)) onTalkTo(standing.id);
+      if (isAdjacent(playerPos, p) && canTalkTo(standing.id)) onTalkTo(standing.id);
       return;
     }
     // The Rifter's receptacle, the leader beside it, opens its window
@@ -177,7 +111,8 @@ export default function SanctumMap({ playerPos, activeMoverPos, party, moveTarge
     // The receptacle glows while the leader can use it (beside it), stronger when hovered, like a dungeon door
     const isReceptacle = samePos(p, SANCTUM_RECEPTACLE) && isAdjacent(playerPos, p);
     // An NPC glows while the leader can speak to it (beside it), like the receptacle
-    const isNpcNear = !!sanctumNpcAt(p) && isAdjacent(playerPos, p);
+    const near = sanctumNpcAt(p);
+    const isNpcNear = !!near && canTalkTo(near.id) && isAdjacent(playerPos, p);
     const allyTarget = !isWall && activeTarget === 'ally' && memberByKey.has(posKey(p));
     return (
       <FloorTile key={posKey(p)} p={p} hover={hover} onClick={onTileClick}

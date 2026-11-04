@@ -5,8 +5,9 @@ import { useEffect, useState } from 'react';
 export function useKeyHeld(key: string): boolean {
   const [held, setHeld] = useState(false);
   useEffect(() => {
-    const down = (e: KeyboardEvent) => { if (e.key === key) setHeld(true); };
-    const up = (e: KeyboardEvent) => { if (e.key === key) setHeld(false); };
+    // Alt alone would move the browser's focus to its menu: the game keeps it
+    const down = (e: KeyboardEvent) => { if (e.key === key) { if (key === 'Alt') e.preventDefault(); setHeld(true); } };
+    const up = (e: KeyboardEvent) => { if (e.key === key) { if (key === 'Alt') e.preventDefault(); setHeld(false); } };
     const release = () => setHeld(false);
     window.addEventListener('keydown', down);
     window.addEventListener('keyup', up);

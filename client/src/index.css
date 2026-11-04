@@ -70,7 +70,7 @@
   --rift-levelup: #e2d496;   /* level-up cues and XP fill: "act now", deliberately not the --glow accent */
   --pulse-combat: #8a1a1a;   /* the dark red pulse around the screen's edge as combat begins (EdgePulse) */
   --rift-xp-track: #1a1c20;
-  --rift-fog: #050608;       /* fog of war over unseen tiles (read by the map renderer: viewEngine/three/fog.ts) */
+  --rift-fog: #000000;       /* fog of war over unseen tiles (read by the map renderer: viewEngine/three/fog.ts): the game screen's black, so its edges melt into it */
   --rift-ap-spent: #15161a;  /* a spent action point */
   --rift-ap-lost: #000000;   /* an action point lost to a debuff (stun) */
   --rift-ap-extra: #ffffff;  /* an extra action point from a buff (haste) */
@@ -131,9 +131,9 @@
   --rarity-rare: #6a5acd;
   --rarity-exquisite: #48d1cc;
 
-  /* Screen backgrounds (Backdrop): the menu screens' (under their --glow tint) and the game's (a little lighter at the centre, under the map) */
+  /* Screen backgrounds (Backdrop): the menu screens' (under their --glow tint) and the game's: pure black, the fog's color, so the fog's edges blend into it */
   --bg-menu: radial-gradient(ellipse 120% 100% at 50% 50%, #101215 0%, var(--rift-void) 62%, #040506 100%);
-  --bg-game: radial-gradient(ellipse 80% 70% at 50% 45%, #14171b 0%, #0b0c0f 70%, #060708 100%);
+  --bg-game: #000000;
 
   /* A floating box (tooltips, menus) */
   --shadow-float: 0 14px 32px rgba(0, 0, 0, 0.65), inset 0 1px 0 rgba(255, 255, 255, 0.04);
@@ -672,7 +672,7 @@ input, textarea { user-select: text; -webkit-user-select: text; }
 * {
   /* "10 4" is the hotspot: the arrow's tip within the 36x36 image. Without it the click point is the image's
      top-left corner, 10px left of and 4px above where the arrow points, and small buttons miss. */
-  cursor: url('/cursors/blue-cursor.png') 10 4, auto !important;
+  cursor: url('/cursors/gray-cursor.png') 10 4, auto !important;
   scrollbar-width: none;
 }
 

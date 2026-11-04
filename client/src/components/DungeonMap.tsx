@@ -7,10 +7,10 @@ import type { AreaType, TargetType } from '../data/combat/abilities';
 import type { ActiveBuff, ActiveHot, ActiveDot } from '../data/units/stats';
 import { bodyOf, isAlly, type EnemyInstance } from '../data/units/enemies';
 import type { DungeonChest, DungeonConfig, ZoneData } from '../data/world/dungeonGen';
-import { sceneryObjects, zoneGround } from './zoneScenery';
+import { doorObjects, riftObject, sceneryObjects, zoneGround } from './zoneScenery';
 import type { FogState } from '../hooks/useFogOfWar';
 import type { EnemyAoePreview } from '../hooks/useEnemyTurn';
-import { facingOpenSide, yawFromGridMove } from '../forge/core/facing';
+import { yawFromGridMove } from '../forge/core/facing';
 import { buildTerrain } from '../forge/terrain/build';
 import type { TerrainStyle } from '../forge/terrain/types';
 import { affectedKeys, areaCenter, isArea } from '../data/combat/areas';
@@ -180,14 +180,13 @@ export default function DungeonMap({ playerPos, activeMoverPos, party, moveTarge
     [zone.id, floors, doors, riftPos, chests, clutter], // eslint-disable-line react-hooks/exhaustive-deps -- the zone's layout, by its id and floor
   );
   const mapObjects = useMemo(() => {
-    const isFloor = (q: Pos) => floors.has(posKey(q));
-    const out: MapObject[] = doors.map(d => ({ id: d.id, link: interactiveObjectModel(doorObject), pos: d.pos, facing: facingOpenSide(d.pos, isFloor) }));
-    if (riftPos) out.push({ id: 'rift', link: RIFT_MODELS.rift.model, pos: riftPos, facing: facingOpenSide(riftPos, isFloor), tint: SANCTUM_RIFT_COLOR });
+    const out: MapObject[] = doorObjects(zone, doorObject);
+    if (riftPos) out.push(riftObject(zone, riftPos, 'rift'));
     for (const c of chests) {
       out.push({ id: c.id, link: interactiveObjectModel(c.object), pos: c.pos, facing: yawFromGridMove(...c.facing), played: emptiedChests.has(c.id) ? ['open'] : undefined });
     }
     return [...out, ...scenery];
-  }, [doors, floors, riftPos, doorObject, chests, emptiedKey, scenery]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [doors, floors, riftPos, doorObject, chests, emptiedKey, scenery]); // eslint-disable-line react-hooks/exhaustive-deps -- the zone by its doors and floor; emptied chests by their key
 
   // What aiming at a tile aims at: the large creature on it (all of it), else the tile (as aimPartyAction does)
   const enemyBodies = useMemo(() => modelEnemies.map(bodyOf), [modelEnemies]);

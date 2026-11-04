@@ -1,7 +1,7 @@
 import { bodyOf, isAlly, withEnemyBuffs, type EnemyInstance } from '../units/enemies';
 import type { ActiveDot, ActiveHot, Stats } from '../units/stats';
 import { bodyCenter, inRangeAndSight, type Pos } from '../world/grid';
-import { tickDots, tickDurations, tickHots, type ActionOutcome } from './abilityExecution';
+import { countDownTurns, tickDots, tickHots, type ActionOutcome } from './abilityExecution';
 import { AGGRO_RANGE, COMBAT_TEXT_COLOR } from '../constants';
 import { randInt } from '../random';
 
@@ -177,17 +177,24 @@ export function advanceTurn(
   };
 }
 
-/** One unit's top-of-round result: regen + HoT heals + DoT damage (after DR). Shared by party and enemies. */
-export interface RoundTick {
+// ─── Turn ticks ──────────────────────────────────────────────────────────────
+//
+// Every effect runs on its bearer's own turns: at the start of a unit's turn its regen, HoTs and DoTs tick
+// (turnStartTick); at the end, its effects count down a turn (countDownTurns), and a summon's time with them. So a
+// 1-turn debuff always weighs on its target's next turn, and a 1-turn self-buff lasts through everyone else's.
+// Out of combat (no turns), a timer runs a whole turn for everyone at once (useTurnTicks).
+
+/** One unit's start-of-turn tick: regen + HoT heals + DoT damage (after DR). Shared by party and creatures. */
+export interface TurnTick {
   hp: number;
   mp: number;
-  heal: number;                     // HoT healing this round
-  dotDamage: number;                // DoT damage to HP this round
-  mpDotDamage: number;              // DoT damage to MP this round (damagesMP DoTs)
+  heal: number;                     // HoT healing this turn
+  dotDamage: number;                // DoT damage to HP this turn
+  mpDotDamage: number;              // DoT damage to MP this turn (damagesMP DoTs)
   dotSources: Map<string, number>;  // threatKey → threat from the DoTs that unit applied
 }
 
-export function tickRound(stats: Stats, hp: number, mp: number, hots: ActiveHot[], dots: ActiveDot[]): RoundTick {
+export function turnStartTick(stats: Stats, hp: number, mp: number, hots: ActiveHot[], dots: ActiveDot[]): TurnTick {
   const heal = tickHots(hots, stats);
   const { damage, mpDamage, threatBySource } = tickDots(dots, stats);
   return {
@@ -205,43 +212,53 @@ export function tickRound(stats: Stats, hp: number, mp: number, hots: ActiveHot[
  * full (or unchanged). Such a unit is kept as the same object, so a quiet tick (out of combat, everyone
  * full) changes no state and redraws nothing. Shared by party and enemies.
  */
-export const tickChangesNothing = (tick: RoundTick, hp: number, mp: number, effects: { length: number }[]) =>
+export const tickChangesNothing = (tick: TurnTick, hp: number, mp: number, effects: { length: number }[]) =>
   tick.hp === hp && tick.mp === mp && effects.every(list => list.length === 0);
 
-/** Per-enemy tick event, used to spawn floating text and attribute DoT threat. */
-export interface EnemyTickEvent {
+/** A creature's tick, used to spawn floating text and attribute DoT threat. */
+export interface CreatureTickEvent {
   pos: Pos;
-  tick: RoundTick;
+  tick: TurnTick;
+}
+
+/** A creature's turn starting: its regen, HoTs and DoTs (turnStartTick). The same creature when nothing changes. */
+export function creatureTurnStart(e: EnemyInstance): { enemy: EnemyInstance; event: CreatureTickEvent | null } {
+  const tick = turnStartTick(e.stats, e.currentHp, e.currentMp, e.hots, e.dots);
+  if (tick.hp === e.currentHp && tick.mp === e.currentMp && !e.hots.length && !e.dots.length) return { enemy: e, event: null };
+  return { enemy: { ...e, currentHp: tick.hp, currentMp: tick.mp }, event: { pos: bodyCenter(bodyOf(e)), tick } };
 }
 
 /**
- * Apply all top-of-round effects to the creatures of zone `zoneId` (where the party is; the others wait, untouched):
- * buff expiry, regen, HoT and DoT ticks. A summoned creature's time runs down too (either side's): one whose
- * rounds run out vanishes (removed, listed in `vanished`).
+ * A creature's turn ending: its effects count down (countDownTurns; its stats follow its buffs), and a summoned
+ * creature's time with them (either side's): one whose time runs out `vanished` (the caller removes it).
  */
-export function applyTopOfRound(enemies: EnemyInstance[], zoneId: number): { enemies: EnemyInstance[]; events: EnemyTickEvent[]; vanished: EnemyInstance[] } {
-  const events: EnemyTickEvent[] = [];
-  const vanished = enemies.filter(e => e.zoneId === zoneId && e.summon && e.currentHp > 0 && e.summon.roundsLeft <= 1);
+export function creatureTurnEnd(e: EnemyInstance): { enemy: EnemyInstance; vanished: boolean } {
+  if (e.summon && e.summon.turnsLeft <= 1) return { enemy: e, vanished: true };
+  if (!e.summon && !e.buffs.length && !e.hots.length && !e.dots.length) return { enemy: e, vanished: false };
+  const buffs = countDownTurns(e.buffs);
+  const next = buffs.length !== e.buffs.length ? withEnemyBuffs(e, buffs) : { ...e, buffs };
+  return {
+    enemy: { ...next, hots: countDownTurns(e.hots), dots: countDownTurns(e.dots), ...(e.summon && { summon: { ...e.summon, turnsLeft: e.summon.turnsLeft - 1 } }) },
+    vanished: false,
+  };
+}
 
-  let changed = vanished.length > 0;
-  const updated = enemies.filter(e => !vanished.includes(e)).map(e => {
-    if (e.zoneId !== zoneId || e.currentHp <= 0) return e;
-    if (e.summon) {
-      changed = true;
-      e = { ...e, summon: { ...e.summon, roundsLeft: e.summon.roundsLeft - 1 } };
-    }
-
-    // Buff expiry first so regen/DR use the post-expiry stats
-    const buffs = tickDurations(e.buffs);
-    const next = buffs.length !== e.buffs.length ? withEnemyBuffs(e, buffs) : { ...e, buffs };
-
-    const tick = tickRound(next.stats, e.currentHp, e.currentMp, e.hots, e.dots);
-    if (tickChangesNothing(tick, e.currentHp, e.currentMp, [e.buffs, e.hots, e.dots])) return e;
-    changed = true;
-    events.push({ pos: bodyCenter(bodyOf(e)), tick });
-    return { ...next, currentHp: tick.hp, currentMp: tick.mp, hots: tickDurations(e.hots), dots: tickDurations(e.dots) };
+/**
+ * Out of combat, on a timer: a whole turn (its start, then its end) for every creature of zone `zoneId` (where the
+ * party is; the others wait, untouched). Vanished summons are removed and listed.
+ */
+export function applyRestTick(enemies: EnemyInstance[], zoneId: number): { enemies: EnemyInstance[]; events: CreatureTickEvent[]; vanished: EnemyInstance[] } {
+  const events: CreatureTickEvent[] = [], vanished: EnemyInstance[] = [];
+  let changed = false;
+  const updated = enemies.flatMap(e => {
+    if (e.zoneId !== zoneId || e.currentHp <= 0) return [e];
+    const start = creatureTurnStart(e);
+    if (start.event) events.push(start.event);
+    const end = creatureTurnEnd(start.enemy);
+    if (end.vanished) { vanished.push(e); changed = true; return []; }
+    if (end.enemy !== e) changed = true;
+    return [end.enemy];
   });
-
   // Nothing ticked: the same array, so the caller's state doesn't change
   return { enemies: changed ? updated : enemies, events, vanished };
 }

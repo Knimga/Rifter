@@ -7,19 +7,19 @@ import { PALE_CRYSTALS, WEAPON_ROLL, weaponEntry } from './_weapon';
 
 /**
  * A gnarled wooden staff a creature holds (sporemother.ts), from its foot at `base` to `top`: five segments that
- * wander a little (the seed's) and thin toward the top, with a knot at each inner joint. Returns the joints, foot
- * to top.
+ * wander a little (the seed's) and thin toward the top, with a knot at each inner joint (unless `knots` is false:
+ * Ardas's). Returns the joints, foot to top.
  */
-export function gnarledStaff(m: Mesh, rf: (a: number, b: number) => number, base: Vec3, top: Vec3, bark: RGB): Vec3[] {
-  const knots = [0, 0.22, 0.45, 0.68, 0.86, 1].map((t, i, all) => {
+export function gnarledStaff(m: Mesh, rf: (a: number, b: number) => number, base: Vec3, top: Vec3, bark: RGB, knots = true): Vec3[] {
+  const joints = [0, 0.22, 0.45, 0.68, 0.86, 1].map((t, i, all) => {
     const p = lerp3(base, top, t);
     return i === 0 || i === all.length - 1 ? p : add(p, [rf(-0.025, 0.025), 0, rf(-0.025, 0.025)]);
   });
-  for (let i = 0; i < knots.length - 1; i++) {
-    frustum(m, knots[i], knots[i + 1], 0.03 - i * 0.002, 0.028 - i * 0.002, 5, bark, { j: 0.2 });
-    if (i > 0) blob(m, knots[i], [0.034, 0.03, 0.034], 0, 0.25, mulC(bark, 1.15));
+  for (let i = 0; i < joints.length - 1; i++) {
+    frustum(m, joints[i], joints[i + 1], 0.03 - i * 0.002, 0.028 - i * 0.002, 5, bark, { j: 0.2 });
+    if (knots && i > 0) blob(m, joints[i], [0.034, 0.03, 0.034], 0, 0.25, mulC(bark, 1.15));
   }
-  return knots;
+  return joints;
 }
 
 /** Head size, relative to the shaft: the prongs and the crystal they cradle, together. */
