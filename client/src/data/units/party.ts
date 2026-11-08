@@ -1,7 +1,9 @@
 import { CLASSES, type ClassKey } from './classes';
 import { EMPTY_GEAR, generateArmor, generateOffhand, generateShield, generateWeapon, getGearArmorBonus, getGearBuffs, heldWeapon, isWeaponItem, type GearSlots, type Item, type WeaponItem } from '../gear';
 import { equipSlotFor, gearWith, isProficient, otherEquipSlot } from '../gear/inventory';
-import { ATTRIBUTE_KEYS, ATTRIBUTE_POINTS_PER_LEVEL, BUFFABLE_STATS, SKILL_KEYS, SKILL_POINTS_PER_LEVEL, recomputeStats, type ActiveBuff, type BuffableStat, type ActiveDot, type ActiveHot, type AttributeKey, type PlayerStatInput, type SkillKey, type Stats } from './stats';
+import type { PassiveEffect } from '../combat/abilities';
+import { unitKey } from '../combat/abilityExecution';
+import { ATTRIBUTE_KEYS, ATTRIBUTE_POINTS_PER_LEVEL, BUFFABLE_STATS, SKILL_KEYS, SKILL_POINTS_PER_LEVEL, isPassiveEntry, passiveEffectEntries, recomputeStats, type ActiveBuff, type BuffableStat, type ActiveDot, type ActiveHot, type AttributeKey, type PlayerStatInput, type SkillKey, type Stats } from './stats';
 import { getOffense } from '../combat/attackResolution';
 import { scaledRange } from '../random';
 
@@ -69,7 +71,11 @@ export interface EquipCompare {
 /** The gear's own stats, summed by stat: its implicits and affixes, and its armor. */
 function gearStatTotals(gear: GearSlots): Map<BuffableStat, number> {
   const totals = new Map<BuffableStat, number>([['armor', getGearArmorBonus(gear)]]);
-  for (const b of getGearBuffs(gear)) totals.set(b.stat, (totals.get(b.stat) ?? 0) + b.amount);
+  // Both threat stats are one 'Threat' to the player: a reduction counts against an increase, so a swap shows the net
+  for (const b of getGearBuffs(gear)) {
+    const stat = b.stat === 'reducedThreat' ? 'increasedThreat' : b.stat;
+    totals.set(stat, (totals.get(stat) ?? 0) + (stat === b.stat ? b.amount : -b.amount));
+  }
   return totals;
 }
 
@@ -122,10 +128,45 @@ export interface MemberState {
   dots: ActiveDot[];
 }
 
-/** A member at full HP and MP with no effects on them (a new game; back in the Sanctum after a party wipe). */
-export function freshMember(m: PartyMemberConfig, level: number): MemberState {
-  const s = memberStats(m, level, []);
-  return { hp: s.hp, mp: s.mp, buffs: [], hots: [], dots: [] };
+/**
+ * The passive effects a member has for good (PassiveEffect): its class's. The one place that decides them, so what else
+ * gives a member passives (a subclass) is added here.
+ */
+export const memberPassiveEffects = (m: PartyMemberConfig): readonly PassiveEffect[] => CLASSES[m.selectedClass].passiveEffects ?? [];
+
+/** The entries a member's passive effects make in its buffs, HoTs and DoTs (passiveEffectEntries); `idx`: its place in the party. */
+export const memberPassiveEntries = (m: PartyMemberConfig, idx: number) =>
+  passiveEffectEntries(memberPassiveEffects(m), unitKey({ side: 'party', idx }));
+
+/** Which passive effects a member has, as a key: what the member's stored entries are kept in step with (usePartyMembers). */
+export const memberPassivesKey = (m: PartyMemberConfig) => memberPassiveEffects(m).map(p => p.name).join('|');
+
+/**
+ * A member's lists with only the entries that last for good (isPassiveEntry: its passive effects) left: everything cast
+ * on it ends (it died, or left the location). The same object when nothing goes.
+ */
+export function withoutCastEffects(s: MemberState): MemberState {
+  const buffs = s.buffs.filter(isPassiveEntry), hots = s.hots.filter(isPassiveEntry), dots = s.dots.filter(isPassiveEntry);
+  return buffs.length === s.buffs.length && hots.length === s.hots.length && dots.length === s.dots.length ? s : { ...s, buffs, hots, dots };
+}
+
+/** A member's state with its passive entries replaced by the ones its passive effects make now (they changed); `idx`: its place in the party. */
+export function withCurrentPassives(s: MemberState, m: PartyMemberConfig, idx: number): MemberState {
+  const entries = memberPassiveEntries(m, idx);
+  const cast = withoutPassiveEntries(s);
+  return { ...s, buffs: [...cast.buffs, ...entries.buffs], hots: [...cast.hots, ...entries.hots], dots: [...cast.dots, ...entries.dots] };
+}
+
+/** A member's lists without the entries that last for good (what is cast on them stays). */
+const withoutPassiveEntries = (s: MemberState) => ({
+  buffs: s.buffs.filter(x => !isPassiveEntry(x)), hots: s.hots.filter(x => !isPassiveEntry(x)), dots: s.dots.filter(x => !isPassiveEntry(x)),
+});
+
+/** A member at full HP and MP with only its passive effects on them (a new game; back in the Sanctum after a party wipe). `idx`: its place in the party. */
+export function freshMember(m: PartyMemberConfig, level: number, idx: number): MemberState {
+  const entries = memberPassiveEntries(m, idx);
+  const s = memberStats(m, level, entries.buffs);
+  return { hp: s.hp, mp: s.mp, ...entries };
 }
 
 /** The member after gaining `levels` levels: ATTRIBUTE_POINTS_PER_LEVEL and SKILL_POINTS_PER_LEVEL more to spend per level. */

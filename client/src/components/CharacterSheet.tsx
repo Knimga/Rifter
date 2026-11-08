@@ -1,30 +1,33 @@
 // The party window: party rail, the member's model and equipment, the shared
 // inventory (or, its Shards tab, the party's affix shards, or its Keys tab, the keyring), and their attributes,
-// skills and stats (StatsPanel). Values raised or
+// skills and a panel with their stats (StatsPanel) or, its Abilities tab, their class's passives and abilities
+// (ClassKit); its Talents tab isn't available yet. Values raised or
 // lowered by gear, buffs and debuffs show green / red (a green one's tooltip says by how much), pulse yellow when
 // the gear changes them, and (the stats, not the attributes and skills themselves) glow yellow while placed
 // level-up points change them.
 // Level-up: the party's XP bar on the rail; a member with points to
 // spend is marked on the rail, gets a header banner (Reset, Confirm) and + / - on their attribute and skill
 // rows. Placed points stay pending (kept by GameScreen, so closing the window keeps them) until Confirm.
-import { lazy, Suspense, useMemo, useState, type ComponentType, type MouseEvent } from 'react';
-import { Crown, Shirt, Hand, Footprints, Sword, Shield, Gem, CircleDot } from 'lucide-react';
+import { lazy, Suspense, useMemo, useState, type MouseEvent } from 'react';
+import { FaSortAmountDown } from 'react-icons/fa';
 import { CLASSES } from '../data/units/classes';
-import { ATTRIBUTE_KEYS, SKILL_KEYS, recomputeStats, type ActiveBuff, type Stats } from '../data/units/stats';
-import { GEAR_SLOTS, getGearBuffs, type GearSlot, type Item } from '../data/gear';
+import { ATTRIBUTE_KEYS, SKILL_KEYS, isPassiveEntry, recomputeStats, type ActiveBuff, type BuffableStat, type Stats } from '../data/units/stats';
+import { GEAR_SLOTS, getGearBuffs, heldWeapon, type GearSlot, type Item } from '../data/gear';
 import { equipCompare, hasPointsToSpend, memberStatInput, memberStats, noPendingPoints, pointsLeft, spendPoints, type PartyMemberConfig, type PendingPoints } from '../data/units/party';
 import { xpToNext, type PartyProgress } from '../data/units/xp';
 import { INVENTORY_COLS, INVENTORY_SIZE, canEquip, canSwapGear, canUnequip, isProficient, type Inventory } from '../data/gear/inventory';
 import { AttributeTooltips, SkillTooltips, ATTR_LABEL, SLOT_LABEL, capitalize } from '../data/detailStrings';
-import { Tooltip, ItemTooltipContent, TextTip } from './Tooltip';
+import { Tooltip, ItemTooltipContent, TextTip, Hint } from './Tooltip';
 import ItemIcon, { rarityGlow } from './ItemIcon';
 import ItemGrid from './ItemGrid';
+import { SLOT_ICON, SLOT_POS } from './gearSlotLayout';
 import { sameSpot, useItemDrag, type ItemSpot } from '../hooks/useItemDrag';
 import Portrait from './hud/Portrait';
 import { PanelTitle } from './ui/Panel';
 import { XpBar } from './hud/XpBar';
 import { characterLookKey, characterModel, heldGear } from './characterModel';
 import StatsPanel, { GearChange, Val, type Shift, type StatShift } from './StatsPanel';
+import ClassKit from './ClassKit';
 import Keyring from './Keyring';
 import ShardsTab, { type ShardFilter } from './ShardsTab';
 import type { ShardCounts } from '../data/gear/shards';
@@ -64,8 +67,12 @@ interface Props {
   onUnequipItem?: (slot: GearSlot, charIdx: number, to?: number) => void;
   /** Move an inventory item to another slot (dragged there), trading places with any item there. */
   onMoveItem?: (from: number, to: number) => void;
+  /** Auto-sort the inventory by item kind (the button beside the gold). */
+  onSortItems?: () => void;
   /** Swap a member's items in two gear slots (one dragged onto the other: a ring to the other ring slot). */
   onSwapGear?: (from: GearSlot, to: GearSlot, charIdx: number) => void;
+  /** Gear can't be changed now (in combat): the Equipment panel says so (the gear handlers are then not given). */
+  gearLocked?: boolean;
   /** The party's shared level and XP. */
   progress: PartyProgress;
   /** Each member's placed, unconfirmed level-up points. */
@@ -78,26 +85,6 @@ interface Props {
 
 /** The window's design size (px); it scales down to fit smaller screens. */
 const WIDTH = 1296, HEIGHT = 830;
-
-const SLOT_ICON: Record<GearSlot, ComponentType<{ className?: string }>> = {
-  helm: Crown, chest: Shirt, gloves: Hand, boots: Footprints,
-  mainhand: Sword, offhand: Shield,
-  amulet: Gem, ring1: CircleDot, ring2: CircleDot,
-};
-
-// Grid position for each slot (col, row) in the 3×5 equipment grid: the head, the amulet under it, the hands
-// beside the chest, the rings beside the gloves, the boots at the bottom
-const SLOT_POS: Record<GearSlot, { col: number; row: number }> = {
-  helm:     { col: 2, row: 1 },
-  amulet:   { col: 2, row: 2 },
-  mainhand: { col: 1, row: 3 },
-  chest:    { col: 2, row: 3 },
-  offhand:  { col: 3, row: 3 },
-  ring1:    { col: 1, row: 4 },
-  gloves:   { col: 2, row: 4 },
-  ring2:    { col: 3, row: 4 },
-  boots:    { col: 2, row: 5 },
-};
 
 /** Level-up controls on an attribute or skill row. */
 interface PointControls {
@@ -175,10 +162,12 @@ function GearSlotBox({ slot, item: worn, stats, onUnequip, drag }: {
   );
 }
 
-export default function CharacterSheet({ party, partyHp, partyMp, partyStats, partyBuffs, inventory, gold, shards, keys, hasNewKey, onSeeKeys, hasNewShards, onSeeShards, onClose, onEquipItem, onUnequipItem, onMoveItem, onSwapGear, progress, pending: pendingAll, onPendingChange, onConfirmPoints }: Props) {
+export default function CharacterSheet({ party, partyHp, partyMp, partyStats, partyBuffs, inventory, gold, shards, keys, hasNewKey, onSeeKeys, hasNewShards, onSeeShards, onClose, onEquipItem, onUnequipItem, onMoveItem, onSortItems, onSwapGear, gearLocked = false, progress, pending: pendingAll, onPendingChange, onConfirmPoints }: Props) {
   const [selectedIdx, setSelectedIdx] = useState(0);
   // The Inventory panel's tab: the shared inventory, the party's shards, or the keyring
   const [tab, setTab] = useState<'items' | 'shards' | 'keys'>('items');
+  // The stats panel's tab: the member's stats, or their class's passives and abilities (kept when switching member)
+  const [detailsTab, setDetailsTab] = useState<'stats' | 'abilities'>('stats');
   const showKeys = () => { setTab('keys'); onSeeKeys(); };
   const showShards = () => { setTab('shards'); onSeeShards(); };
   // The Shards tab's selected category and Carried / All toggle: kept while the window stays open, and (the window
@@ -232,19 +221,38 @@ export default function CharacterSheet({ party, partyHp, partyMp, partyStats, pa
   // numbers: +Block counts toward Block, Evasion or Finesse on gear doesn't, though they raise it through their formulas);
   // the effects', the buffs and debuffs on that stat over that. Yellow: the placed, unconfirmed points change it (from
   // the member's confirmed stats).
+  // The class's passive effects (isPassiveEntry) are part of the class, like its flat passives: they count in the base
+  // and in every value below, never as an effect that raises or lowers
   const statInput = memberStatInput(shown, stats.level);
-  const baseStats = recomputeStats(statInput, []);
-  const unlowered = memberStats(shown, stats.level, buffs.filter(b => b.amount >= 0 && (b.percent ?? 0) >= 0));
+  const passives = buffs.filter(isPassiveEntry);
+  const effects = buffs.filter(b => !isPassiveEntry(b));
+  const baseStats = recomputeStats(statInput, passives);
+  const unlowered = memberStats(shown, stats.level, [...passives, ...effects.filter(b => b.amount >= 0 && (b.percent ?? 0) >= 0)]);
   const gearBuffs = getGearBuffs(gear);
-  const raised = new Set([...gearBuffs, ...buffs].filter(b => b.amount > 0 || (b.percent ?? 0) > 0).map(b => b.stat));
+  const raised = new Set([...gearBuffs, ...effects].filter(b => b.amount > 0 || (b.percent ?? 0) > 0).map(b => b.stat));
   /**
    * How a stat stands: `dir` −1 an effect lowers it, 1 gear or an effect on it (`stat`) raises it above its base, 0
    * neither (Val's colors); and what the gear and the effects on it add (its tooltip).
    */
+  // The stats with only the gear on a stat, and with the gear and effects on it, built once per stat (the panel asks
+  // for the same stat many times: a stat with no gear or effects on it is just the base, rebuilding nothing)
+  const statViews = new Map<BuffableStat, { gearOnly: Stats; withEffects: Stats }>();
+  const viewsOf = (stat: BuffableStat) => {
+    let views = statViews.get(stat);
+    if (!views) {
+      const onGear = gearBuffs.filter(b => b.stat === stat);
+      const onEffects = effects.filter(b => b.stat === stat);
+      const gearOnly = onGear.length ? recomputeStats(statInput, [...passives, ...onGear]) : baseStats;
+      const withEffects = onEffects.length ? recomputeStats(statInput, [...passives, ...onGear, ...onEffects]) : gearOnly;
+      statViews.set(stat, views = { gearOnly, withEffects });
+    }
+    return views;
+  };
   const shift: StatShift = (stat, get) => {
     const value = get(stats);
-    const gearOnly = get(recomputeStats(statInput, gearBuffs.filter(b => b.stat === stat)));
-    const withEffects = get(recomputeStats(statInput, [...gearBuffs, ...buffs].filter(b => b.stat === stat)));
+    const views = viewsOf(stat);
+    const gearOnly = get(views.gearOnly);
+    const withEffects = get(views.withEffects);
     return {
       value,
       dir: value < get(unlowered) ? -1 : raised.has(stat) && value > get(baseStats) ? 1 : 0,
@@ -349,7 +357,10 @@ export default function CharacterSheet({ party, partyHp, partyMp, partyStats, pa
                 </div>
 
                 <section aria-label="Equipment" className="rf-panel flex-none flex flex-col px-3.5 pt-3.5 pb-3">
-                  <PanelTitle variant="heading">Equipment</PanelTitle>
+                  <div className="flex items-baseline justify-between gap-3">
+                    <PanelTitle variant="heading">Equipment</PanelTitle>
+                    {gearLocked && <span className="text-[10px] tracking-[0.1em] uppercase text-rift-down">In combat</span>}
+                  </div>
                   <div className="flex-1 grid content-between mt-3.5 gap-x-6 gap-y-1.5" style={{ gridTemplateColumns: 'repeat(3, 84px)', gridTemplateRows: 'repeat(5, 48px)' }}>
                     {GEAR_SLOTS.map(slot => (
                       <GearSlotBox key={slot} slot={slot} item={gear[slot]} stats={stats}
@@ -378,7 +389,18 @@ export default function CharacterSheet({ party, partyHp, partyMp, partyStats, pa
                   </div>
                   {tab === 'keys'
                     ? <span className="text-xs text-rift-muted">{keys.length} {keys.length === 1 ? 'key' : 'keys'}</span>
-                    : <GoldAmount amount={gold} label="Party gold" className="text-xs text-rift-soft" />}
+                    : (
+                      <span className="flex items-center gap-2.5">
+                        {tab === 'items' && onSortItems && (
+                          <Hint text="Auto-sort Inventory">
+                            <button type="button" className="rf-pt" aria-label="Auto-sort Inventory" onClick={onSortItems}>
+                              <FaSortAmountDown aria-hidden="true" className="w-2.5 h-2.5" />
+                            </button>
+                          </Hint>
+                        )}
+                        <GoldAmount amount={gold} label="Party gold" className="text-xs text-rift-soft" />
+                      </span>
+                    )}
                 </div>
                 {tab === 'shards' ? (
                   <ShardsTab counts={shards} category={shardCategory} onCategory={setShardCategory} showAll={shardsAll} onShowAll={setShardsAll} />
@@ -422,7 +444,20 @@ export default function CharacterSheet({ party, partyHp, partyMp, partyStats, pa
                   </section>
                 </div>
 
-                <StatsPanel stats={stats} hp={hp} mp={mp} shift={shift} />
+                <section aria-label="General stats" className="rf-panel flex-1 min-h-0 p-3 flex flex-col">
+                  {/* Stats, Abilities, and Talents (not yet available): one tab shared by the members, so switching
+                      member keeps you comparing the same thing */}
+                  <div role="tablist" aria-label="Character details" className="flex-none flex items-baseline justify-between px-1.5 h-5">
+                    <button type="button" role="tab" aria-selected={detailsTab === 'stats'} className={`rf-h rf-tab ${detailsTab === 'stats' ? 'is-on' : ''}`} onClick={() => setDetailsTab('stats')}>Stats</button>
+                    <button type="button" role="tab" aria-selected={detailsTab === 'abilities'} className={`rf-h rf-tab ${detailsTab === 'abilities' ? 'is-on' : ''}`} onClick={() => setDetailsTab('abilities')}>Abilities</button>
+                    <Hint text="Talents unlock in a later update">
+                      <button type="button" role="tab" aria-selected={false} aria-disabled="true" className="rf-h rf-tab is-off">Talents</button>
+                    </Hint>
+                  </div>
+                  {detailsTab === 'stats'
+                    ? <StatsPanel stats={stats} hp={hp} mp={mp} shift={shift} />
+                    : <ClassKit classData={classData} level={stats.level} weapon={heldWeapon(gear)} />}
+                </section>
               </div>
             </GearChange>
           </div>

@@ -42,6 +42,12 @@ export interface MapUnit {
    */
   aim?: { x: number; y: number; seq: number };
   /**
+   * How its next move to a new tile plays, when `seq` is new (a movement ability): a 'dash' turns toward it, then glides
+   * there in `ms` (fast, whatever the distance); a 'blink' fades out where it stands and back in on the new tile over
+   * `ms` in all, without turning. A move with no new `seq` is a walk.
+   */
+  move?: { kind: 'dash' | 'blink'; ms: number; seq: number };
+  /**
    * The model's one-time animations (PartAnimation) the unit's state has called for, e.g. ['open'] for a
    * looted chest. One newly listed plays; one already listed when the unit appears shows its end pose.
    */
@@ -78,6 +84,10 @@ interface Entry {
   move?: { from: Pos; to: Pos; ms: number; t: number };
   /** Facing to turn to once the glide ends (an ability aimed mid-glide). */
   afterMoveYaw?: number;
+  /** The last movement-ability move it played (MapUnit.move's seq). */
+  moveSeq?: number;
+  /** A blink in progress (MapUnit.move): it fades out, appears at `to` halfway (`jumped`), and fades back in. */
+  blink?: { to: Pos; ms: number; t: number; jumped: boolean };
   /** Its played animations: time into each (ms) and its length; done when t >= ms. */
   anims: Record<string, { t: number; ms: number }>;
   /** See MapUnit.viewer. */
@@ -165,7 +175,6 @@ export class MapModelRenderer {
   /** Whether it has drawn a frame yet (onFirstFrame fires once, after it). */
   private drawn = false;
 
-  /** The terrain's floor, on its own canvas (created with the first terrain), drawn only when it or the board changes. */
   /**
    * The terrain's floor, on its own canvas (created with the first terrain), drawn only when it or the board changes.
    * `flats`: the flat objects lying on it (isFlat), drawn over it whatever its own relief (a carving on raised stones).
@@ -277,7 +286,7 @@ export class MapModelRenderer {
       if (!e) {
         // A new unit adopts any existing aim without turning to it (a remount never replays an old attack)
         const yaw = u.lying ? lootYaw() : (u.facing ?? 0);
-        e = { model: u.model, obj: makeObject(u, this.fog), pos: u.pos, at: { ...u.pos }, yaw, targetYaw: yaw, aimSeq: u.aim?.seq, anims: {}, viewer: u.viewer, size: typeof u.size === 'object' ? u.size : [u.size ?? 1, u.size ?? 1], flashSeq: u.flash, flashMs: 0, flat: isFlat(u) };
+        e = { model: u.model, obj: makeObject(u, this.fog), pos: u.pos, at: { ...u.pos }, yaw, targetYaw: yaw, aimSeq: u.aim?.seq, moveSeq: u.move?.seq, anims: {}, viewer: u.viewer, size: typeof u.size === 'object' ? u.size : [u.size ?? 1, u.size ?? 1], flashSeq: u.flash, flashMs: 0, flat: isFlat(u) };
         if (u.fadeIn) {
           e.fadeMs = 0;
           this.fog.fade(e.obj, 0);
@@ -291,13 +300,23 @@ export class MapModelRenderer {
         animateParts(e.obj, 0, progressOf(e));
         changed = true;
       } else if (u.pos.x !== e.pos.x || u.pos.y !== e.pos.y) {
-        // Turn toward the new tile (from where the model is drawn now, which matters mid-glide), then glide
-        const from = { ...e.at }, dx = u.pos.x - from.x, dy = u.pos.y - from.y;
-        e.targetYaw = yawFromGridMove(dx, dy);
-        const turnMs = (Math.abs(shortestAngle(e.yaw, e.targetYaw)) / Math.PI) * HALF_TURN_MS;
-        const ms = Math.max(1, Math.min(Math.hypot(dx, dy) * MS_PER_TILE, MAX_MOVE_MS - turnMs));
-        e.move = { from, to: u.pos, ms, t: 0 };
-        e.afterMoveYaw = undefined;
+        // A movement ability's move (a new `move`) plays as it asks; any other is a walk
+        const ability = u.move && u.move.seq !== e.moveSeq ? u.move : undefined;
+        if (u.move) e.moveSeq = u.move.seq;
+        if (ability?.kind === 'blink') {
+          // Fade out here, appear on the new tile halfway, fade back in (frame)
+          e.blink = { to: { ...u.pos }, ms: Math.max(2, ability.ms), t: 0, jumped: false };
+          e.move = undefined;
+          e.afterMoveYaw = undefined;
+        } else {
+          // Turn toward the new tile (from where the model is drawn now, which matters mid-glide), then glide
+          const from = { ...e.at }, dx = u.pos.x - from.x, dy = u.pos.y - from.y;
+          e.targetYaw = yawFromGridMove(dx, dy);
+          const turnMs = (Math.abs(shortestAngle(e.yaw, e.targetYaw)) / Math.PI) * HALF_TURN_MS;
+          const ms = ability ? Math.max(1, ability.ms) : Math.max(1, Math.min(Math.hypot(dx, dy) * MS_PER_TILE, MAX_MOVE_MS - turnMs));
+          e.move = { from, to: u.pos, ms, t: 0 };
+          e.afterMoveYaw = undefined;
+        }
         e.pos = u.pos;
         changed = true;
       }
@@ -344,7 +363,7 @@ export class MapModelRenderer {
 
   private removeObject(e: Entry): void {
     if (this.ground && e.obj.parent === this.ground.flats) this.ground.dirty = true;
-    if (e.fadeMs !== undefined) this.fog.fade(e.obj, 1); // drops its faded materials' copies
+    if (e.fadeMs !== undefined || e.blink) this.fog.fade(e.obj, 1); // drops its faded materials' copies
     e.obj.removeFromParent();
   }
 
@@ -392,6 +411,18 @@ export class MapModelRenderer {
           }
         }
         this.place(id, e);
+        animating = true;
+      }
+      if (e.blink) {
+        const b = e.blink, half = b.ms / 2;
+        b.t = Math.min(b.ms, b.t + dt);
+        if (!b.jumped && b.t >= half) {
+          b.jumped = true;
+          e.at = { ...b.to };
+          this.place(id, e);
+        }
+        this.fog.fade(e.obj, b.t >= b.ms ? 1 : b.t < half ? 1 - b.t / half : (b.t - half) / half);
+        if (b.t >= b.ms) e.blink = undefined;
         animating = true;
       }
       e.obj.rotation.y = e.yaw;

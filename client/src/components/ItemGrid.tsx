@@ -22,7 +22,7 @@ export interface CellMarks {
   isNew?: boolean;
 }
 
-export default function ItemGrid({ items, cols, size, canUse, action, onAction, stats, unusableNote, compareWith, trade, marks, tooltipBelow, label, leading, affixTiers, drag }: {
+export default function ItemGrid({ items, cols, size, canUse, action, onAction, stats, unusableNote, compareWith, trade, marks, tooltipBelow, label, leading, affixTiers, selected, drag }: {
   /** The items by slot (a gap is an empty slot); slots past the list's end are empty too. */
   items: readonly (Item | null)[];
   cols: number;
@@ -55,6 +55,11 @@ export default function ItemGrid({ items, cols, size, canUse, action, onAction, 
   leading?: ReactNode[];
   /** Its items' tooltips show their affixes in their groups' colors, with their tiers (the enchanter's window). */
   affixTiers?: boolean;
+  /**
+   * Items are picked, not moved (the enchanter's bench): whether the item at this slot is the picked one (it takes the
+   * bench's mark), and a focused item is picked with Enter or Space too.
+   */
+  selected?: (idx: number) => boolean;
   /** Dragging items (useItemDrag): the slot being dragged from (null: none), and a press on an item starting a drag. */
   drag?: { dragging: ItemSpot | null; start: (from: ItemSpot, e: PointerEvent<HTMLElement>) => void };
 }) {
@@ -78,12 +83,13 @@ export default function ItemGrid({ items, cols, size, canUse, action, onAction, 
           run();
         };
         const key = (e: KeyboardEvent) => {
-          if (deal && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); run(); }
+          if ((deal || selected) && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); run(); }
         };
-        const cls = `${usable ? '' : 'is-unusable'} ${mark.dim ? 'is-dim' : ''} ${mark.isNew ? 'is-new' : ''}`;
+        const picked = selected?.(i);
+        const cls = `${usable ? '' : 'is-unusable'} ${mark.dim ? 'is-dim' : ''} ${mark.isNew ? 'is-new' : ''} ${picked ? 'is-bench' : ''}`;
         const aria = deal
           ? `${item.name}, ${item.rarity}, ${deal.label} ${deal.price}${usable ? '' : unusableNote}${mark.isNew ? ', new' : ''}`
-          : `${item.name}${usable ? '' : unusableNote}`;
+          : `${item.name}${usable ? '' : unusableNote}${picked ? ', on the bench' : ''}`;
         const tip = { item, stats, proficient: usable, clickAction: act ?? undefined, trade: deal, affixTiers };
         return (
           // Keyed by slot, not item: when an item leaves and the next one moves into this slot, the tooltip
@@ -91,7 +97,7 @@ export default function ItemGrid({ items, cols, size, canUse, action, onAction, 
           <Tooltip key={i} gap={10} bare={!!compareWith} placement={tooltipBelow?.(i) ? 'below' : 'above'}
             content={compareWith ? <ItemCompareTooltip {...tip} compareWith={compareWith} comparing={comparing} other={otherSlot} /> : <ItemTooltipContent {...tip} />}>
             <div className={`rf-cell is-filled ${glow.className} ${cls}`} style={glow.style} aria-label={aria} {...drop}
-              tabIndex={deal ? 0 : undefined} onContextMenu={rightClick} onKeyDown={key} onPointerDown={drag ? (e) => drag.start({ kind: 'inventory', idx: i }, e) : undefined}>
+              tabIndex={deal || selected ? 0 : undefined} onContextMenu={rightClick} onKeyDown={key} onPointerDown={drag ? (e) => drag.start({ kind: 'inventory', idx: i }, e) : undefined}>
               <ItemIcon item={item} className="w-[30px] h-[30px]" />
               {deal && mark.isNew && <FaCoins aria-hidden className="rf-cell-coin" />}
             </div>

@@ -1,15 +1,15 @@
 // Rifts and keystones. Every rift has the same shape, and so does every keystone: one model each (forge section
 // "Rifts & Keys"), painted when drawn in the color of where it leads: a rift into a dungeon and that dungeon's
 // keystone in its color (DungeonConfig.riftColor), a rift back to the Sanctum (where the party arrives in a
-// dungeon, and past its boss) in SANCTUM_RIFT_COLOR. A new dungeon needs only its color.
+// dungeon, and past its boss, opening once the boss falls: riftShut) in SANCTUM_RIFT_COLOR. A new dungeon needs only its color.
 //
 // Rift keys (keystones, one per dungeon: DungeonConfig.keyName): the party keeps them on its keyring, apart from
-// the inventory, and never loses them (using one to open a rift doesn't use it up). It starts with the Crypt's;
-// every boss drops one the party doesn't have yet (none once it has them all).
+// the inventory, and never loses them (using one to open a rift doesn't use it up). It starts with none (the Crypt's
+// is found in the Dark Tunnel: STARTING_KEYS); every boss drops one the party doesn't have yet (none once it has them all).
 import type { ModelLink } from '../../forge/core/types';
 import type { RGB } from '../../forge/core/vec';
 import { DUNGEONS, type DungeonKey } from './dungeons';
-import type { QuestCondition } from './quests';
+import { quest, type QuestCondition, type QuestLog } from './quests';
 import { pick } from '../random';
 
 export interface RiftModelData {
@@ -45,6 +45,19 @@ export const ARRIVAL_PORTAL_COLOR: RGB = [104, 44, 200];
  * with her, or done). Until then its receptacle doesn't respond.
  */
 export const RIFTER_UNLOCK: QuestCondition = { reached: 'use-the-rifter', step: 'enter-rift' };
+
+/**
+ * TEMP (testing only): the party as it stands once Ileena has shown it the Rifter: its quests at "Use the Rifter",
+ * "Enter the Rift", and Ardas's Crypt key on its keyring (CharacterSelectScreen's "Skip to Sanctum").
+ */
+export const RIFTER_READY_START: { quests: QuestLog; keys: readonly DungeonKey[] } = {
+  quests: {
+    active: ['use-the-rifter'],
+    completed: ['escape-dark-tunnel', 'seek-ardas'],
+    steps: { 'use-the-rifter': (quest('use-the-rifter').steps ?? []).findIndex((s) => s.id === 'enter-rift') },
+  },
+  keys: ['crypt'],
+};
 
 /**
  * The key a boss drops: one of a dungeon the party has no key to yet (`owned`), and that isn't already lying

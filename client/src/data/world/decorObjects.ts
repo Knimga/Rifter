@@ -12,7 +12,7 @@ import type { ModelLink } from '../../forge/core/types';
  * - `ground`: ground clutter, small things lying on a floor tile; never blocks movement or sight. Purely visual.
  * - `obstacle`: fills its tiles (`span` x `depth`), standing free in a room; blocks movement, and sight if `blocksSight`.
  */
-export type DecorPlacement = 'wall' | 'ground' | 'obstacle';
+export type DecorPlacementKind = 'wall' | 'ground' | 'obstacle';
 
 export interface DecorObjectData {
   id: string;
@@ -29,7 +29,7 @@ export interface DecorObjectData {
    * (a large faded wall sigil, 3).
    */
   span?: number;
-  placement?: DecorPlacement;
+  placement?: DecorPlacementKind;
   /** An obstacle: how many tiles deep it is, front to back (default 1); its footprint is `span` x `depth`. */
   depth?: number;
   /** An obstacle: it blocks sight too (a tree trunk), not only movement (a sarcophagus, which can be seen over). */

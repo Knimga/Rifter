@@ -1,5 +1,5 @@
-import { bodyOf, isAlly, withEnemyBuffs, type EnemyInstance } from '../units/enemies';
-import type { ActiveDot, ActiveHot, Stats } from '../units/stats';
+import { bodyOf, creatureName, isAlly, withEnemyBuffs, type EnemyInstance } from '../units/enemies';
+import { runsDown, type ActiveDot, type ActiveHot, type Stats } from '../units/stats';
 import { bodyCenter, inRangeAndSight, type Pos } from '../world/grid';
 import { countDownTurns, tickDots, tickHots, type ActionOutcome } from './abilityExecution';
 import { AGGRO_RANGE, COMBAT_TEXT_COLOR } from '../constants';
@@ -47,7 +47,7 @@ const d20 = () => randInt(1, 20);
 /** A creature's place in the turn order (an enemy, or a creature summoned by either side), its initiative rolled. */
 const creatureCombatant = (e: EnemyInstance): Combatant => ({
   id: e.id,
-  name: e.classData.name,
+  name: creatureName(e),
   initiativeRoll: d20() + e.stats.initiative,
   isPlayer: false,
   ...(isAlly(e) ? { isAlly: true } : {}),
@@ -55,7 +55,7 @@ const creatureCombatant = (e: EnemyInstance): Combatant => ({
 
 /** Turn order: highest initiative first, the party first on a tie. */
 const byInitiative = (a: Combatant, b: Combatant) =>
-  b.initiativeRoll !== a.initiativeRoll ? b.initiativeRoll - a.initiativeRoll : a.isPlayer ? -1 : 1;
+  b.initiativeRoll - a.initiativeRoll || Number(b.isPlayer) - Number(a.isPlayer);
 
 /**
  * The enemies a party member at `pos` stirs: every unaggroed group with a living member within AGGRO_RANGE of it
@@ -68,9 +68,13 @@ export function aggroedBy(pos: Pos, zoneEnemies: EnemyInstance[], sight: Readonl
   return spotted.size ? zoneEnemies.filter(e => e.currentHp > 0 && !e.aggroed && spotted.has(e.groupId)) : [];
 }
 
+/**
+ * A fight beginning: everyone rolls initiative, the party's members and `creatures` (the enemies it stirred, and the
+ * party's forever summons there, which join every fight: isForeverSummon).
+ */
 export function startCombat(
   partyMembers: Array<{ stats: Stats; name: string }>,
-  aggroedEnemies: EnemyInstance[],
+  creatures: EnemyInstance[],
 ): CombatState {
   const combatants: Combatant[] = [
     ...partyMembers.map((m, i) => ({
@@ -80,7 +84,7 @@ export function startCombat(
       isPlayer: true,
       partyIndex: i,
     })),
-    ...aggroedEnemies.filter(e => e.currentHp > 0).map(creatureCombatant),
+    ...creatures.filter(e => e.currentHp > 0).map(creatureCombatant),
   ];
   combatants.sort(byInitiative);
 
@@ -208,12 +212,13 @@ export function turnStartTick(stats: Stats, hp: number, mp: number, hots: Active
 }
 
 /**
- * Whether a tick leaves a unit exactly as it was: no buffs, HoTs or DoTs to run down, and HP and MP already
- * full (or unchanged). Such a unit is kept as the same object, so a quiet tick (out of combat, everyone
- * full) changes no state and redraws nothing. Shared by party and enemies.
+ * Whether a tick leaves a unit exactly as it was: no buffs, HoTs or DoTs to run down (an aura's effects, which last
+ * while their unit is inside, don't: runsDown), and HP and MP already full (or unchanged). Such a unit is kept as the
+ * same object, so a quiet tick (out of combat, everyone full) changes no state and redraws nothing. Shared by party
+ * and enemies.
  */
-export const tickChangesNothing = (tick: TurnTick, hp: number, mp: number, effects: { length: number }[]) =>
-  tick.hp === hp && tick.mp === mp && effects.every(list => list.length === 0);
+export const tickChangesNothing = (tick: TurnTick, hp: number, mp: number, effects: readonly (readonly { turnsLeft: number }[])[]) =>
+  tick.hp === hp && tick.mp === mp && !effects.some(runsDown);
 
 /** A creature's tick, used to spawn floating text and attribute DoT threat. */
 export interface CreatureTickEvent {
@@ -224,7 +229,7 @@ export interface CreatureTickEvent {
 /** A creature's turn starting: its regen, HoTs and DoTs (turnStartTick). The same creature when nothing changes. */
 export function creatureTurnStart(e: EnemyInstance): { enemy: EnemyInstance; event: CreatureTickEvent | null } {
   const tick = turnStartTick(e.stats, e.currentHp, e.currentMp, e.hots, e.dots);
-  if (tick.hp === e.currentHp && tick.mp === e.currentMp && !e.hots.length && !e.dots.length) return { enemy: e, event: null };
+  if (tickChangesNothing(tick, e.currentHp, e.currentMp, [e.hots, e.dots])) return { enemy: e, event: null };
   return { enemy: { ...e, currentHp: tick.hp, currentMp: tick.mp }, event: { pos: bodyCenter(bodyOf(e)), tick } };
 }
 
@@ -233,12 +238,15 @@ export function creatureTurnStart(e: EnemyInstance): { enemy: EnemyInstance; eve
  * creature's time with them (either side's): one whose time runs out `vanished` (the caller removes it).
  */
 export function creatureTurnEnd(e: EnemyInstance): { enemy: EnemyInstance; vanished: boolean } {
-  if (e.summon && e.summon.turnsLeft <= 1) return { enemy: e, vanished: true };
-  if (!e.summon && !e.buffs.length && !e.hots.length && !e.dots.length) return { enemy: e, vanished: false };
+  // (a forever summon's time never runs out: it counts down like any creature's effects only)
+  const left = e.summon?.turnsLeft;
+  const timed = typeof left === 'number' ? left : null;
+  if (timed !== null && timed <= 1) return { enemy: e, vanished: true };
+  if (timed === null && ![e.buffs, e.hots, e.dots].some(runsDown)) return { enemy: e, vanished: false };
   const buffs = countDownTurns(e.buffs);
   const next = buffs.length !== e.buffs.length ? withEnemyBuffs(e, buffs) : { ...e, buffs };
   return {
-    enemy: { ...next, hots: countDownTurns(e.hots), dots: countDownTurns(e.dots), ...(e.summon && { summon: { ...e.summon, turnsLeft: e.summon.turnsLeft - 1 } }) },
+    enemy: { ...next, hots: countDownTurns(e.hots), dots: countDownTurns(e.dots), ...(e.summon && timed !== null && { summon: { ...e.summon, turnsLeft: timed - 1 } }) },
     vanished: false,
   };
 }

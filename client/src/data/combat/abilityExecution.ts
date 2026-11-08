@@ -1,13 +1,13 @@
-import type { Ability, Effect, PassiveTrigger, Trigger, TriggerOutcome } from './abilities';
+import type { Ability, Effect, Trigger, TriggerOutcome } from './abilities';
 import { mpCostAt } from './abilities';
-import { MIN_THREAT_MULTIPLIER, stackCap, stackKey, tickStack, type ActiveBuff, type ActiveDot, type ActiveHot, type BuffableStat, type Stats } from '../units/stats';
+import { MIN_THREAT_MULTIPLIER, auraToBuff, effectToBuffs, nextEffectSeq, pickDispelled, rootToBuff, tickStack, type ActiveBuff, type ActiveDot, type ActiveHot, type Stats } from '../units/stats';
 import type { AttackCategory, DamageElement, WeaponItem } from '../gear';
 import { WEAPON_TYPE_DATA } from '../gear/weapons';
 import { COMBAT_TEXT_COLOR, DAMAGE_ELEMENT_COLOR } from '../constants';
 import { applyDR, CRIT_MULTIPLIER, getOffense, rollCrit, rollDamage, rollHit, type HitOutcome, type Offense } from './attackResolution';
 import { randInt, rollScaled } from '../random';
 import { bodyCenter, bodyDistance, bodySight, type Pos } from '../world/grid';
-import { basicAttack, bodySize, isAlly, type EnemyInstance } from '../units/enemies';
+import { basicAttack, bodySize, creatureName, isAlly, type EnemyInstance } from '../units/enemies';
 import type { SummonRequest } from '../units/summons';
 
 // ─── Shared resolution for every ability used by a party member OR an enemy ──────
@@ -30,8 +30,11 @@ export interface CombatUnit {
   allied?: boolean;
   /** Its HP now (none: taken as alive): a unit this action has brought down sets off no triggers. */
   hp?: number;
-  /** Its active buffs: the triggers on it (ActiveBuff.trigger). */
+  /** Its active buffs: the triggers on it (ActiveBuff.trigger), and what a dispel can take. */
   buffs?: ActiveBuff[];
+  /** Its HoTs and DoTs now: what a dispel can take. */
+  hots?: ActiveHot[];
+  dots?: ActiveDot[];
   /** Its basic attack, for a trigger's weaponAttack: a party member's held weapon, a creature's basicAttack. */
   weaponAttack?: Ability;
 }
@@ -44,16 +47,16 @@ export const threatKey = (u: Pick<CombatUnit, 'ref' | 'allied'>): string | undef
   u.ref.side === 'party' || u.allied ? unitKey(u.ref) : undefined;
 
 /**
- * Party member `idx` as a combat unit (`name` blank falls back to 'Party[idx]'). `live`: its HP, buffs, held
- * weapon and its class's passive triggers now, for triggers (none: it sets off none of its own).
+ * Party member `idx` as a combat unit (`name` blank falls back to 'Party[idx]'). `live`: its HP, buffs (its passive
+ * effects among them) and held weapon now, for triggers (none: it sets off none of its own).
  */
 export const memberUnit = (idx: number, name: string | undefined, stats: Stats, pos: Pos,
-  live?: { hp: number; buffs: ActiveBuff[]; weapon: WeaponItem | null; passiveTriggers?: readonly PassiveTrigger[] }): CombatUnit => {
+  live?: { hp: number; buffs: ActiveBuff[]; hots?: ActiveHot[]; dots?: ActiveDot[]; weapon: WeaponItem | null }): CombatUnit => {
   const weaponAttack = live?.weapon ? toAction('weapon-attack', live.weapon) : null;
   const ref: UnitRef = { side: 'party', idx };
   return {
     ref, name: name || `Party[${idx}]`, stats, pos,
-    ...(live ? { hp: live.hp, buffs: [...live.buffs, ...passiveTriggerBuffs(live.passiveTriggers, unitKey(ref))] } : {}),
+    ...(live ? { hp: live.hp, buffs: live.buffs, hots: live.hots ?? [], dots: live.dots ?? [] } : {}),
     ...(weaponAttack ? { weaponAttack } : {}),
   };
 };
@@ -63,13 +66,15 @@ export const creatureUnit = (e: EnemyInstance): CombatUnit => {
   const weaponAttack = basicAttack(e.classData);
   return {
     ref: { side: 'enemy', id: e.id },
-    name: `${e.classData.name} (lv${e.level})`,
+    name: `${creatureName(e)} (lv${e.level})`,
     stats: e.stats,
     pos: e.pos,
     ...(e.classData.large ? { size: bodySize(e.classData) } : {}),
     hp: e.currentHp,
-    // Its buffs, and its kind's passive triggers (always on)
-    buffs: [...e.buffs, ...passiveTriggerBuffs(e.classData.passiveTriggers, e.id)],
+    // Its buffs: its kind's passive triggers (always on) are among them
+    buffs: e.buffs,
+    hots: e.hots,
+    dots: e.dots,
     ...(weaponAttack ? { weaponAttack } : {}),
     ...(isAlly(e) ? { allied: true } : {}),
   };
@@ -86,6 +91,8 @@ export interface UnitChange {
   buffs: ActiveBuff[];
   hots: ActiveHot[];
   dots: ActiveDot[];
+  /** Effects a dispel takes off it (their places: stats.ts pickDispelled), removed before the new ones above are added. */
+  dispelled: number[];
   /** Dies now, whatever its HP: the caster of a selfDestruct ability. */
   slain?: boolean;
 }
@@ -112,6 +119,11 @@ export interface ActionOutcome {
   threat: UnitThreat[];
   /** Creatures the caster summons (a 'summon' effect): placed and added to the fight where the outcome lands. */
   summons?: ActionSummon[];
+  /**
+   * A movement ability moved its caster (abilityMoves.ts executeMoveAction): to where, how many tiles it passed, and how
+   * it is drawn. The rest of the outcome is already worked out from there; whoever lands it places the unit.
+   */
+  move?: { ref: UnitRef; to: Pos; tiles: number; style: 'dash' | 'blink' };
 }
 
 /** A summon of the outcome; `by`: its summoner, when not the action's caster (a trigger's bearer). */
@@ -128,6 +140,9 @@ export interface ThreatChange {
 
 export const unitKey = (ref: UnitRef) => ref.side === 'party' ? `party-${ref.idx}` : ref.id;
 
+/** Which side of the fight a unit is on: the party's (members and their summoned allies), else the enemies'. */
+const onSide = (u: Pick<CombatUnit, 'ref' | 'allied'>): 'party' | 'enemy' => (u.ref.side === 'party' || u.allied ? 'party' : 'enemy');
+
 // ─── Effect helpers ───────────────────────────────────────────────────────────
 
 /**
@@ -139,56 +154,12 @@ export function countDownTurns<T extends { turnsLeft: number; fresh?: boolean }>
   return list.map(x => (x.fresh ? { ...x, fresh: undefined } : { ...x, turnsLeft: x.turnsLeft - 1 })).filter(x => x.turnsLeft > 0);
 }
 
-/** The last stack id handed out (effectToBuffs): each application of a buff or debuff effect gets its own. */
-let stackSeq = 0;
-
-/**
- * Build ActiveBuff entries from a buff/debuff Effect: one per stat changed, and one for its trigger. Debuff amounts
- * are always negative. `sourceKey`: the unitKey of who puts it on (a trigger's 'source'). The entries are one stack
- * (ActiveBuff.stack), capped when they land (addBuffs).
- */
-export function effectToBuffs(eff: BuffEffect, idPrefix: string, source: string, sourceKey: string): ActiveBuff[] {
-  const signed = (v: number) => eff.type === 'debuff' ? -Math.abs(v) : v;
-  const stack = { key: stackKey(source, eff), id: ++stackSeq, max: stackCap(eff) };
-  return ([
-    ...(Object.entries(eff.stats ?? {}) as [BuffableStat, number][]).map(([stat, amount]) => ({
-      id: `${idPrefix}-${stat}`, source, damageElement: eff.damageElement,
-      stat, amount: signed(amount), turnsLeft: eff.turns,
-    })),
-    ...(Object.entries(eff.statsPercent ?? {}) as [BuffableStat, number][]).map(([stat, pct]) => ({
-      id: `${idPrefix}-${stat}-pct`, source, damageElement: eff.damageElement,
-      stat, amount: 0, percent: signed(pct), turnsLeft: eff.turns,
-    })),
-    // A trigger changes no stat (like a root)
-    ...(eff.trigger ? [{
-      id: `${idPrefix}-trigger`, source, damageElement: eff.damageElement,
-      stat: 'movement' as const, amount: 0, turnsLeft: eff.turns,
-      trigger: { def: eff.trigger, sourceKey, debuff: eff.type === 'debuff' },
-    }] : []),
-  ] as ActiveBuff[]).map(b => ({ ...b, stack }));
-}
-
-/**
- * A unit's passive triggers (PassiveTrigger: its class's or creature's, always on) as trigger entries like a
- * trigger buff's, for its combat unit only (never stored on it, so they never run out or show as markers). Each is
- * its own bearer's (`ownerKey`): its effects on 'source' land on itself, and its own bonuses count.
- */
-export const passiveTriggerBuffs = (passives: readonly PassiveTrigger[] | undefined, ownerKey: string): ActiveBuff[] =>
-  (passives ?? []).map(p => ({
-    id: `passive-${p.name}-trigger`, source: p.name, damageElement: p.damageElement,
-    stat: 'movement', amount: 0, turnsLeft: Infinity,
-    trigger: { def: p.trigger, sourceKey: ownerKey, debuff: false },
-  }));
-
-/** A root (Effect 'root') as an ActiveBuff: no stat change, it just holds the unit in place (isRooted). */
-export const rootToBuff = (eff: Extract<Effect, { type: 'root' }>, idPrefix: string, source: string): ActiveBuff => ({
-  id: `${idPrefix}-root`, source, damageElement: eff.damageElement,
-  stat: 'movement', amount: 0, roots: true, turnsLeft: eff.turns,
-});
-
-/** Threat a root or a trigger generates when it lands (like a debuff's, which is its total stat change). */
+/** Threat a root, a trigger or an aura generates when it lands (like a debuff's, which is its total stat change). */
 const ROOT_THREAT = 5;
 const TRIGGER_THREAT = 5;
+const AURA_THREAT = 5;
+/** Threat each effect a dispel removes generates. */
+const DISPEL_THREAT = 5;
 
 /**
  * A DoT `actor` puts on someone with `eff`: half its damage bonus (`off`, as of the attack or scaled trigger result
@@ -198,6 +169,7 @@ const newDot = (name: string, eff: Extract<Effect, { type: 'dot' }>, actor: Comb
   name, damageElement: eff.damageElement, damagePerTurn: Math.floor(eff.damagePerTurn + (off?.damage ?? 0) / 2),
   turnsLeft: eff.turns, sourceKey: threatKey(actor),
   penetration: off?.penetration, elementPenetration: off?.elementPenetration, damagesMP: eff.damagesMP,
+  seq: nextEffectSeq(),
   ...tickStack(name, eff),
 });
 
@@ -321,7 +293,8 @@ export interface ActionWorld {
  * - target 'self':  ignored; its 'target' effects land on the caster (like its 'caster' ones)
  * - target 'tile':  ignored; `aimAt` is the tile (a summon appears there)
  * `allies` are the units on the caster's side in the ability's area (the caster too, if it stands in it):
- * its 'allies' effects land on each of them (areas.ts unitsInArea finds them).
+ * its 'allies' effects land on each of them (areas.ts unitsInArea finds them). An enemy-target ability's 'caster'
+ * effects land only if at least one of its hit rolls hits.
  * Triggers (abilities.ts Trigger) on the units involved fire as its hit rolls and heals happen, their results
  * landing in the same outcome.
  */
@@ -334,7 +307,7 @@ export function executeAction(caster: CombatUnit, action: Ability, targets: Comb
   const changeFor = (u: CombatUnit): UnitChange => {
     const key = unitKey(u.ref);
     let c = changes.get(key);
-    if (!c) changes.set(key, c = { ref: u.ref, damage: 0, heal: 0, mpSpent: 0, mpRestored: 0, buffs: [], hots: [], dots: [] });
+    if (!c) changes.set(key, c = { ref: u.ref, damage: 0, heal: 0, mpSpent: 0, mpRestored: 0, buffs: [], hots: [], dots: [], dispelled: [] });
     return c;
   };
   /** The threat change of a unit acting in this action (the caster, or a trigger's bearer). */
@@ -409,6 +382,7 @@ export function executeAction(caster: CombatUnit, action: Ability, targets: Comb
         c.hots.push({
           name: o.ability, damageElement: eff.damageElement,
           healPerTurn: bonuses ? Math.floor(eff.healPerTurn + actor.stats.healing / 2) : eff.healPerTurn, turnsLeft: eff.turns,
+          seq: nextEffectSeq(),
           ...tickStack(o.ability, eff),
         });
         float(recipient, '+HoT', COMBAT_TEXT_COLOR.heal, 'glow', eff.damageElement);
@@ -448,6 +422,25 @@ export function executeAction(caster: CombatUnit, action: Ability, targets: Comb
         float(recipient, 'Rooted!', COMBAT_TEXT_COLOR.dot, 'glow', eff.damageElement);
         threat.gain += ROOT_THREAT;
         break;
+      case 'aura':
+        c.buffs.push(auraToBuff(eff, prefix, o.ability));
+        float(recipient, `${o.ability}!`, COMBAT_TEXT_COLOR.heal, 'glow', eff.damageElement);
+        threat.gain += AURA_THREAT;
+        break;
+      case 'dispel': {
+        // On a friendly unit it takes what hurts it, on a hostile one what helps it. It reads the unit as it was when
+        // the action began, skipping what an earlier dispel of this action took
+        const friendly = onSide(actor) === onSide(recipient);
+        const { seqs, names } = pickDispelled(
+          { buffs: recipient.buffs ?? [], hots: recipient.hots ?? [], dots: recipient.dots ?? [] },
+          friendly, eff.count ?? 1, new Set(c.dispelled));
+        if (seqs.length === 0) break;
+        c.dispelled.push(...seqs);
+        float(recipient, seqs.length === 1 ? `Dispelled ${names[0]}!` : `Dispelled ×${seqs.length}!`,
+          friendly ? COMBAT_TEXT_COLOR.heal : COMBAT_TEXT_COLOR.dot, 'glow', eff.damageElement);
+        threat.gain += seqs.length * DISPEL_THREAT;
+        break;
+      }
     }
   };
 
@@ -497,14 +490,15 @@ export function executeAction(caster: CombatUnit, action: Ability, targets: Comb
   /**
    * One attack roll of an enemy-target ability against one target, and its effects there if it lands (damage,
    * DoTs, debuffs, roots), then the triggers it sets off. `triggered`: a trigger's weapon attack (it sets off no
-   * more of those). Returns whether it damaged the target.
+   * more of those). Returns whether it hit the target, and whether it damaged it.
    */
-  const resolveAttack = (attacker: CombatUnit, act: Ability, target: CombatUnit, triggered: boolean): boolean => {
+  const resolveAttack = (attacker: CombatUnit, act: Ability, target: CombatUnit, triggered: boolean): { hit: boolean; damaged: boolean } => {
     const targetEffects = effectsOf(act).filter(e => e.appliesTo === 'target');
     const damageEffects = targetEffects.filter((e): e is Extract<Effect, { type: 'damage' }> => e.type === 'damage');
     const dotEffects    = targetEffects.filter((e): e is Extract<Effect, { type: 'dot' }> => e.type === 'dot');
     const debuffEffects = targetEffects.filter((e): e is Extract<Effect, { type: 'debuff' }> => e.type === 'debuff');
     const rootEffects   = targetEffects.filter((e): e is Extract<Effect, { type: 'root' }> => e.type === 'root');
+    const dispelEffects = targetEffects.filter((e): e is Extract<Effect, { type: 'dispel' }> => e.type === 'dispel');
     const category = act.attackCategory ?? 'melee';
     // The primary element (first damage component, else the first DoT) drives the hit roll and DoT scaling.
     const primaryElement: DamageElement = damageEffects[0]?.damageElement ?? dotEffects[0]?.damageElement ?? 'physical';
@@ -524,7 +518,7 @@ export function executeAction(caster: CombatUnit, action: Ability, targets: Comb
       log(attacker, target, `${hit.outcome.toUpperCase()} (${primaryElement})`);
       float(target, STOPPED_TEXT[hit.outcome], COMBAT_TEXT_COLOR.stopped);
       fire();
-      return false;
+      return { hit: false, damaged: false };
     }
 
     const c = changeFor(target);
@@ -558,8 +552,9 @@ export function executeAction(caster: CombatUnit, action: Ability, targets: Comb
       threat.gain += buffMagnitude(debuffEffect);
     }
     for (const rootEffect of rootEffects) applySupport(attacker, target, rootEffect, { ability: act.name });
+    for (const dispelEffect of dispelEffects) applySupport(attacker, target, dispelEffect, { ability: act.name });
     fire();
-    return damaged;
+    return { hit: true, damaged };
   };
 
   changeFor(caster).mpSpent = mpCostAt(action, caster.stats.level);
@@ -569,9 +564,13 @@ export function executeAction(caster: CombatUnit, action: Ability, targets: Comb
   const allyEffects = effects.filter(e => e.appliesTo === 'allies');
   const support = { ability: action.name };
 
-  let targetsDamaged = 0;
+  let targetsHit = 0, targetsDamaged = 0;
   if (action.target === 'enemy') {
-    for (const target of targets) if (resolveAttack(caster, action, target, false)) targetsDamaged++;
+    for (const target of targets) {
+      const r = resolveAttack(caster, action, target, false);
+      if (r.hit) targetsHit++;
+      if (r.damaged) targetsDamaged++;
+    }
   } else if (action.target === 'ally') {
     for (const target of targets) for (const eff of targetEffects) applySupport(caster, target, eff, support);
   } else if (action.target === 'self') {
@@ -582,9 +581,12 @@ export function executeAction(caster: CombatUnit, action: Ability, targets: Comb
   // Effects on the caster's side in the area: they always land (no hit roll), like any support effect
   for (const ally of allies) for (const eff of allyEffects) applySupport(caster, ally, eff, support);
 
-  // Caster effects. Heals on an enemy-targeting ability scale with targets damaged (e.g. drain life).
-  const healMultiplier = action.target === 'enemy' ? Math.max(1, targetsDamaged) : 1;
-  for (const eff of casterEffects) applySupport(caster, caster, eff, { ...support, healMultiplier });
+  // Caster effects. On an enemy-target ability they happen only once it hits at least one target (a drain that misses
+  // heals nothing, a taunt that misses gains no threat); its heals scale with targets damaged (e.g. drain life).
+  if (action.target !== 'enemy' || targetsHit > 0) {
+    const healMultiplier = action.target === 'enemy' ? Math.max(1, targetsDamaged) : 1;
+    for (const eff of casterEffects) applySupport(caster, caster, eff, { ...support, healMultiplier });
+  }
 
   if (action.selfDestruct) {
     changeFor(caster).slain = true;

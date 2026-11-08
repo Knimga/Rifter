@@ -2,16 +2,17 @@ import {
   GiSwordBrandish, GiHospitalCross, GiSacrificialDagger, GiDrippingBlade, GiWaveStrike, GiEnrage,
   GiFireZone, GiPlantWatering, GiLayeredArmor, GiEvilComet, GiCursedStar, GiHolosphere,
   GiBroadsword, GiShield, GiHealthNormal, GiCometSpark, GiHealing, GiHidden, GiAngryEyes,
-  GiFocusedLightning, GiFlamingArrow, GiStoneAxe, GiSparkSpirit, GiOrbitalRays, GiStickyBoot
+  GiFocusedLightning, GiFlamingArrow, GiStoneAxe, GiSparkSpirit, GiOrbitalRays, GiWolfTrap,
+  GiBowman
 } from 'react-icons/gi';
 import { FaRegSnowflake } from 'react-icons/fa';
 import { FaExplosion } from 'react-icons/fa6';
-import { TbBow, TbFocus2 } from "react-icons/tb";
+import { TbBow } from "react-icons/tb";
 
 import type { IconType } from 'react-icons';
 import type { DamageElement, OffhandKind, WeaponType } from '../gear';
 import type { AttributeKey, SkillKey } from './stats';
-import { warnIgnoredEffects, warnIgnoredTriggers, type Ability, type PassiveTrigger } from '../combat/abilities';
+import { warnIgnoredEffects, warnIgnoredPassives, type Ability, type PassiveEffect } from '../combat/abilities';
 import type { ModelLink } from '../../forge/core/types';
 
 export type ClassKey = 'knight' | 'rogue' | 'barbarian' | 'arcanist' | 'archer' | 'primalist' | 'occultist' | 'acolyte';
@@ -64,8 +65,12 @@ export interface ClassData {
   skills: Partial<Record<SkillKey, number>>;
   passives: Record<string, Passive>;
   scalingPassives?: ScalingPassive[];
-  /** Triggers the class always has (always on, never run out: PassiveTrigger), e.g. striking back when parried. */
-  passiveTriggers?: PassiveTrigger[];
+  /**
+   * Lasting effects the class has for good (on its members from the start, never run out: PassiveEffect, see
+   * party.ts memberPassiveEntries): a trigger (striking back when parried), an aura, a buff, debuff, root, HoT or DoT.
+   * For plain flat stat bonuses, `passives` is still the shorter way.
+   */
+  passiveEffects?: PassiveEffect[];
   armorProficiencies: ArmorProficiency[];
   weaponProficiencies: WeaponProficiency[];
   startingGear: StartingGear;
@@ -92,9 +97,9 @@ export const CLASSES: Record<ClassKey, ClassData> = {
     attributes: { strength: 3, toughness: 5, finesse: 1, mind: 2, spirit: 3, speed: 0 },
     skills: { redoubt: 4, devotion: 4, expertise: 2, spellcraft: 2 },
     passives: {
-      block:   { name: 'Defender',  flat: 5 },
-      healing: { name: 'Protector', flat: 5 },
-      holyCrit: { name: 'Faith', flat: 5 }
+      block:   { name: 'Defender',  flat: 3 },
+      healing: { name: 'Protector', flat: 3 },
+      healingReceived: { name: 'Blessed', flat: 3 }
     },
     armorProficiencies: ['Heavy'],
     weaponProficiencies: ['1h Swords', '1h Maces', 'Shields'],
@@ -147,11 +152,11 @@ export const CLASSES: Record<ClassKey, ClassData> = {
     baseHp: 30,
     description: 'A dagger-wielding brigand who fights dirty.',
     attributes: { strength: 1, toughness: 1, finesse: 7, mind: 1, spirit: 0, speed: 4 },
-    skills: { perception: 2, subtlety: 4, expertise: 3, evasion: 3 },
+    skills: { subtlety: 4, expertise: 4, evasion: 4 },
     passives: {
-      dodge:     { name: 'Slippery',    flat: 5 },
-      meleeCrit: { name: 'Opportunist', flat: 5 },
-      poisonResistance: { name: 'Stoneblood', flat: 30 }
+      dodge:     { name: 'Slippery',    flat: 3 },
+      meleeCrit: { name: 'Opportunist', flat: 3 },
+      poisonResistance: { name: 'Prior Exposure', flat: 20 }
     },
     armorProficiencies: ['Light'],
     weaponProficiencies: ['Daggers'],
@@ -181,14 +186,12 @@ export const CLASSES: Record<ClassKey, ClassData> = {
         displayElement: 'poison',
         effects: [
           {
-            type: 'buff',
-            appliesTo: 'target',
-            turns: 4,
+            type: 'buff', appliesTo: 'target', turns: 5,
             trigger: {
               when: 'attacking',
               categories: ['melee'],
               weaponOnly: true,
-              chance: 40,
+              chance: 50,
               effects: [
                 { type: 'dot', appliesTo: 'target', damageElement: 'poison', damagePerTurn: 4, turns: 3 },
               ],
@@ -230,9 +233,9 @@ export const CLASSES: Record<ClassKey, ClassData> = {
     attributes: { strength: 6, toughness: 6, finesse: 1, mind: 0, spirit: 0, speed: 1 },
     skills: { redoubt: 4, evasion: 6, expertise: 2 },
     passives: {
-      dodge: { name: 'Duck and Weave', flat: 10 },
+      dodge: { name: 'Duck and Weave', flat: 7 },
       hpRegen: { name: 'Bloodrush', flat: 1 },
-      glancingBlow:    { name: 'Tough-skinned', flat: 10 }
+      glancingBlow:    { name: 'Tough-skinned', flat: 7 }
     },
     armorProficiencies: ['Light', 'Medium'],
     weaponProficiencies: ['2h Swords', '2h Maces', '2h Axes'],
@@ -285,7 +288,7 @@ export const CLASSES: Record<ClassKey, ClassData> = {
     passives: {
       mp:              { name: 'Mental Reservoir', flat: 10 },
       magicResistance: { name: 'Scholar',      flat: 10 },
-      magicHit:        { name: 'Well-Trained', flat: 5 }
+      magicHit:        { name: 'Well-Trained', flat: 3 }
     },
     armorProficiencies: ['Cloth'],
     weaponProficiencies: ['Staves', 'Daggers', 'Wands', 'Foci'],
@@ -343,9 +346,9 @@ export const CLASSES: Record<ClassKey, ClassData> = {
     baseHp: 25,
     description: 'A marksman who deals damage from afar.',
     attributes: { strength: 0, toughness: 1, finesse: 7, mind: 3, spirit: 1, speed: 2 },
-    skills: { perception: 4, subtlety: 2, expertise: 4, evasion: 2 },
+    skills: { perception: 2, subtlety: 4, expertise: 4, evasion: 2 },
     passives: {
-      rangedHit:    { name: 'Eagle Eye', flat: 5 },
+      rangedHit:    { name: 'Eagle Eye', flat: 3 },
       armor: { name: 'Outfitted',  flat: 10 },
       magicResistance: { name: 'Dungeon Delver', flat: 10 }
     },
@@ -355,28 +358,28 @@ export const CLASSES: Record<ClassKey, ClassData> = {
     model: 'character.archer',
     abilities: [
       {
-        name: 'Concentration',
-        icon: TbFocus2,
-        mpCost: 5,
-        apCost: 1,
-        range: 0,
-        target: 'self',
-        displayElement: 'physical',
-        effects: [
-          { type: 'buff', appliesTo: 'target', stats: { rangedHit: 5, rangedDamage: 5 }, turns: 1 },
-        ],
-      },
-      {
-        name: 'Sapshot',
-        icon: GiStickyBoot,
+        name: 'Quick Shot',
+        icon: GiBowman,
         mpCost: 5,
         apCost: 1,
         range: 5,
         target: 'enemy',
-        attackCategory: 'ranged',
         useWeapon: true,
+        attackCategory: 'ranged',
+        displayElement: 'physical',
+        effects: [],
+      },
+      {
+        name: 'Bear Trap',
+        icon: GiWolfTrap,
+        mpCost: 4,
+        apCost: 1,
+        range: 4,
+        target: 'enemy',
+        attackCategory: 'ranged',
         effects: [
-          { type: 'root', appliesTo: 'target', turns: 3 }
+          { type: 'root', appliesTo: 'target', turns: 3 },
+          { type: 'dot', appliesTo: 'target', damageElement: 'physical', damagePerTurn: 6, turns: 3 }
         ]
       },
       {
@@ -391,7 +394,7 @@ export const CLASSES: Record<ClassKey, ClassData> = {
         attackCategory: 'ranged',
         effects: [
           { type: 'damage', appliesTo: 'target', damageElement: 'fire', minDamage: 3, maxDamage: 3 },
-          { type: 'dot', appliesTo: 'target', damageElement: 'fire', damagePerTurn: 5, turns: 3 }
+          { type: 'dot', appliesTo: 'target', damageElement: 'fire', damagePerTurn: 6, turns: 3 }
         ],
       },
     ],
@@ -430,7 +433,7 @@ export const CLASSES: Record<ClassKey, ClassData> = {
       {
         name: 'Stonestrike',
         icon: GiStoneAxe,
-        mpCost: 3,
+        mpCost: 4,
         apCost: 1,
         range: 1,
         displayElement: 'nature',
@@ -451,7 +454,7 @@ export const CLASSES: Record<ClassKey, ClassData> = {
         displayElement: 'nature',
         target: 'ally',
         effects: [
-          { type: 'buff', appliesTo: 'target', stats: { armor: 20 }, turns: 3 }
+          { type: 'buff', appliesTo: 'target', stats: { armor: 15 }, turns: 3 }
         ]
       }
     ],
@@ -466,11 +469,11 @@ export const CLASSES: Record<ClassKey, ClassData> = {
     skills: { spellcraft: 6, devotion: 2, subtlety: 4 },
     passives: {
       shadowDamage: { name: 'Dark Mark', flat: 3 },
-      magicHit:     { name: 'Spite',     flat: 5 },
-      shadowResistance: { name: 'Demon-touched', flat: 30 }
+      magicHit:     { name: 'Spite',     flat: 3 },
+      shadowResistance: { name: 'Shadow-touched', flat: 20 }
     },
     armorProficiencies: ['Cloth'],
-    weaponProficiencies: ['Staves', 'Daggers', 'Wands', 'Foci'],
+    weaponProficiencies: ['Staves', 'Wands', 'Foci'],
     startingGear: { chest: 'Cloth', boots: 'Cloth', weapon: 'Wands', weaponElement: 'shadow', offhand: 'focus' },
     model: 'character.occultist',
     abilities: [
@@ -561,7 +564,7 @@ export const CLASSES: Record<ClassKey, ClassData> = {
         ]
       },
       {
-        name: 'Ethershell',
+        name: 'Cleanse',
         icon: GiHolosphere,
         mpCost: 6,
         apCost: 1,
@@ -570,7 +573,7 @@ export const CLASSES: Record<ClassKey, ClassData> = {
         area: 'blast2',
         displayElement: 'holy',
         effects: [
-          { type: 'buff', appliesTo: 'target', stats: { magicResistance: 20 }, turns: 3 }
+          { type: 'dispel', appliesTo: 'allies' }
         ]
       }
     ]
@@ -581,5 +584,5 @@ export const CLASSES: Record<ClassKey, ClassData> = {
 // ability): warned at load
 for (const [key, c] of Object.entries(CLASSES)) {
   warnIgnoredEffects(`classes › ${key}`, c.abilities);
-  warnIgnoredTriggers(`classes › ${key}`, c.passiveTriggers);
+  warnIgnoredPassives(`classes › ${key}`, c.passiveEffects);
 }

@@ -45,12 +45,12 @@ export function useFloatingText() {
     const now = performance.now(), start = Math.max(now, nextAnnounce.current);
     nextAnnounce.current = start + ANNOUNCE_GAP_MS;
     if (start <= now) {
-      spawnFloat(gridX, gridY, text, color);
+      spawnFloat(gridX, gridY, text, color, undefined, 'quest');
       return;
     }
     const timer = setTimeout(() => {
       waiting.current.delete(timer);
-      spawnFloat(gridX, gridY, text, color);
+      spawnFloat(gridX, gridY, text, color, undefined, 'quest');
     }, start - now);
     waiting.current.add(timer);
   }, [spawnFloat]);

@@ -1,5 +1,6 @@
 // Words typed out letter by letter (an NPC's dialogue, the opening's narration), moved on with a right-click.
 import { useEffect, useRef, useState } from 'react';
+import { useLatest } from './useLatest';
 
 /** How fast words are typed: one character per this many ms. */
 const TYPE_MS = 22;
@@ -30,6 +31,8 @@ export function useTypewriter(text: string, instant = false): { typed: number; d
  */
 export function useRightClick(onClick: () => void): void {
   const pressed = useRef<{ x: number; y: number } | null>(null);
+  // Listened for once, always calling the latest handler (not re-subscribed every render)
+  const latest = useLatest(onClick);
   useEffect(() => {
     const onDown = (e: PointerEvent) => { if (e.button === 2) pressed.current = { x: e.clientX, y: e.clientY }; };
     const onUp = (e: PointerEvent) => {
@@ -42,7 +45,7 @@ export function useRightClick(onClick: () => void): void {
       const block = (m: MouseEvent) => m.preventDefault();
       window.addEventListener('contextmenu', block, { capture: true, once: true });
       setTimeout(() => window.removeEventListener('contextmenu', block, true), 300);
-      onClick();
+      latest.current();
     };
     const onContext = (e: MouseEvent) => {
       e.preventDefault();
@@ -56,5 +59,5 @@ export function useRightClick(onClick: () => void): void {
       window.removeEventListener('pointerup', onUp, true);
       window.removeEventListener('contextmenu', onContext, true);
     };
-  });
+  }, [latest]);
 }

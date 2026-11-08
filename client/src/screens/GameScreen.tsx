@@ -1,33 +1,26 @@
-// The game: the Sanctum or a dungeon, the party moving and fighting in it, and the HUD. Each concern lives in
-// its own hook (party member state, inventory, chests, experience, turn ticks, action outcomes, keys, the
-// enemy turn); this screen holds where everyone is and the fight, wires the hooks together, and draws it all.
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+// The game: the Sanctum or a dungeon, the party moving and fighting in it, and the HUD. Each concern lives in// its own hook (party member state, inventory, chests, loot, experience, turn ticks, action outcomes, keys, the// Rifter, dialogue and quests, travel between maps, the enemy turn); this screen holds where everyone is and the// fight, wires the hooks together, and draws it all.
+import { useState, useEffect, useCallback, useMemo } from 'react';
 
 import { CLASSES } from '../data/units/classes';
-import { generateLootDrops, heldWeapon, type Item } from '../data/gear';
-import { rollGold } from '../data/gear/loot';
-import { mpCostAt } from '../data/combat/abilities';
-import { mergeShards, rollShardDrop, SHARD_DROP_CHANCE, totalShards, type ShardCounts } from '../data/gear/shards';
-import { formatGold } from '../data/detailStrings';
+import { heldWeapon, type Item } from '../data/gear';
+import { mpCostAt, summonsForever } from '../data/combat/abilities';
 import { partyCanUseItem } from '../data/gear/inventory';
 import { AUTO_END_TURN_DELAY_MS, COMBAT_TEXT_COLOR, STUNNED_PAUSE_MS } from '../data/constants';
 import { hasPointsToSpend, isOnMap, type PartyMemberConfig } from '../data/units/party';
 import { xpToNext, type PartyProgress } from '../data/units/xp';
-import { bodyOf, creatureTiles, isAlly, isHostile, type EnemyInstance } from '../data/units/enemies';
-import { isBoss } from '../data/units/bosses';
+import { bodyOf, creatureTiles, isAlly, isForeverSummon, isHostile, type EnemyInstance } from '../data/units/enemies';
 import { areaTone } from '../data/combat/areas';
 import { aimPartyAction } from '../data/combat/targeting';
-import { covers, findOpenTilesNear, footprint, footprintKeys, isAdjacent, posKey, samePos, type Pos } from '../data/world/grid';
-import { partyWalk, findFollowerSpawns, spreadOut, trailFollowers } from '../data/world/movement';
-import { SANCTUM, SANCTUM_FLOORS, SANCTUM_RECEPTACLE, isSanctumWalkable, type NpcPlacement } from '../data/world/sanctum';
+import { executeMoveAction, rootBlocks } from '../data/combat/abilityMoves';
+import { covers, footprint, footprintKeys, posKey, samePos, type Pos } from '../data/world/grid';
+import { partyWalk, marchParty, spreadOut } from '../data/world/movement';
+import { SANCTUM, SANCTUM_FLOORS, isSanctumWalkable } from '../data/world/sanctum';
 import { npc } from '../data/world/npcs';
-import { conversationOf, effectsMark, npcQuestMark, type Conversation, type DialogueEffect, type DialogueTopic, type QuestMark } from '../data/world/dialogue';
-import { currentStep, quest, questHolds, questsFinishedBy, stepIndex, type QuestEvent } from '../data/world/quests';
 import { useQuests } from '../hooks/useQuests';
 import QuestTracker from '../components/hud/QuestTracker';
 import { interactiveObjectName } from '../data/world/interactiveObjects';
-import { isFreeFloor, objectTilesOf, zoneRift, zoneWalkable, type DungeonData, type ZoneData } from '../data/world/dungeonGen';
-import { areaLook, buildArea, DUNGEONS, foundKeyIn, isPassage, OPENING_PASSAGE, type AreaKey, type DungeonKey } from '../data/world/dungeons';
+import { isFreeFloor, objectTilesOf, riftShut, zoneRift, zoneWalkable, type DungeonData } from '../data/world/gen';
+import { areaLook, DUNGEONS, OPENING_PASSAGE, type AreaKey } from '../data/world/dungeons';
 import { ARRIVAL_LINES } from '../data/world/opening';
 import { INITIAL_COMBAT, aggroedBy, startCombat, joinCombat, advanceTurn, apLeft, moveBudget, moveCost, stunnedOutcome, getCurrentCombatant, deadPartyIndices, type CombatState } from '../data/combat/combat';
 import { isRooted } from '../data/units/stats';
@@ -42,14 +35,11 @@ import RifterWindow from '../components/RifterWindow';
 import VendorWindow from '../components/VendorWindow';
 import EnchanterWindow from '../components/EnchanterWindow';
 import EdgePulse from '../components/hud/EdgePulse';
-import type { UnitAim } from '../components/ModelLayer';
 import { arrivalPortal } from '../components/zoneScenery';
 import NpcDialogue, { DIALOGUE_PORTRAIT } from '../components/NpcDialogue';
 import Narration from '../components/Narration';
 import { KeyPortrait } from '../components/Keyring';
-import { DORMANT_RIFTER, type RifterState } from '../components/sanctumScene';
-import { RIFT_CLOSE_MS } from '../forge/designs/_rifter';
-import { RIFTER_UNLOCK, bossKeyDrop, riftGlowCss } from '../data/world/rifts';
+import { RIFTER_READY_START } from '../data/world/rifts';
 import { usePartyMembers } from '../hooks/usePartyMembers';
 import { useInventory } from '../hooks/useInventory';
 import { useVendor } from '../hooks/useVendor';
@@ -58,13 +48,17 @@ import { useExperience } from '../hooks/useExperience';
 import { useEnemyDeaths } from '../hooks/useEnemyDeaths';
 import { usePendingPoints } from '../hooks/usePendingPoints';
 import { useGameKeys } from '../hooks/useGameKeys';
+import { useAuras } from '../hooks/useAuras';
 import { useTurnTicks } from '../hooks/useTurnTicks';
 import { useActionOutcomes } from '../hooks/useActionOutcomes';
 import { useFogOfWar } from '../hooks/useFogOfWar';
 import { useReach } from '../hooks/useReach';
 import { useSceneReady } from '../hooks/useSceneReady';
-import { useFadeOut } from '../hooks/useFadeOut';
-import { useArrival } from '../hooks/useArrival';
+import { useRifter } from '../hooks/useRifter';
+import { useDialogue } from '../hooks/useDialogue';
+import { useLoot } from '../hooks/useLoot';
+import { useTravel } from '../hooks/useTravel';
+import { useScenes } from '../hooks/useScenes';
 import { useHints } from '../hooks/useHints';
 import HintPane from '../components/hud/HintPane';
 import { OPENING_FADE_MS } from './OpeningScreen';
@@ -94,17 +88,16 @@ interface Props {
   /** The party's shared level and XP. */
   progress: PartyProgress;
   setProgress: (progress: PartyProgress) => void;
+  /** TEMP (testing only): begin in the Sanctum, the opening skipped, at the quest "Use the Rifter", "Enter the Rift". */
+  skipOpening?: boolean;
 }
-
-/** How long the party stands in the Sanctum, come through its door, before its greeter speaks (ms). */
-const GREETING_PAUSE_MS = 1200;
 
 /** Screen space the HUD covers on each side (px): the map pans only within the area inside it. */
 const HUD_INSETS: Insets = { top: 84, right: 24, bottom: 164, left: 300 };
 
-export default function GameScreen({ party, setParty, progress, setProgress }: Props) {
+export default function GameScreen({ party, setParty, progress, setProgress, skipOpening = false }: Props) {
   // The game begins in a dungeon: the opening's passage, the party arriving there (scene 'arrival', below)
-  const [location, setLocation] = useState<'sanctum' | 'dungeon'>('dungeon');
+  const [location, setLocation] = useState<'sanctum' | 'dungeon'>(skipOpening ? 'sanctum' : 'dungeon');
   const [playerPos, setPlayerPos] = useState<Pos>(SANCTUM.playerStart);
   const [enemies, setEnemies] = useState<EnemyInstance[]>([]);
   const [combat, setCombat] = useState<CombatState>(INITIAL_COMBAT);
@@ -160,23 +153,20 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
   // Every creature of the zone: hostile enemies (summoned ones too), and the party's summoned allies (isAlly)
   const zoneEnemies = enemies.filter(e => e.zoneId === currentZone);
   const zoneSummons = zoneEnemies.filter(e => isAlly(e) && e.currentHp > 0);
+  // Its forever summons: they march with the party out of combat and join every fight (isForeverSummon)
+  const zoneForever = zoneSummons.filter(isForeverSummon);
   const riftPos = dungeon ? zoneRift(dungeon, currentZone) : null;
 
   // ─── Scenes ──────────────────────────────────────────────────────────────
-  // A moment the party watches: the opening's arrival in the Dark Tunnel (useArrival), a found key's words (finding:
-  // PassageConfig.foundKey; and at the passage's door while it still lies there: turnBack), the greeting at the Sanctum's door (its greeter speaks at once: SANCTUM.doorGreeter). The
-  // party can't act (move, use abilities or items, open windows) until it is over; its dialogue is still clicked through
-  const [scene, setScene] = useState<'arrival' | 'finding' | 'greeting' | null>('arrival');
-  const locked = scene !== null;
-  // The tile the party faces as it appears on a map (its greeter, through the Sanctum's door), if any
-  const [facesOnArrival, setFacesOnArrival] = useState<Pos | null>(null);
 
   // The map stays under a dark cover until its 3D layer has drawn (useSceneReady), after fading to black before a
   // change of map (useFadeOut, below)
   const mapKey = `${location}:${zone?.id ?? ''}`;
   const { loading: mapLoading, onReady: onMapReady } = useSceneReady(mapKey);
-  // The opening's arrival plays once the Dark Tunnel is shown: the party coming through its portals, then told
-  const arrival = useArrival(scene === 'arrival' && !mapLoading);
+  // A moment the party watches (useScenes): the opening's arrival, a found key's words, the greeting at the Sanctum's
+  // door. The party can't act until it is over
+  const scenes = useScenes({ location, mapLoading, opening: !skipOpening });
+  const { scene, locked, arrival, finding, turnBack, faces: facesOnArrival } = scenes;
 
   // Party members as drawn on the maps: the leader always, followers only while alive
   const partyPositions = [playerPos, ...followerPositions].slice(0, party.length);
@@ -224,12 +214,17 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
   // Selected action, normalised (weapon folded in) — drives map targeting and range
   const activeAction = activeAbility ? toAction(activeAbility, activeWeapon) : null;
 
-  const { moveTargets, tileTargets } = useReach({
+  // A movement ability armed (a rooted mover can't use one: rootBlocks): where it can be aimed comes from useReach too
+  const moveAbility = activeAction?.move && !rootBlocks(activeAction, partyBuffs[activePartyIdx] ?? []) ? activeAction : null;
+
+  const { moveTargets, tileTargets, moveAims } = useReach({
     zone, dungeon, fog, zoneEnemies, combatActive: combat.active,
     partyTiles: partyTokens.map(t => t.pos),
     mover: combat.active ? activePartyPos : playerPos,
     movement: combat.active ? moveBudget(combat.paidTiles, activeAp, activeStats.movement, isRooted(partyBuffs[activePartyIdx] ?? [])) : partyAllStats[0].movement,
-    tileRange: activeAction?.target === 'tile' ? activeAction.range : null,
+    // (in a fight; out of one, only a forever summon's)
+    tileRange: activeAction?.target === 'tile' && !activeAction.move && (combat.active || summonsForever(activeAction)) ? activeAction.range : null,
+    moveAbility,
   });
 
   // ─── Latest values, for callbacks, timers and the enemy turn ─────────────
@@ -256,7 +251,7 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
     const m = partyRef.current[i];
     const weapon = m ? heldWeapon(m.gear) : null;
     return memberUnit(i, m?.characterName, partyStatsRef.current[i], pos,
-      { hp: partyHpRef.current[i] ?? 0, buffs: membersRef.current[i]?.buffs ?? [], weapon, passiveTriggers: m && CLASSES[m.selectedClass].passiveTriggers });
+      { hp: partyHpRef.current[i] ?? 0, buffs: membersRef.current[i]?.buffs ?? [], hots: membersRef.current[i]?.hots, dots: membersRef.current[i]?.dots, weapon });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   /** What executeAction needs of the fight: what sight passes over on the map, and a living unit by unitKey. */
   const actionWorld = useCallback((): ActionWorld => ({
@@ -282,287 +277,57 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
   /** Whether someone in the party can use an item (proficient): loot favours it, and windows fade what no one can use. */
   const partyCanUse = useCallback((item: Item) => partyCanUseItem(partyRef.current, item), [partyRef]);
 
-  const { inventory, setInventory, takeLoot, equipItem, unequipItem, swapGearSlots, moveInventoryItem, gold, setGold, addGold } = useInventory({ party, setParty, spawnFloat });
-  /** Gold picked up at a tile (off the floor, out of a chest): into the party's gold, and its amount floats up with the coin. */
-  const takeGold = useCallback((amount: number, at: Pos) => {
-    addGold(amount);
-    spawnFloat(at.x, at.y, `+${formatGold(amount)}`, COMBAT_TEXT_COLOR.gold, 'gold');
-  }, [addGold, spawnFloat]);
+  const { inventory, setInventory, takeLoot, equipItem, unequipItem, swapGearSlots, moveInventoryItem, sortItems, gold, setGold, addGold } = useInventory({ party, setParty, spawnFloat, gearLocked: combat.active });
   // The Sanctum vendor's wares and this visit's trades
   const vendor = useVendor({ partyLevel: progress.level, partyCanUse, inventory, setInventory, gold, setGold });
   const { endVisit, restock: restockVendor } = vendor;
   // The rift keys (shared, apart from the inventory, never lost)
-  const keyring = useKeyring();
-  const { shards, hasNew: hasNewShards, addShard, gainShards, pickUpShards, spendShard, seeShards } = useShards();
-  /** Shards picked up at a tile (off the floor, out of a chest): into the party's shards, and how many floats up. */
-  const takeShards = useCallback((found: ShardCounts, at: Pos) => {
-    pickUpShards(found);
-    const n = totalShards(found);
-    spawnFloat(at.x, at.y, `+${n} ${n === 1 ? 'Shard' : 'Shards'}`, COMBAT_TEXT_COLOR.loot);
-  }, [pickUpShards, spawnFloat]);
-  // The Sanctum enchanter's services on the party's items, gold and shards (and the shards sold to her this session)
-  const enchanter = useEnchanter({ partyLevel: progress.level, inventory, setInventory, gold, addGold, shards, addShard, gainShards, spendShard });
+  const keyring = useKeyring(skipOpening ? RIFTER_READY_START.keys : undefined);
   const { addKey } = keyring;
-  // The Sanctum's Rifter: the key set in it and whether its rift is open (dormant whenever the party arrives),
-  // and its window, open while the leader stands by its receptacle
-  const [rifter, setRifter] = useState<RifterState>(DORMANT_RIFTER);
-  const reopenTimer = useRef<number | undefined>(undefined);
-  /**
-   * Open `key`'s rift (the window closes, so the device is seen). Dormant: it wakes. Awake with another key's rift:
-   * the new key goes in the socket at once, the old rift closes, then (RIFT_CLOSE_MS later) the new one opens.
-   */
-  const openRift = (key: DungeonKey) => {
-    setShowRifter(false);
-    if (!rifter.rift) { setRifter({ key, rift: key, phase: 'activate' }); return; }
-    if (key === rifter.key) return;
-    window.clearTimeout(reopenTimer.current);
-    // Mid-swap already: the rift still closing (or showing) stays the one that closes
-    setRifter({ key, rift: rifter.rift, phase: 'close' });
-    reopenTimer.current = window.setTimeout(() => setRifter((r) => (r.phase === 'close' ? { ...r, rift: r.key, phase: 'reopen' } : r)), RIFT_CLOSE_MS);
-  };
-  useEffect(() => () => window.clearTimeout(reopenTimer.current), []);
+  const { shards, hasNew: hasNewShards, addShard, gainShards, pickUpShards, spendShard, seeShards } = useShards();
+  // The Sanctum enchanter's services on the party's items, gold and shards (and the shards sold to her this session)
+  const enchanter = useEnchanter({ partyLevel: progress.level, party, setParty, inventory, setInventory, gold, addGold, shards, addShard, gainShards, spendShard });
+
+  // ─── The Rifter, NPCs and quests ─────────────────────────────────────────
+
+  const quests = useQuests(skipOpening ? RIFTER_READY_START.quests : undefined);
+  // The Sanctum's Rifter: the key set in it, its rift, and its window
+  const { rifter, showRifter, setShowRifter, openRift, reset: resetRifter, usable: rifterUsable, mark: rifterMark } = useRifter({ location, playerPos, questLog: quests.log });
   // TEMP (testing only): the testing tools' window (components/DevToolsWindow.tsx)
   const [showTesting, setShowTesting] = useState(false);
-  const [showRifter, setShowRifter] = useState(false);
-  useEffect(() => {
-    if (showRifter && (location !== 'sanctum' || !isAdjacent(playerPos, SANCTUM_RECEPTACLE))) setShowRifter(false);
-  }, [showRifter, location, playerPos]);
-
-  // The Sanctum's NPCs: the one the leader is speaking to (its window open), and where each faces. It turns to the
-  // leader when spoken to, and back to its own way (the tile in front of it) when the talk ends
-  const [talkingTo, setTalkingTo] = useState<NpcPlacement | null>(null);
-  // Each talk's number: a new talk with a speaking NPC starts its conversation over
-  const [talkCount, setTalkCount] = useState(0);
-  // The conversation a speaking NPC speaks this talk: the one that held as the talk began (it stays the same while
-  // the talk changes the party's quests)
-  const [conversation, setConversation] = useState<Conversation | null>(null);
-  const quests = useQuests();
   // The new player's hints (data/world/hints.ts): the party window's comes up as the game begins, and goes once it is opened
   const hints = useHints();
   const hintDone = hints.done;
   useEffect(() => { if (showCharSheet) hintDone('party'); }, [showCharSheet, hintDone]);
-  const [npcAims, setNpcAims] = useState<Record<string, UnitAim>>({});
-  const npcAimSeq = useRef(0);
-  const aimNpc = (id: string, at: Pos) => setNpcAims(prev => ({ ...prev, [id]: { x: at.x, y: at.y, seq: ++npcAimSeq.current } }));
-  const talkTo = (id: string) => {
-    const placed = SANCTUM.npcs.find(n => n.id === id);
-    if (!placed) return;
-    setTalkingTo(placed);
-    setTalkCount(n => n + 1);
-    setConversation(conversationOf(id, quests.log) ?? null);
-    aimNpc(id, playerPos);
-  };
-  const endTalk = useCallback(() => {
-    if (!talkingTo) return;
-    aimNpc(talkingTo.id, { x: talkingTo.pos.x + talkingTo.facing[0], y: talkingTo.pos.y + talkingTo.facing[1] });
-    setTalkingTo(null);
-    endVisit(); // a trade can only be undone during the visit it was made in
-  }, [talkingTo, endVisit]);
-  // Walking away (the leader no longer beside it) or leaving the Sanctum ends the talk, as does opening any window
-  // (a service NPC's own window is its talk)
-  const otherWindowOpen = showCharSheet || showRifter || showTesting;
-  useEffect(() => {
-    if (talkingTo && (location !== 'sanctum' || !isAdjacent(playerPos, talkingTo.pos) || otherWindowOpen)) endTalk();
-  }, [talkingTo, location, playerPos, otherWindowOpen, endTalk]);
-  /**
-   * What finishing a conversation or topic does: a quest taken, moved on or completed, a rift key put on the keyring
-   * (each named in floating text over the leader).
-   */
-  const runDialogueEffects = (effects: readonly DialogueEffect[] | undefined) => {
-    for (const e of effects ?? []) {
-      if (e.kind === 'giveQuest') {
-        quests.take(e.quest);
-        announce(playerPos.x, playerPos.y, `New quest: ${quest(e.quest).name}`, 'var(--rift-quest)');
-      } else if (e.kind === 'advanceQuest') {
-        const next = quest(e.quest).steps?.[stepIndex(quests.log, e.quest) + 1];
-        quests.advance(e.quest);
-        if (next) announce(playerPos.x, playerPos.y, `New objective: ${next.objective}`, 'var(--rift-quest)');
-      } else if (e.kind === 'completeQuest') {
-        quests.complete(e.quest);
-        announce(playerPos.x, playerPos.y, `Quest complete: ${quest(e.quest).name}`, 'var(--rift-quest)');
-      } else if (e.kind === 'giveKey') {
-        addKey(e.key);
-        announce(playerPos.x, playerPos.y, DUNGEONS[e.key].keyName, riftGlowCss(DUNGEONS[e.key].riftColor));
-      }
-    }
-  };
-  /** The speaking NPC finished a topic it was asked about: what it does (its effects). */
-  const finishTopic = (topic: DialogueTopic) => runDialogueEffects(topic.effects);
-  /** The speaking NPC finished its conversation: what it does (a topic-less one's effects), and the talk ends. */
-  const finishConversation = () => {
-    if (talkingTo) runDialogueEffects(conversation?.effects);
-    endTalk();
-    if (scene === 'greeting') setScene(null);
-  };
-  // The greeting at the Sanctum's door: GREETING_PAUSE_MS after the Sanctum is shown, its greeter speaks to the party
-  const talkToRef = useLatest(talkTo);
-  useEffect(() => {
-    if (scene !== 'greeting' || location !== 'sanctum' || mapLoading || talkingTo) return;
-    const id = setTimeout(() => talkToRef.current(SANCTUM.doorGreeter), GREETING_PAUSE_MS);
-    return () => clearTimeout(id);
-  }, [scene, location, mapLoading, talkingTo, talkToRef]);
-  // The NPC speaking now, if the party is talking to one without a service (a service opens its window instead)
-  const speaking = talkingTo && !npc(talkingTo.id).service && conversation ? { npcId: talkingTo.id, talk: talkCount, conversation } : null;
-  // The Rifter works once the party has been told how (RIFTER_UNLOCK); a quest step waiting on it marks its receptacle (?)
-  const rifterUsable = questHolds(quests.log, RIFTER_UNLOCK);
-  const rifterMark: QuestMark | null = quests.log.active.some(id => currentStep(quests.log, id)?.marker === 'rifter') ? '?' : null;
-  /**
-   * The party did something (entered a dungeon, picked up a key there): the quests waiting on it move on, their next
-   * objective floating over the leader.
-   */
-  const questDid = (event: QuestEvent) => {
-    for (const id of questsFinishedBy(quests.log, event)) {
-      const next = quest(id).steps?.[stepIndex(quests.log, id) + 1];
-      if (next) announce(playerPos.x, playerPos.y, `New objective: ${next.objective}`, 'var(--rift-quest)');
-    }
-    quests.event(event);
-  };
-  const questDidRef = useLatest(questDid);
-  // The key lying to be found in this passage, if any (its words, then it is taken: finding)
-  const foundKey = location === 'dungeon' ? foundKeyIn(dungeonKey) : undefined;
-  const [finding, setFinding] = useState<Pos | null>(null);
-  // Its words at the passage's door while it still lies in the passage (its `leaving`): the door stays shut
-  const [turnBack, setTurnBack] = useState<Pos | null>(null);
-  // The keys lying on this dungeon's floor are marked: a found key by what its words do (! a quest to take), else by a
-  // quest step waiting on a key being picked up here (?)
-  const keyMark: QuestMark | null = foundKey && zone && Object.values(zone.droppedKeys).includes(foundKey.key)
-    ? effectsMark(foundKey.conversation.effects, quests.log)
-    : quests.log.active.some(id => {
-      const step = currentStep(quests.log, id);
-      return step?.marker === 'droppedKey' && !!step.until && 'pickUpKeyIn' in step.until && step.until.pickUpKeyIn === dungeonKey;
-    }) ? '?' : null;
-  // The quest marker over each NPC (! a quest to take, ? one to hand in), from what it would say now
-  const questMarks = useMemo(() => {
-    const out: Record<string, QuestMark> = {};
-    for (const n of SANCTUM.npcs) {
-      const mark = npcQuestMark(n.id, quests.log);
-      if (mark) out[n.id] = mark;
-    }
-    return out;
-  }, [quests.log]);
-  const keysRef = useLatest(keyring.keys);
+  // Talking to the Sanctum's NPCs, and what dialogue and the party's deeds do to its quests
+  const { talkingTo, talkTo, endTalk, npcAims, speaking, runDialogueEffects, finishTopic, finishConversation, questDid, questMarks } = useDialogue({
+    quests, scenes, location, playerPos, otherWindowOpen: showCharSheet || showRifter || showTesting, announce, addKey, endVisit,
+  });
+
+  // What lies on a dungeon's floor: enemies' drops, picking them up, and a passage's found key
+  const { takeGold, takeShards, foundKey, keyMark, finishFinding, pickUp: handleLootPickup, pickUpRef: lootPickupRef, dropLoot } = useLoot({
+    location, dungeonKey, dungeon, setDungeon, currentZone, partyLevel: progress.level, questLog: quests.log, scenes,
+    runDialogueEffects, questDid, partyCanUse, keys: keyring.keys, addKey,
+    takeLoot, addGold, pickUpShards, restockVendor, spawnFloat, announce,
+  });
   const chests = useChests({ location, dungeon, currentZone, combatActive: combat.active, playerPos, partyLevel: progress.level, partyCanUse, takeLoot, takeGold, takeShards });
-
-  /** Replace the current zone's data in the dungeon (e.g. its dropped items). */
-  const updateCurrentZone = useCallback((fn: (z: ZoneData) => ZoneData) => {
-    setDungeon(prev => prev ? { ...prev, zones: prev.zones.map((z, i) => i === currentZoneRef.current ? fn(z) : z) } : null);
-  }, [currentZoneRef]);
-
-  /**
-   * Pick up what lies on `pos` (clicked from next to it): a rift key goes on the keyring, gold into the party's gold
-   * and shards into the party's shards (none needs inventory room, so a full inventory never keeps them); a loot pile
-   * goes into the inventory, as much as fits.
-   */
-  /** The rift key lying on `pos` in this dungeon is gone from its floor. */
-  const clearKeyAt = useCallback((pos: Pos) =>
-    updateCurrentZone(z => ({ ...z, droppedKeys: Object.fromEntries(Object.entries(z.droppedKeys).filter(([k]) => k !== posKey(pos))) })), [updateCurrentZone]);
-  /** Pick up the rift key lying on `pos` in this dungeon: onto the keyring (the quests waiting on it move on). */
-  const pickUpRiftKey = useCallback((pos: Pos, riftKey: DungeonKey) => {
-    addKey(riftKey);
-    announce(pos.x, pos.y, DUNGEONS[riftKey].keyName, riftGlowCss(DUNGEONS[riftKey].riftColor));
-    clearKeyAt(pos);
-    questDidRef.current({ pickUpKeyIn: dungeonKey });
-  }, [dungeonKey, addKey, announce, clearKeyAt, questDidRef]);
-  /**
-   * The found key's words are said: what they do (a quest given), and the key is taken, only from the floor: the party
-   * doesn't know it is a key (someone gives it later: a dialogue's giveKey).
-   */
-  const finishFinding = () => {
-    if (finding && foundKey) {
-      runDialogueEffects(foundKey.conversation.effects);
-      clearKeyAt(finding);
-    }
-    setFinding(null);
-    setScene(null);
-  };
-
-  const handleLootPickup = useCallback((pos: Pos) => {
-    if (!zone) return;
-    const key = posKey(pos);
-    // A tile's record with this tile's entry gone (what was lying here has been taken)
-    const cleared = <T,>(r: Record<string, T>) => Object.fromEntries(Object.entries(r).filter(([k]) => k !== key));
-    const riftKey = zone.droppedKeys[key];
-    // A rift key: onto the keyring; a found one speaks first (its words), and is taken once they are said (finishFinding)
-    if (riftKey && riftKey === foundKey?.key) {
-      setFinding(pos);
-      setScene('finding');
-    } else if (riftKey) pickUpRiftKey(pos, riftKey);
-    const coins = zone.droppedGold[key];
-    if (coins) {
-      takeGold(coins, pos);
-      updateCurrentZone(z => ({ ...z, droppedGold: cleared(z.droppedGold) }));
-    }
-    const found = zone.droppedShards[key];
-    if (found) {
-      takeShards(found, pos);
-      updateCurrentZone(z => ({ ...z, droppedShards: cleared(z.droppedShards) }));
-    }
-    const items = zone.droppedItems[key];
-    if (!items?.length) return;
-
-    const remaining = takeLoot(items, pos);
-    if (!remaining) return;
-    updateCurrentZone(z => ({ ...z, droppedItems: remaining.length > 0 ? { ...z.droppedItems, [key]: remaining } : cleared(z.droppedItems) }));
-  }, [zone, foundKey, pickUpRiftKey, takeLoot, takeGold, takeShards, updateCurrentZone]);
-  const lootPickupRef = useLatest(handleLootPickup);
-
-  /**
-   * Loot for enemies that just died (any cause), on the tiles they fell: items favouring what the party can use, gold
-   * (rolled apart from items: rollGold) and, for any enemy, a chance of a group of affix shards (SHARD_DROP_CHANCE).
-   * A boss also drops a rift key the party doesn't have (and that isn't
-   * already lying in this dungeon), if one is left: on its tile, or the nearest floor tile beside it with nothing
-   * lying on it.
-   */
-  const dropLoot = useCallback((dead: EnemyInstance[]) => {
-    const d = dungeonRef.current;
-    if (!d) return;
-    const drops: Record<string, Item[]> = {};
-    const goldDrops: Record<string, number> = {};
-    const shardDrops: Record<string, ShardCounts> = {};
-    const keyDrops: { at: Pos; key: DungeonKey }[] = [];
-    // A boss's defeat gives the vendor fresh wares, at the party's level (only then: leaving a dungeon doesn't)
-    if (dead.some(isBoss)) restockVendor(partyLevelRef.current);
-    for (const e of dead) {
-      // (none in a dungeon whose enemies drop nothing: DungeonData.loot)
-      if (d.loot) {
-        const items = generateLootDrops(d.level, partyLevelRef.current, e.classData.dropChance ?? 0, partyCanUse);
-        if (items.length) (drops[posKey(e.pos)] ??= []).push(...items);
-        const coins = rollGold(e.level, e.classData.dropsGold ?? 0, e.classData.goldBonus);
-        if (coins) goldDrops[posKey(e.pos)] = (goldDrops[posKey(e.pos)] ?? 0) + coins;
-        const found = rollShardDrop(SHARD_DROP_CHANCE);
-        if (found) shardDrops[posKey(e.pos)] = mergeShards(shardDrops[posKey(e.pos)] ?? {}, found);
-      }
-      if (isBoss(e)) {
-        const lying = [...d.zones.flatMap(z => Object.values(z.droppedKeys)), ...keyDrops.map(k => k.key)];
-        const key = bossKeyDrop(keysRef.current, lying);
-        if (key) keyDrops.push({ at: e.pos, key });
-      }
-    }
-    if ([drops, goldDrops, shardDrops].every(r => Object.keys(r).length === 0) && keyDrops.length === 0) return;
-    updateCurrentZone(z => {
-      const merged = { ...z.droppedItems };
-      for (const [k, items] of Object.entries(drops)) merged[k] = [...(merged[k] ?? []), ...items];
-      // Gold on a tile that has some already adds to its pile
-      const gold = { ...z.droppedGold };
-      for (const [k, coins] of Object.entries(goldDrops)) gold[k] = (gold[k] ?? 0) + coins;
-      // So do shards
-      const shardPiles = { ...z.droppedShards };
-      for (const [k, found] of Object.entries(shardDrops)) shardPiles[k] = mergeShards(shardPiles[k] ?? {}, found);
-      const keys = { ...z.droppedKeys };
-      for (const { at, key } of keyDrops) {
-        const free = (p: Pos) => z.floors.has(posKey(p)) && !merged[posKey(p)]?.length && !gold[posKey(p)] && !shardPiles[posKey(p)] && !keys[posKey(p)];
-        const spot = free(at) ? at : (findOpenTilesNear(at, free, 1, 3)[0] ?? at);
-        keys[posKey(spot)] = key;
-      }
-      return { ...z, droppedItems: merged, droppedGold: gold, droppedShards: shardPiles, droppedKeys: keys };
-    });
-  }, [partyCanUse, updateCurrentZone, restockVendor]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ─── Actions, ticks, experience, keys ────────────────────────────────────
 
-  const { unitAims, unitFx, applyActionOutcome, applyOutcomeRef, cancelPendingOutcomes } = useActionOutcomes({
-    spawnFloat, updateMembers, partyStatsRef, partyPosRef, partyLevelRef, enemiesRef, dungeonRef, currentZoneRef, setEnemies, setCombat,
+  /** Put party member `idx` on `pos` at once, in a fight (a step, or where a movement ability lands it): the leader picks up what lies there. */
+  const placeMember = useCallback((idx: number, pos: Pos) => {
+    if (idx === 0) {
+      setPlayerPos(pos);
+      lootPickupRef.current(pos);
+    } else {
+      setFollowerPositions(prev => prev.map((p, i) => (i === idx - 1 ? pos : p)));
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps -- setters and a ref
+  const { unitAims, unitMoves, unitFx, applyActionOutcome, applyOutcomeRef, cancelPendingOutcomes } = useActionOutcomes({
+    spawnFloat, updateMembers, placeMember, partyStatsRef, partyPosRef, partyLevelRef, enemiesRef, dungeonRef, currentZoneRef, setEnemies, setCombat,
   });
+  // Who is inside whose aura, kept in step with where everyone stands (before the ticks, which read what it puts on units)
+  useAuras({ members, partyPositions, partyStats: partyAllStats, currentZone, enemies, updateMembers, setEnemies });
   useTurnTicks({
     combatActive: combat.active, round: combat.round, currentCombatant, membersRef, updateMembers, partyStatsRef, partyPosRef,
     enemiesRef, currentZoneRef, setEnemies, setCombat, spawnFloat,
@@ -597,55 +362,53 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
     },
   });
 
+  // ─── Aggro detection ─────────────────────────────────────────────────────
+
+  // How many fights have begun (each one plays the dark red pulse around the screen's edge: EdgePulse)
+  const [combatStarts, setCombatStarts] = useState(0);
+  /**
+   * Aggro every unaggroed group with a member visible from `pos`, then start combat with them
+   * (or add them to the combat already running).
+   */
+  const triggerAggro = useCallback((pos: Pos, zoneEnemyList: EnemyInstance[], sight: ReadonlySet<string>, inCombat: boolean): boolean => {
+    const newlyAggroed = aggroedBy(pos, zoneEnemyList, sight);
+    if (newlyAggroed.length === 0) return false;
+    const aggroIds = new Set(newlyAggroed.map(e => e.id));
+    setEnemies(prev => prev.map(e => aggroIds.has(e.id) ? { ...e, aggroed: true } : e));
+    if (!inCombat) setCombatStarts(n => n + 1);
+    // A new fight: the party's forever summons there roll initiative with everyone (in one already, they are in it)
+    const forever = zoneEnemyList.filter(e => isForeverSummon(e) && e.currentHp > 0);
+    setCombat(prev => inCombat
+      ? joinCombat(prev, newlyAggroed)
+      : startCombat(party.map((m, i) => ({ stats: partyStatsRef.current[i], name: m.characterName })), [...newlyAggroed, ...forever]));
+    return true;
+  }, [party, partyStatsRef]);
+
   // ─── Location transitions ──────────────────────────────────────────────
 
-  /**
-   * Go back to the Sanctum (`by` a rift, arriving in front of the Rifter, or by a passage's door, arriving inside its
-   * door), or into a dungeon or passage (a fresh one, generated from its preset).
-   */
-  const handleLocationChange = (next: 'sanctum' | AreaKey, by: 'rift' | 'door' = 'rift') => {
-    cancelPendingOutcomes();
-    reviveDowned();
-    setLocation(next === 'sanctum' ? 'sanctum' : 'dungeon');
-    setCombat(INITIAL_COMBAT);
-    clearFloats();
-    clearEffects();
-    resetDeaths(); // enemy ids repeat between dungeons
-    chests.resetChests(); // so do chest ids: a new dungeon's chests start full
-    resetFog(); // and it starts unseen
-    setFacesOnArrival(null);
-
-    if (next !== 'sanctum') {
-      setDungeonKey(next);
-      const { dungeon: d, enemies: spawned } = buildArea(next, progress.level);
-      setDungeon(d);
-      setCurrentZone(d.startZoneId);
-      setPlayerPos(d.playerStart);
-      setEnemies(spawned);
-      // The followers take the tiles around the rift the party came through, beside the leader
-      const isFree = isFreeFloor(d, d.zones[d.startZoneId], spawned);
-      setFollowerPositions(findFollowerSpawns(zoneRift(d, d.startZoneId) ?? d.playerStart, p => isFree(p) && !samePos(p, d.playerStart), 2));
-    } else {
-      setDungeon(null);
-      setCurrentZone(0);
-      window.clearTimeout(reopenTimer.current);
-      setRifter(DORMANT_RIFTER); // its rift closed after use: dormant again
-      setShowRifter(false);
-      // Every way back by a rift (or a party wipe) arrives in front of the Rifter; a passage's door, inside the Sanctum's door
-      const [leader, ...followers] = by === 'door' ? SANCTUM.doorArrival : SANCTUM.riftArrival;
-      setPlayerPos(leader);
-      setFollowerPositions(followers);
-      setEnemies([]);
-      // Through the door, the party faces its greeter, who speaks at once if he has a quest for it (scene 'greeting')
-      if (by === 'door') {
-        setFacesOnArrival(SANCTUM.npcs.find(n => n.id === SANCTUM.doorGreeter)?.pos ?? null);
-        if (npcQuestMark(SANCTUM.doorGreeter, quests.log)) setScene('greeting');
-      }
-    }
-  };
+  // Into a dungeon or back to the Sanctum, through a door to another zone, a party wipe: each fades the map to black first
+  const { changeLocation, travel, goThroughDoor, wipeToSanctum, fading, fadeMs } = useTravel({
+    partyLevel: progress.level, questLog: quests.log, questDid, foundKey,
+    zone, dungeon, currentZone, enemies, combatActive: combat.active,
+    setLocation, setDungeonKey, setDungeon, setCurrentZone, setPlayerPos, setFollowerPositions, setEnemies,
+    leaveMap: () => {
+      cancelPendingOutcomes();
+      reviveDowned();
+      setCombat(INITIAL_COMBAT);
+      clearFloats();
+      clearEffects();
+      resetDeaths(); // enemy ids repeat between dungeons
+      chests.resetChests(); // so do chest ids: a new dungeon's chests start full
+      resetFog(); // and it starts unseen
+    },
+    scenes, resetRifter, triggerAggro, clearFloats, restoreAll,
+  });
 
   // The game begins with the opening: the party arriving in its passage (scene 'arrival')
-  useEffect(() => { handleLocationChange(OPENING_PASSAGE); }, []); // eslint-disable-line react-hooks/exhaustive-deps -- once, on mount
+  // (TEMP, skipOpening: the party begins in the Sanctum in front of the Rifter, its first hint up as the narration would)
+  useEffect(() => {
+    if (skipOpening) { changeLocation('sanctum'); hints.trigger('gameStart'); } else changeLocation(OPENING_PASSAGE);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps -- once, on mount
 
   // ─── Death checks ────────────────────────────────────────────────────────
 
@@ -666,13 +429,9 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
   };
 
   useEffect(() => {
-    // A party wipe: everyone wakes in the Sanctum at full HP and MP, once the map has faded to black (a repeat
-    // call while it fades does nothing)
+    // A party wipe: everyone wakes in the Sanctum at full HP and MP, once the map has faded to black
     if (partyHp.every(hp => hp <= 0)) {
-      fadeOut(() => {
-        changes.current.handleLocationChange('sanctum');
-        changes.current.restoreAll();
-      });
+      wipeToSanctum();
       return;
     }
     // Out of combat: revive any individual dead members to 10%
@@ -690,89 +449,17 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [combat.active, currentCombatant, partyHp]);
 
-  // ─── Aggro detection ─────────────────────────────────────────────────────
-
-  /**
-   * Aggro every unaggroed group with a member visible from `pos`, then start combat with them
-   * (or add them to the combat already running).
-   */
-  // How many fights have begun (each one plays the dark red pulse around the screen's edge: EdgePulse)
-  const [combatStarts, setCombatStarts] = useState(0);
-  const triggerAggro = useCallback((pos: Pos, zoneEnemyList: EnemyInstance[], sight: ReadonlySet<string>, inCombat: boolean) => {
-    const newlyAggroed = aggroedBy(pos, zoneEnemyList, sight);
-    if (newlyAggroed.length === 0) return;
-    const aggroIds = new Set(newlyAggroed.map(e => e.id));
-    setEnemies(prev => prev.map(e => aggroIds.has(e.id) ? { ...e, aggroed: true } : e));
-    if (!inCombat) setCombatStarts(n => n + 1);
-    setCombat(prev => inCombat
-      ? joinCombat(prev, newlyAggroed)
-      : startCombat(party.map((m, i) => ({ stats: partyStatsRef.current[i], name: m.characterName })), newlyAggroed));
-  }, [party, partyStatsRef]);
-
-  // ─── Door transitions ─────────────────────────────────────────────────
-
-  const handleDoorClick = useCallback((doorId: string) => {
-    if (!zone || !dungeon || combat.active) return;
-
-    const door = zone.doors.find(d => d.id === doorId);
-    if (!door || door.to === 'sanctum') return; // (out to the Sanctum: goThroughDoor)
-    const { zoneId, doorId: pairedId } = door.to;
-
-    const targetZone = dungeon.zones[zoneId];
-    const pairedDoor = targetZone.doors.find(d => d.id === pairedId);
-    if (!pairedDoor) return;
-
-    // Arrive on the free floor tile closest to the paired door (never on an enemy), followers around it
-    const isFree = isFreeFloor(dungeon, targetZone, enemies);
-    const spawnPos = findOpenTilesNear(pairedDoor.pos, isFree, 1, 4)[0];
-    if (!spawnPos) return;
-
-    setCurrentZone(zoneId);
-    setPlayerPos(spawnPos);
-    setFollowerPositions(findFollowerSpawns(spawnPos, isFree, 2));
-    clearFloats();
-
-    triggerAggro(spawnPos, enemies.filter(e => e.zoneId === zoneId), targetZone.sight, false);
-  }, [zone, dungeon, combat.active, enemies, triggerAggro, clearFloats]);
-
-  // ─── Fading between maps ──────────────────────────────────────────────
-  // Every change of map (a rift into a dungeon or back to the Sanctum, a door to another zone, a party wipe) first
-  // fades the map to black (useFadeOut); the new one fades in once its 3D layer has drawn (useSceneReady)
-  const { fading, fadeMs, fadeOut } = useFadeOut();
-  // (each change as of when the fade ends, with that render's state)
-  const changes = useLatest({ handleLocationChange, handleDoorClick, restoreAll });
-  // Into a dungeon through the Rifter's rift: the quests waiting on the party entering it move on
-  const travel = (next: 'sanctum' | AreaKey) => {
-    if (next !== 'sanctum' && !isPassage(next)) questDid({ enterRift: next });
-    fadeOut(() => changes.current.handleLocationChange(next));
-  };
-  // Through a door: into another zone, or (a passage's way out) into the Sanctum
-  const goThroughDoor = (doorId: string) => {
-    const door = zone?.doors.find(d => d.id === doorId);
-    // Out of a passage with its found key still lying in it: the key's words turn the party back instead
-    if (door?.to === 'sanctum' && foundKey && zone && Object.values(zone.droppedKeys).includes(foundKey.key)) {
-      setTurnBack(door.pos);
-      setScene('finding');
-      return;
-    }
-    const out = door?.to === 'sanctum';
-    fadeOut(() => (out ? changes.current.handleLocationChange('sanctum', 'door') : changes.current.handleDoorClick(doorId)));
-  };
 
   // ─── Movement handler ────────────────────────────────────────────────────
 
-  const handleMove = useCallback((newPos: Pos) => {
+  /** Move the active member to `newPos`. True if it moved and no fight began (a click that walks to an object then uses it). */
+  const handleMove = useCallback((newPos: Pos): boolean => {
     const steps = moveTargets.get(posKey(newPos));
-    if (steps === undefined) return; // not reachable this turn (walls, enemies or too far)
+    if (steps === undefined) return false; // not reachable this turn (walls, enemies or too far)
     if (combat.active) {
-      if (!isPlayerTurn) return;
+      if (!isPlayerTurn) return false;
 
-      if (activePartyIdx === 0) {
-        setPlayerPos(newPos);
-        lootPickupRef.current(newPos);
-      } else {
-        setFollowerPositions(prev => prev.map((p, i) => i === activePartyIdx - 1 ? newPos : p));
-      }
+      placeMember(activePartyIdx, newPos);
 
       // Walks the tiles already paid for first, then pays 1 AP per `movement` tiles more
       const movement = activeStats.movement;
@@ -781,19 +468,24 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
         return { ...prev, apSpent: prev.apSpent + apSpent, paidTiles: tilesLeft };
       });
     } else {
-      // Followers trail the leader along the way it walked, in an unbroken line behind it (trailFollowers),
-      // over walkable floor, never onto an enemy or a map object
-      const enemyTiles = creatureTiles(zoneEnemies.filter(e => e.currentHp > 0));
+      // Followers trail the leader along the way it walked, in an unbroken line behind it, its forever summons last
+      // (marchParty), over walkable floor, never onto an enemy or a map object
+      const enemyTiles = creatureTiles(zoneEnemies.filter(e => e.currentHp > 0 && isHostile(e)));
       const walkable = zone && dungeon ? zoneWalkable(dungeon, zone) : isSanctumWalkable;
       const isEnemy = (p: Pos) => enemyTiles.has(posKey(p));
       const walk = partyWalk(playerPos, newPos, steps, walkable, isEnemy);
+      const march = marchParty(walk, followerPositionsRef.current, zoneForever.map(bodyOf), p => walkable(p) && !isEnemy(p));
       setPlayerPos(newPos);
-      setFollowerPositions(trailFollowers(walk, followerPositionsRef.current, p => walkable(p) && !isEnemy(p)));
+      setFollowerPositions(march.followers);
+      if (zoneForever.length) {
+        const to = new Map(zoneForever.map((e, i) => [e.id, march.summons[i]]));
+        setEnemies(prev => prev.map(e => (to.has(e.id) ? { ...e, pos: to.get(e.id)! } : e)));
+      }
       lootPickupRef.current(newPos);
     }
 
-    if (zone) triggerAggro(newPos, zoneEnemies, zone.sight, combat.active);
-  }, [combat.active, moveTargets, isPlayerTurn, activePartyIdx, activeStats.movement, playerPos, zoneEnemies, zone, dungeon, triggerAggro]); // eslint-disable-line react-hooks/exhaustive-deps
+    return !(zone && triggerAggro(newPos, zoneEnemies, zone.sight, combat.active));
+  }, [combat.active, moveTargets, isPlayerTurn, activePartyIdx, activeStats.movement, playerPos, zoneEnemies, zoneForever, zone, dungeon, triggerAggro]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ─── End turn ────────────────────────────────────────────────────────────
 
@@ -810,9 +502,22 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
 
     const action = activeAction;
     if (!action || activeMp < mpCostAt(action, progress.level)) return;
-    // A summoned creature only lasts the fight: no summoning out of combat
-    if (!combat.active && action.effects.some(e => e.type === 'summon')) {
-      spawnFloat(activePartyPos.x, activePartyPos.y, 'Only in combat', COMBAT_TEXT_COLOR.warn);
+    // A summoned creature only lasts the fight: no summoning out of combat; movement abilities are for fights too.
+    // A forever summon outlasts fights, so it can be called up out of one, but only in a dungeon (it stays there)
+    const summons = action.effects.some(e => e.type === 'summon');
+    const forever = summons && summonsForever(action);
+    const refusal = combat.active ? null
+      : action.move || (summons && !forever) ? 'Only in combat'
+      : forever && location !== 'dungeon' ? 'Only in a dungeon'
+      : null;
+    if (refusal) {
+      spawnFloat(activePartyPos.x, activePartyPos.y, refusal, COMBAT_TEXT_COLOR.warn);
+      clearActiveSlot();
+      return;
+    }
+    // A rooted member can't move by an ability either
+    if (rootBlocks(action, partyBuffs[activePartyIdx] ?? [])) {
+      spawnFloat(activePartyPos.x, activePartyPos.y, 'Rooted', COMBAT_TEXT_COLOR.warn);
       clearActiveSlot();
       return;
     }
@@ -834,14 +539,20 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
         return i >= 0 ? partyUnit(i) : summon ? creatureUnit(summon) : null;
       },
       hostiles: zoneEnemies.filter(e => e.currentHp > 0 && isHostile(e)).map(creatureUnit),
-      tileTargets,
+      tileTargets, moveAims, caster,
     });
     if (!aimed) { clearActiveSlot(); return; }
 
-    applyActionOutcome(executeAction(caster, action, aimed.targets, targetPos, aimed.allies, actionWorld()), caster, targetPos);
+    // A movement ability moves its caster first, then resolves from where it lands
+    const outcome = aimed.move
+      ? executeMoveAction(caster, action, aimed.move, aimed.targets, targetPos, aimed.allies, actionWorld())
+      : executeAction(caster, action, aimed.targets, targetPos, aimed.allies, actionWorld());
+    applyActionOutcome(outcome, caster, targetPos);
     clearActiveSlot();
     if (combat.active) setCombat(prev => ({ ...prev, apSpent: prev.apSpent + action.apCost }));
-  }, [combat.active, isPlayerTurn, activeAp, activePartyIdx, activeAction, zoneEnemies, activePartyPos, activeMp, partyAllStats, partyPositions, partyHp, party, zone, zoneSummons, tileTargets, applyActionOutcome, spawnFloat, progress.level]); // eslint-disable-line react-hooks/exhaustive-deps
+    // Landing near sleeping enemies wakes them, as walking there would
+    if (aimed.move && zone) triggerAggro(aimed.move.landing, zoneEnemies, zone.sight, combat.active);
+  }, [combat.active, isPlayerTurn, activeAp, activePartyIdx, activeAction, zoneEnemies, activePartyPos, activeMp, partyAllStats, partyPositions, partyHp, partyBuffs, party, zone, zoneSummons, location, tileTargets, moveAims, triggerAggro, applyActionOutcome, spawnFloat, progress.level]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // A member's turn ends by itself once it has nothing left to spend (no AP, no paid tiles). One that starts
   // its turn with no AP (stunned) loses it, the same as an enemy (useEnemyTurn). Waits a moment first, and
@@ -886,14 +597,15 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
 
   // ─── Combat end detection ────────────────────────────────────────────────
 
-  // Every enemy in the fight is dead (summoned ones too): it's over, and every summoned creature vanishes with it
+  // Every enemy in the fight is dead (summoned ones too): it's over, and every summoned creature vanishes with it,
+  // but the party's living forever summons (they stay until slain, or until the party leaves the dungeon)
   useEffect(() => {
     if (!combat.active) return;
     const allAggroedDead = zoneEnemies.filter(e => e.aggroed && isHostile(e)).every(e => e.currentHp <= 0);
     if (!allAggroedDead) return;
     reviveParty();
     setCombat(INITIAL_COMBAT);
-    setEnemies(prev => prev.filter(e => !e.summon));
+    setEnemies(prev => prev.filter(e => !e.summon || (isForeverSummon(e) && e.currentHp > 0)));
   }, [combat.active, zoneEnemies]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ─── Map view ────────────────────────────────────────────────────────────
@@ -959,6 +671,7 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
               activeMoverPos={combat.active ? activePartyPos : playerPos}
               party={partyTokens}
               aims={unitAims}
+              moves={unitMoves}
               fx={unitFx}
               moveTargets={moveTargets}
               moveApCost={moveApCost}
@@ -984,6 +697,7 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
               onFloatingTextComplete={removeFloat}
               zone={zone}
               riftPos={riftPos}
+              riftShut={dungeon ? riftShut(dungeon, currentZone, enemies) : false}
               partyBuffs={partyBuffs}
               partyHots={partyHots}
               partyDots={partyDots}
@@ -993,6 +707,8 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
               enemyAoePreview={enemyAoePreview}
               enemyTargetKey={enemyTargetKey}
               tileTargets={tileTargets}
+              activeMove={!!activeAction?.move}
+              moveAims={moveAims}
               droppedItems={zone?.droppedItems}
               droppedKeys={zone?.droppedKeys}
               keyMark={keyMark}
@@ -1002,7 +718,7 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
                 at: (finding ?? turnBack)!,
                 content: <NpcDialogue portrait={<KeyPortrait color={DUNGEONS[foundKey.key].riftColor} size={DIALOGUE_PORTRAIT} />} name={foundKey.name}
                   conversation={finding ? foundKey.conversation : foundKey.leaving} quests={quests.log} onTopicDone={() => {}}
-                  onEnd={finding ? finishFinding : () => { setTurnBack(null); setScene(null); }} />,
+                  onEnd={finding ? finishFinding : scenes.endTurnBack} />,
               } : null}
               droppedGold={zone?.droppedGold}
               droppedShards={zone?.droppedShards}
@@ -1020,14 +736,13 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
       {/* The arrival told over the dimmed map, once the party has come through; then the game begins */}
       {scene === 'arrival' && arrival.telling && (
         <div className="rf-narration-dim absolute inset-0 z-40 flex items-center justify-center">
-          <Narration lines={ARRIVAL_LINES} onDone={() => { setScene(null); hints.trigger('gameStart'); }} />
+          <Narration lines={ARRIVAL_LINES} onDone={() => { scenes.end(); hints.trigger('gameStart'); }} />
         </div>
       )}
 
       {/* ─── HUD ─── (none while the party arrives; not usable while it watches a scene) */}
       {scene !== 'arrival' && <div className={`contents ${locked ? '[&_*]:pointer-events-none' : ''}`}>
 
-      {/* Where the party is */}
       {/* Where the party is, and its active quests under it */}
       <div className="absolute top-5 left-6 z-30 flex flex-col gap-12 pointer-events-none">
         <div className="rf-label">{locationName}</div>
@@ -1096,6 +811,7 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
             member={party[dockIdx]}
             stats={partyAllStats[dockIdx]}
             mp={members[dockIdx]?.mp ?? 0}
+            buffs={partyBuffs[dockIdx] ?? []}
             slots={partySlots[dockIdx] ?? []}
             onSlotsChange={slots => setPartySlots(prev => prev.map((s, idx) => idx === dockIdx ? slots : s))}
             armedSlot={partyActiveSlot[dockIdx] ?? null}
@@ -1105,6 +821,7 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
             ap={combat.active ? apState(partyAllStats[dockIdx].apMax, members[dockIdx]?.buffs ?? [], dockIdx === activePartyIdx ? activeAp : 0) : null}
             paidTiles={combat.active && dockIdx === activePartyIdx ? combat.paidTiles : 0}
             onEndTurn={combat.active ? handleEndTurn : undefined}
+            keysEnabled={!locked && !showCharSheet && !showRifter && !talkingTo && !showTesting}
           />
         </div>
       )}
@@ -1133,7 +850,7 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
           onLevelUp={() => addXp(xpToNext(progress.level) - progress.xp)} onClose={() => setShowTesting(false)} />
       )}
       {talkingTo && npc(talkingTo.id).service === 'enchanting' && (
-        <EnchanterWindow enchanter={enchanter} npc={npc(talkingTo.id)} inventory={inventory} gold={gold} shards={shards}
+        <EnchanterWindow enchanter={enchanter} npc={npc(talkingTo.id)} party={party} inventory={inventory} gold={gold} shards={shards}
           canUse={partyCanUse} onClose={endTalk} />
       )}
 
@@ -1160,10 +877,13 @@ export default function GameScreen({ party, setParty, progress, setProgress }: P
           hasNewShards={hasNewShards}
           onSeeShards={seeShards}
           onClose={() => setShowCharSheet(false)}
-          onEquipItem={equipItem}
-          onUnequipItem={unequipItem}
+          // In combat gear can't be changed (useInventory gearLocked): the window offers no equipping, unequipping or swapping
+          gearLocked={combat.active}
+          onEquipItem={combat.active ? undefined : equipItem}
+          onUnequipItem={combat.active ? undefined : unequipItem}
           onMoveItem={moveInventoryItem}
-          onSwapGear={swapGearSlots}
+          onSortItems={sortItems}
+          onSwapGear={combat.active ? undefined : swapGearSlots}
           progress={progress}
           pending={pendingPoints}
           onPendingChange={setMemberPending}

@@ -1,15 +1,16 @@
-// The Sanctum enchanter's services (data/gear/enchanting.ts) on the party's inventory, gold and shards: enchanting,
-// disenchanting and shattering the item in an inventory slot (the one on her bench), and selling shards and buying
-// them back. Every action says what happened (or why it couldn't), for the window's status line. The shards sold this
-// session, most recent first, stay for buying back as long as the game runs.
+// The Sanctum enchanter's services (data/gear/enchanting.ts) on the party's items, gold and shards: enchanting an item
+// (carried or worn: the one her bench points at, a BenchRef), disenchanting and shattering a carried one, and selling
+// shards and buying them back. Every action says what happened (or why it couldn't), for the window's status line. The
+// shards sold this session, most recent first, stay for buying back as long as the game runs.
 import { useState, type Dispatch, type SetStateAction } from 'react';
 import type { Item } from '../data/gear';
 import type { AffixStat } from '../data/gear/affixes';
 import { setSlot, type Inventory } from '../data/gear/inventory';
+import type { PartyMemberConfig } from '../data/units/party';
 import { shardCount, shardName, type ShardCounts } from '../data/gear/shards';
 import {
-  DISENCHANT_COST, SHARD_PRICE, SHATTER_COST, addAffix, addAffixCost, addBlocked, addableShards, affixGroup, shardsOf,
-  shatterPick, tierValueText, upgradeAffix, upgradeBlocked, upgradeCost, type BenchParty,
+  DISENCHANT_COST, SHARD_PRICE, SHATTER_COST, addAffix, addAffixCost, addBlocked, addableShards, affixGroup, benchItem, shardsOf,
+  shatterPick, tierValueText, upgradeAffix, upgradeBlocked, upgradeCost, type BenchParty, type BenchRef,
 } from '../data/gear/enchanting';
 import { formatGold } from '../data/detailStrings';
 
@@ -28,8 +29,11 @@ export interface SoldShard {
 
 const shardsWord = (n: number) => (n === 1 ? 'shard' : 'shards');
 
-export function useEnchanter({ partyLevel, inventory, setInventory, gold, addGold, shards, addShard, gainShards, spendShard }: {
+export function useEnchanter({ partyLevel, party: members, setParty, inventory, setInventory, gold, addGold, shards, addShard, gainShards, spendShard }: {
   partyLevel: number;
+  /** The party members, whose worn gear can be enchanted too. */
+  party: PartyMemberConfig[];
+  setParty: (party: PartyMemberConfig[]) => void;
   inventory: Inventory;
   setInventory: Dispatch<SetStateAction<Inventory>>;
   gold: number;
@@ -43,58 +47,63 @@ export function useEnchanter({ partyLevel, inventory, setInventory, gold, addGol
   const [sold, setSold] = useState<SoldShard[]>([]);
   const party: BenchParty = { partyLevel, shards, gold };
   const fail = (message: string): EnchantResult => ({ ok: false, message });
-  /** The item in an inventory slot, changed (or, null, destroyed). */
-  const put = (slot: number, item: Item | null) => setInventory((inv) => setSlot(inv, slot, item));
+  const itemAt = (at: BenchRef) => benchItem(at, inventory, members);
+  /** The item `at` the bench's pointer, changed in place (or, null, destroyed: a carried one only). */
+  const put = (at: BenchRef, item: Item | null) => {
+    if (at.kind === 'inventory') setInventory((inv) => setSlot(inv, at.idx, item));
+    else setParty(members.map((m, i) => (i === at.member ? { ...m, gear: { ...m.gear, [at.slot]: item } } : m)));
+  };
 
-  /** Upgrade the affix at `idx` of the item in `slot` a tier: a shard of its stat and the gold. */
-  const upgrade = (slot: number, idx: number): EnchantResult => {
-    const item = inventory[slot];
-    if (!item) return fail('Place an item on the bench first.');
+  /** Upgrade the affix at `idx` of the item `at` the bench a tier: a shard of its stat and the gold. */
+  const upgrade = (at: BenchRef, idx: number): EnchantResult => {
+    const item = itemAt(at);
+    if (!item) return fail('Put an item on the bench first.');
     const why = upgradeBlocked(item, idx, party);
     if (why) return fail(why.long);
     const affix = item.affixes[idx], stat = affix.stat as AffixStat, tier = (affix.tier ?? 1) + 1, cost = upgradeCost(tier);
-    put(slot, upgradeAffix(item, idx));
+    put(at, upgradeAffix(item, idx));
     spendShard(stat);
     addGold(-cost);
     return { ok: true, message: `${shardName(stat)} raised to tier ${tier} (${tierValueText(item, stat, tier)}) for ${formatGold(cost)}.` };
   };
 
-  /** Add an affix of `stat` to the item in `slot`, at tier 1, in a slot of its group: a shard of it and the gold. */
-  const add = (slot: number, stat: AffixStat): EnchantResult => {
-    const item = inventory[slot];
-    if (!item) return fail('Place an item on the bench first.');
+  /** Add an affix of `stat` to the item `at` the bench, at tier 1, in a slot of its group: a shard of it and the gold. */
+  const add = (at: BenchRef, stat: AffixStat): EnchantResult => {
+    const item = itemAt(at);
+    if (!item) return fail('Put an item on the bench first.');
     const group = affixGroup({ stat, value: 0 });
     const why = addBlocked(item, group, party);
     if (why) return fail(why.long);
     if (!addableShards(item, group, shards).includes(stat)) return fail(`${shardName(stat)} can't be added to this item.`);
     const cost = addAffixCost(item.affixes.length);
-    put(slot, addAffix(item, stat));
+    put(at, addAffix(item, stat));
     spendShard(stat);
     addGold(-cost);
     return { ok: true, message: `Added ${shardName(stat)} (${tierValueText(item, stat, 1)}) for ${formatGold(cost)}.` };
   };
 
-  /** Destroy the item in `slot` for the shards of the affixes at `idxs`, for `cost`. */
-  const destroy = (slot: number, idxs: number[], cost: number, verb: string): EnchantResult => {
-    const item = inventory[slot];
-    if (!item) return fail('Place an item on the bench first.');
+  /** Destroy the item `at` the bench for the shards of the affixes at `idxs`, for `cost` (not a worn one). */
+  const destroy = (at: BenchRef, idxs: number[], cost: number, verb: string): EnchantResult => {
+    const item = itemAt(at);
+    if (!item) return fail('Put an item on the bench first.');
+    if (at.kind === 'gear') return fail(`Unequip ${item.name} in the party screen first.`);
     if (item.affixes.length === 0) return fail('This item has no affixes.');
     if (idxs.length === 0) return fail('Select at least one affix to extract.');
     if (gold < cost) return fail('Not enough gold.');
-    put(slot, null);
+    put(at, null);
     gainShards(shardsOf(item, idxs));
     addGold(-cost);
     const stats = idxs.map((i) => item.affixes[i].stat as AffixStat);
     return { ok: true, message: `${verb} ${item.name} for ${formatGold(cost)}. Got ${stats.length} ${shardsWord(stats.length)}.`, returned: { item, stats } };
   };
 
-  /** Disenchant: extract the affixes at `idxs` of the item in `slot` as shards, destroying it. */
-  const extract = (slot: number, idxs: number[]) => destroy(slot, idxs, DISENCHANT_COST[idxs.length - 1] ?? 0, 'Extracted');
+  /** Disenchant: extract the affixes at `idxs` of the item `at` the bench as shards, destroying it. */
+  const extract = (at: BenchRef, idxs: number[]) => destroy(at, idxs, DISENCHANT_COST[idxs.length - 1] ?? 0, 'Extracted');
 
-  /** Shatter the item in `slot`: a random number of its affixes as shards, destroying it. */
-  const shatter = (slot: number) => {
-    const item = inventory[slot];
-    return destroy(slot, item?.affixes.length ? shatterPick(item) : [], SHATTER_COST, 'Shattered');
+  /** Shatter the item `at` the bench: a random number of its affixes as shards, destroying it. */
+  const shatter = (at: BenchRef) => {
+    const item = itemAt(at);
+    return destroy(at, item?.affixes.length ? shatterPick(item) : [], SHATTER_COST, 'Shattered');
   };
 
   /** Sell one shard of `stat`, or (`all`) every one carried. */

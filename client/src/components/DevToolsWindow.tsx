@@ -23,7 +23,7 @@ export default function DevToolsWindow({ keys, onLevelUp, onAddKey, onEnterPassa
   keys: readonly DungeonKey[];
   onLevelUp: () => void;
   onAddKey: (key: DungeonKey) => void;
-  /** Go into a passage (none has a way in yet: the game's opening will lead into the first). */
+  /** Go into a passage (none has a way in from the Sanctum: the game's opening starts in the first). */
   onEnterPassage: (key: PassageKey) => void;
   onAddShard: (stat: AffixStat) => void;
   onAddGold: (amount: number) => void;

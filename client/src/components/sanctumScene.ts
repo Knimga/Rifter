@@ -25,7 +25,10 @@ export const SANCTUM_FOG: FogInput = { cols: SANCTUM.width, rows: SANCTUM.height
 /** The Sanctum's 3D floor and walls (forge/terrain), its walls opened at its doors: it never changes, so it is built once. */
 export const SANCTUM_3D = buildTerrain({ cols: SANCTUM.width, rows: SANCTUM.height, floors: SANCTUM_FLOORS, doors: SANCTUM.doors, style: SANCTUM_TERRAIN, seed: 0 });
 
-/** The Sanctum's doors (SANCTUM.doors), each a heavy door facing the floor it opens onto. Nothing uses them yet. */
+/**
+ * The Sanctum's doors (SANCTUM.doors), each a warded stone door facing the floor it opens onto. The party comes in by
+ * them (from a passage) but can't go out by them yet.
+ */
 export const SANCTUM_DOORS: MapObject[] = SANCTUM.doors.map((pos, i) => doorAt(`door-${i}`, 'warded-stone-door', pos, (p) => SANCTUM_FLOORS.has(posKey(p))));
 
 /**

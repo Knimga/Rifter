@@ -1,7 +1,7 @@
 // The party members' state in play (HP, MP, buffs, HoTs, DoTs; indexed like the party) and their effective
 // stats, kept in step: HP and MP are clamped to their maxima whenever stats drop (a buff ending, a gear swap).
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { freshMember, memberStats, type MemberState, type PartyMemberConfig } from '../data/units/party';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { freshMember, memberPassivesKey, memberStats, withCurrentPassives, withoutCastEffects, type MemberState, type PartyMemberConfig } from '../data/units/party';
 import type { PartyProgress } from '../data/units/xp';
 import { useLatest } from './useLatest';
 
@@ -17,19 +17,20 @@ const listId = (list: object) => {
 
 export function usePartyMembers(party: PartyMemberConfig[], progress: PartyProgress) {
   // Starts at full HP/MP; nothing restores it when a fight ends (regen does, over time)
-  const [members, setMembers] = useState<MemberState[]>(() => party.map(m => freshMember(m, progress.level)));
+  const [members, setMembers] = useState<MemberState[]>(() => party.map((m, i) => freshMember(m, progress.level, i)));
 
   /**
    * Apply `fn` to the listed members' state (others unchanged). When `fn` returns every member as it was,
    * the state stays the same array: React skips the redraw. A member it leaves at 0 HP (dead, whatever killed
-   * it) loses every buff, debuff, HoT and DoT on it at once: it comes back from the dead clean.
+   * it) loses every buff, debuff, HoT and DoT cast on it at once (not its passive effects): it comes back from the
+   * dead clean.
    */
   const updateMembers = useCallback((fn: (m: MemberState, i: number) => MemberState, only?: (i: number) => boolean) =>
     setMembers(prev => {
       const next = prev.map((m, i) => {
         if (only && !only(i)) return m;
         const n = fn(m, i);
-        return n.hp <= 0 && (n.buffs.length || n.hots.length || n.dots.length) ? { ...n, buffs: [], hots: [], dots: [] } : n;
+        return n.hp <= 0 ? withoutCastEffects(n) : n;
       });
       return next.every((m, i) => m === prev[i]) ? prev : next;
     }), []);
@@ -67,12 +68,21 @@ export function usePartyMembers(party: PartyMemberConfig[], progress: PartyProgr
     });
   }, [updateMembers, statsRef]);
 
-  /** Everyone at full HP and MP with no effects (after a party wipe). */
+  /** Everyone at full HP and MP with no effects but their passive ones (after a party wipe). */
   const latest = useLatest({ party, level: progress.level });
-  const restoreAll = useCallback(() => setMembers(latest.current.party.map(m => freshMember(m, latest.current.level))), [latest]);
+  const restoreAll = useCallback(() => setMembers(latest.current.party.map((m, i) => freshMember(m, latest.current.level, i))), [latest]);
 
-  /** Every buff, HoT and DoT ends (leaving a location). */
-  const clearEffects = useCallback(() => updateMembers(m => ({ ...m, buffs: [], hots: [], dots: [] })), [updateMembers]);
+  /** Every buff, HoT and DoT cast on a member ends (leaving a location); their passive effects stay. */
+  const clearEffects = useCallback(() => updateMembers(withoutCastEffects), [updateMembers]);
+
+  // When what a member's passive effects are changes (a subclass chosen), their stored entries follow
+  const passivesKey = party.map(memberPassivesKey).join(',');
+  const lastPassivesKey = useRef(passivesKey);
+  useEffect(() => {
+    if (lastPassivesKey.current === passivesKey) return;
+    lastPassivesKey.current = passivesKey;
+    updateMembers((m, i) => (party[i] ? withCurrentPassives(m, party[i], i) : m));
+  }, [passivesKey]); // eslint-disable-line react-hooks/exhaustive-deps -- the passives, by their key
 
   return { members, updateMembers, partyHp, partyBuffs, partyHots, partyDots, partyAllStats, reviveDowned, restoreAll, clearEffects };
 }

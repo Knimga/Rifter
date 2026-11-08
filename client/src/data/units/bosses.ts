@@ -1,6 +1,6 @@
 // The dungeons' bosses: enemy classes (like data/units/enemies.ts's) each dungeon's boss room is built around
 // (DungeonConfig.bossZone.bossGroup). A boss drops a rift key when it dies (isBoss).
-import { warnIgnoredEffects, warnIgnoredTriggers } from '../combat/abilities';
+import { warnCreatureTable } from '../combat/abilities';
 import type { EnemyClassData, EnemyInstance } from './enemies';
 
 //attributes prop for all bosses should total +20
@@ -252,12 +252,12 @@ export const BOSS_CLASSES: EnemyClassData[] = [
     passives: {
       movement: { name: 'Skitterer', flat: 1 }
     },
-    passiveTriggers: [
-      { name: 'Potent Venom', damageElement: 'poison', trigger: {
+    passiveEffects: [
+      { name: 'Potent Venom', damageElement: 'poison', effect: { type: 'buff', trigger: {
         when: 'attacking', on: 'hit', categories: ['melee'], chance: 50,
         effects: [
           {type: 'dot', appliesTo: 'target', damageElement: 'poison', damagePerTurn: 6, turns: 3, maxStacks: 3 }]
-      }}
+      }}}
     ],
     abilities: [
       {
@@ -312,7 +312,4 @@ export const BOSS_CLASSES: EnemyClassData[] = [
 export const isBoss = (e: EnemyInstance) => BOSS_CLASSES.some((c) => c.id === e.classData.id);
 
 // Effects an ability (or a passive trigger) would silently ignore: warned at load
-for (const c of BOSS_CLASSES) {
-  warnIgnoredEffects(`bosses › ${c.id}`, c.abilities);
-  warnIgnoredTriggers(`bosses › ${c.id}`, c.passiveTriggers);
-}
+warnCreatureTable('bosses', BOSS_CLASSES);

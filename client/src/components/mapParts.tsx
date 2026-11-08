@@ -152,16 +152,42 @@ export const keyLoot = (key: string, dungeon: DungeonKey): MapLoot =>
 /** How much wider (and, drawn twice, brighter) a rift key's halo is lying on the floor than in the Rifter's socket (MapLoot.halo). */
 const KEY_HALO = 1.7;
 
+/** How many sparkles twinkle over a loot pile, and how long one sparkle's cycle lasts (ms). */
+const SPARKLES = 6;
+const SPARKLE_CYCLE = 2000;
+/** How wide the sparkles spread around a loot pile: 1 is a 34 x 26 px area (a bit over a tile wide), 1.3 is 30% wider and taller. */
+const SPARKLE_SPREAD = 1.3;
+
 /**
- * The soft round glow on the floor under something the leader can pick up now (an item, a rift key, gold, shards):
- * pale yellow whatever lies there, pulsing. Goes inside the tile, on the floor layer; `on` false keeps its place hidden.
+ * Loot lying on the floor (an item, a rift key, gold, shards): small four-pointed stars twinkling over the pile,
+ * pale gold whatever lies there, so it catches the eye. Upright, over the pile's model. Each pile's sparkles sit
+ * and time themselves by its tile (piles don't twinkle in step); the view's own effect, not the loot's design
+ * (loot never animates).
  */
-export function LootGlow({ on }: { on: boolean }) {
+export function LootSparkle({ board, x, y }: { board: BoardLayout; x: number; y: number }) {
+  // A small hash of the tile: where each sparkle sits around the pile and when it lights
+  const at = (i: number, salt: number) => {
+    const h = Math.sin((x + 1) * 127.1 + (y + 1) * 311.7 + i * 74.7 + salt * 19.3) * 43758.5453;
+    return h - Math.floor(h);
+  };
   return (
-    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-      <div className={`w-10 h-10 rounded-full ${on ? 'animate-pulse' : 'invisible'}`}
-        style={{ background: 'radial-gradient(circle, color-mix(in srgb, var(--rift-loot-glow) 55%, transparent) 0%, color-mix(in srgb, var(--rift-loot-glow) 22%, transparent) 45%, transparent 70%)' }} />
-    </div>
+    <UprightAt board={board} x={x} y={y} height={0.15} className="z-10">
+      {Array.from({ length: SPARKLES }, (_, i) => {
+        const size = 7 + at(i, 3) * 5;
+        return (
+          <svg key={i} viewBox="-10 -10 20 20" width={size} height={size} aria-hidden className="rf-sparkle absolute"
+            style={{
+              left: TILE_SIZE / 2 + (at(i, 1) - 0.5) * 34 * SPARKLE_SPREAD - size / 2,
+              top: TILE_SIZE / 2 + (at(i, 2) - 0.5) * 26 * SPARKLE_SPREAD - size / 2,
+              // Spread evenly through the cycle (with a little jitter), so one is always lighting
+              animationDelay: `${-Math.round(((i + at(i, 4) * 0.6) / SPARKLES) * SPARKLE_CYCLE)}ms`,
+              animationDuration: `${SPARKLE_CYCLE}ms`,
+            }}>
+            <path d="M0 -10 Q1.2 -1.2 10 0 Q1.2 1.2 0 10 Q-1.2 1.2 -10 0 Q-1.2 -1.2 0 -10Z" fill="var(--rift-loot-sparkle)" />
+          </svg>
+        );
+      })}
+    </UprightAt>
   );
 }
 
@@ -298,14 +324,16 @@ export function TileHighlight({ kind, className = '' }: { kind: keyof typeof TIL
 // ─── Floating text ────────────────────────────────────────────────────────────
 
 /**
- * A map's floating text (damage, heals, "Level N!", gold), rising from its tile; `shown` (optional) picks which (a
- * dungeon's: only those over tiles the party sees). A large creature's float rises from its center (between tiles).
+ * A map's floating text (damage, heals, "Level N!", gold), rising from its tile; `shown` (optional) picks which are
+ * drawn (a dungeon's: only those over tiles the party sees). The others still run out on time, unseen, so none plays
+ * late once its tile comes into sight. A large creature's float rises from its center (between tiles).
  */
 export function MapFloats({ board, floats, onComplete, shown }: { board: BoardLayout; floats: FloatingText[]; onComplete: (id: number) => void; shown?: (ft: FloatingText) => boolean }) {
   return (
     <>
-      {floats.filter((ft) => !shown || shown(ft)).map((ft) => (
-        <FloatingCombatText key={ft.id} ft={ft} at={board.toScreen(ft.gridX + 0.5, ft.gridY + 0.5, 0.5)} onComplete={onComplete} />
+      {floats.map((ft) => (
+        <FloatingCombatText key={ft.id} ft={ft} at={board.toScreen(ft.gridX + 0.5, ft.gridY + 0.5, 0.5)} onComplete={onComplete}
+          hidden={!!shown && !shown(ft)} />
       ))}
     </>
   );

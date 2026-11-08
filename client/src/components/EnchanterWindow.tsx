@@ -1,8 +1,10 @@
 // An enchanter's window (an NPC with the 'enchanting' service, data/world/npcs.ts), opened by speaking to her: her bench
-// above, with four services as tabs (data/gear/enchanting.ts), and the party's inventory (or, selling, its shards) and
-// gold below. Right-click an inventory item to place it on the bench (it leaves its slot while there); click or
-// right-click it on the bench to take it back. The bench only points at the item's inventory slot, so closing the
-// window, for any reason, leaves the item where it was.
+// above, with four services as tabs (data/gear/enchanting.ts), and the party's items (or, selling, its shards) and
+// gold below: a tab for the inventory and one for each member's gear (laid out as in the party window). Right-click an
+// item, carried or worn, to put it on the bench; click or right-click it on the bench (or right-click it again) to
+// clear it. The bench only points at the item (a BenchRef) and the item never moves, so there is no unequipping and
+// re-equipping, and closing the window, for any reason, leaves everything where it was. Worn gear can be enchanted in
+// place, but not destroyed (Disenchant, Shatter): it has to be unequipped first.
 // - Enchant: each of the bench's four affix rows (two per affix group, told apart by color) upgrades its affix or adds
 //   one from a shard (a picker of the shards that fit), within the tier total's cap.
 // - Disenchant: pick affixes to extract as shards; Shatter: break it for a random few. Both destroy the item and ask a
@@ -16,24 +18,27 @@ import RightClickHint from './ui/RightClickHint';
 import { PartyGold, StatusLine, useGoldPulse } from './ui/TradeStatus';
 import ItemGrid from './ItemGrid';
 import ItemIcon, { rarityGlow } from './ItemIcon';
+import { SLOT_ICON, SLOT_POS } from './gearSlotLayout';
 import { ShardIcon, ShardRail, type ShardFilter } from './ShardsTab';
-import { itemTypeLine } from './Tooltip';
+import { ItemTooltipContent, Tooltip, itemTypeLine } from './Tooltip';
 import type { NpcData } from '../data/world/npcs';
-import type { Item } from '../data/gear';
+import { CLASSES } from '../data/units/classes';
+import type { PartyMemberConfig } from '../data/units/party';
+import { GEAR_SLOTS, type GearSlot, type Item } from '../data/gear';
 import type { AffixStat } from '../data/gear/affixes';
 import { MAX_TIER, itemTierSum, tierSumCap } from '../data/gear/affixes';
 import { INVENTORY_COLS, INVENTORY_SIZE, type Inventory } from '../data/gear/inventory';
 import { SHARDS, categoryOfShard, shardCategory, shardCount, shardName, type ShardCounts } from '../data/gear/shards';
 import {
   BENCH_ROWS, DISENCHANT_COST, SHARD_PRICE, SHATTER_COST, addAffixCost, addBlocked, addableShards, affixGroup, affixValueText,
-  benchRows, tierValueText, upgradeBlocked, upgradeCost, type BenchParty,
+  benchItem, benchRows, sameBenchRef, tierValueText, upgradeBlocked, upgradeCost, type BenchParty, type BenchRef,
 } from '../data/gear/enchanting';
 import type { EnchantResult, SoldShard } from '../hooks/useEnchanter';
 import { AFFIX_GROUP_COLOR, RARITY_COLOR } from '../data/constants';
-import { formatModifier } from '../data/detailStrings';
+import { SLOT_LABEL, formatModifier } from '../data/detailStrings';
 
 /** The window's design size (px). */
-const WIDTH = 672, HEIGHT = 780;
+const WIDTH = 672, HEIGHT = 790;
 
 type Mode = 'enchant' | 'disenchant' | 'shatter' | 'sell';
 
@@ -45,16 +50,19 @@ const MODES: Record<Mode, { tab: string; hint: string; accent: string; start: st
   sell: { tab: 'Sell shards', hint: `Shards sell for ${SHARD_PRICE} each`, accent: 'var(--bench-sell)', start: 'Right-click a shard to sell one. Shift + right-click sells all of it.' },
 };
 const MODE_ORDER: Mode[] = ['enchant', 'disenchant', 'shatter', 'sell'];
-const EMPTY_BENCH = 'Right-click an item in your inventory to place it on the bench.';
+const EMPTY_BENCH = 'Right-click an item in your inventory or on a party member to put it on the bench.';
+
+/** Where the party's items are picked from: the inventory, or (by index) a member's gear. */
+type Source = 'inventory' | number;
 
 /** What the enchanter does for the window (useEnchanter). */
 export interface EnchanterActions {
   party: BenchParty;
   sold: SoldShard[];
-  upgrade: (slot: number, idx: number) => EnchantResult;
-  add: (slot: number, stat: AffixStat) => EnchantResult;
-  extract: (slot: number, idxs: number[]) => EnchantResult;
-  shatter: (slot: number) => EnchantResult;
+  upgrade: (at: BenchRef, idx: number) => EnchantResult;
+  add: (at: BenchRef, stat: AffixStat) => EnchantResult;
+  extract: (at: BenchRef, idxs: number[]) => EnchantResult;
+  shatter: (at: BenchRef) => EnchantResult;
   sell: (stat: AffixStat, all?: boolean) => EnchantResult;
   buyBack: (stat: AffixStat) => EnchantResult;
 }
@@ -67,9 +75,11 @@ interface Outcome {
 }
 
 
-export default function EnchanterWindow({ enchanter, npc, inventory, gold, shards, canUse, onClose }: {
+export default function EnchanterWindow({ enchanter, npc, party, inventory, gold, shards, canUse, onClose }: {
   enchanter: EnchanterActions;
   npc: NpcData;
+  /** The party members: their worn gear can go on the bench too. */
+  party: PartyMemberConfig[];
   inventory: Inventory;
   gold: number;
   shards: ShardCounts;
@@ -78,8 +88,9 @@ export default function EnchanterWindow({ enchanter, npc, inventory, gold, shard
   onClose: () => void;
 }) {
   const [mode, setMode] = useState<Mode>('enchant');
-  // The inventory slot whose item is on the bench
-  const [bench, setBench] = useState<number | null>(null);
+  // The item on the bench (where it lives), and the tab of the panel below that is showing
+  const [bench, setBench] = useState<BenchRef | null>(null);
+  const [source, setSource] = useState<Source>('inventory');
   // Disenchant: the affixes picked to extract (item.affixes indexes)
   const [picked, setPicked] = useState<number[]>([]);
   // Disenchant / Shatter: the main button was clicked once and asks for a second click
@@ -93,7 +104,9 @@ export default function EnchanterWindow({ enchanter, npc, inventory, gold, shard
   const goldPulse = useGoldPulse();
   const [flash, setFlash] = useState<{ row: number; n: number }>({ row: -1, n: 0 });
 
-  const item = bench !== null ? inventory[bench] : null;
+  const item = benchItem(bench, inventory, party);
+  // Whose gear the benched item is worn by, if worn
+  const owner = bench?.kind === 'gear' ? party[bench.member].characterName : null;
   const accent = MODES[mode].accent;
   const say = (text: string, bad = false) => setMessage({ text, bad });
 
@@ -105,11 +118,15 @@ export default function EnchanterWindow({ enchanter, npc, inventory, gold, shard
   };
   /** Back to the service's start: no selection, picker, armed confirm or result. */
   const reset = () => { setPicked([]); setArmed(false); setPicker(null); setOutcome(null); };
-  const place = (slot: number | null) => {
+  /** Put the item `ref` points at on the bench (null: clear it). */
+  const place = (ref: BenchRef | null) => {
     reset();
-    setBench(slot);
-    say(slot === null ? EMPTY_BENCH : MODES[mode].start);
+    setBench(ref);
+    const it = benchItem(ref, inventory, party);
+    say(!ref || !it ? 'Bench cleared.' : `Put ${ref.kind === 'gear' ? `${party[ref.member].characterName}'s ` : ''}${it.name} on the bench.`);
   };
+  /** Right-click: put an item on the bench, or, if it is the one there, clear it. */
+  const toggle = (ref: BenchRef) => place(sameBenchRef(bench, ref) ? null : ref);
   const switchMode = (m: Mode) => {
     reset();
     setMode(m);
@@ -130,7 +147,7 @@ export default function EnchanterWindow({ enchanter, npc, inventory, gold, shard
 
   /** Disenchant or Shatter, on its second click: the item is destroyed and its shards shown. */
   const destroy = () => {
-    if (bench === null || !item) return;
+    if (!bench || !item || bench.kind === 'gear') return;
     const r = mode === 'disenchant' ? enchanter.extract(bench, picked) : enchanter.shatter(bench);
     report(r);
     setArmed(false);
@@ -169,16 +186,16 @@ export default function EnchanterWindow({ enchanter, npc, inventory, gold, shard
 
         {mode === 'sell' ? <SoldList sold={enchanter.sold} gold={gold} onBuyBack={(stat) => report(enchanter.buyBack(stat))} /> : (
           <div className="flex gap-4 mt-3 h-[262px]">
-            <ItemColumn item={item} partyLevel={enchanter.party.partyLevel} onTakeBack={() => place(null)} />
+            <ItemColumn item={item} owner={owner} partyLevel={enchanter.party.partyLevel} onClear={() => place(null)} />
             <div className="flex-1 min-w-0 flex flex-col">
               {outcome ? <ResultCard outcome={outcome} onDone={() => setOutcome(null)} /> : (
                 <>
-                  <AffixRows mode={mode} item={item} party={enchanter.party} picked={picked} flash={flash}
+                  <AffixRows mode={mode} item={item} worn={bench?.kind === 'gear'} party={enchanter.party} picked={picked} flash={flash}
                     onUpgrade={(idx, row) => report(enchanter.upgrade(bench!, idx), row)}
                     onBlocked={(why) => say(why, true)}
                     onOpenPicker={(row) => setPicker(row)}
                     onTogglePick={(idx) => { setArmed(false); setPicked((p) => (p.includes(idx) ? p.filter((i) => i !== idx) : [...p, idx])); }} />
-                  <Footer mode={mode} item={item} picked={picked} gold={gold} armed={armed}
+                  <Footer mode={mode} item={item} worn={bench?.kind === 'gear'} picked={picked} gold={gold} armed={armed}
                     onBlocked={(why) => { say(why, true); if (why.includes('gold')) goldPulse.pulse(true); }}
                     onArm={() => { setArmed(true); say('Click again to confirm. The item will be destroyed.', true); }}
                     onConfirm={destroy}
@@ -207,15 +224,34 @@ export default function EnchanterWindow({ enchanter, npc, inventory, gold, shard
             onSell={(stat, all) => report(enchanter.sell(stat, all))} />
         </section>
       ) : (
-        // The party's inventory: right-click an item to place it on the bench (its slot shows empty while it is there)
-        <section aria-label="Party inventory" className="rf-panel flex-none mt-3 p-3.5">
-          <div className="flex items-baseline justify-between mb-2.5">
-            <h3 className="rf-h">Inventory <RightClickHint text="Bench" label="Right-click to place on bench" /></h3>
+        // The party's items: the inventory, or a member's gear. Right-click one to put it on the bench (it stays where it is)
+        <section aria-label="Party gear" className="rf-panel flex-none mt-3 p-3.5" style={{ ['--ac' as string]: accent }}>
+          <div className="flex items-center justify-between h-[26px] mb-2.5">
+            <span className="flex items-center gap-3.5">
+              <div role="tablist" aria-label="Item source" className="rf-segs" style={{ height: 26 }}>
+                {(['inventory', ...party.map((_, i) => i)] as Source[]).map((src) => (
+                  <button key={src} type="button" role="tab" aria-selected={source === src} className={`rf-seg ${source === src ? 'is-on' : ''}`} onClick={() => setSource(src)}>
+                    {src === 'inventory' ? 'Inventory' : party[src].characterName}
+                    {/* The benched item is worn by this member (the inventory shows its own mark in the grid) */}
+                    {src !== 'inventory' && bench?.kind === 'gear' && bench.member === src && (
+                      <span aria-label=", item on the bench" className="inline-block w-[5px] h-[5px] ml-[7px] align-[2px] rotate-45"
+                        style={{ background: 'var(--ac)', boxShadow: '0 0 6px var(--ac)' }} />
+                    )}
+                  </button>
+                ))}
+              </div>
+              <RightClickHint text="Bench" label="Right-click to put on bench" />
+            </span>
             {goldReadout}
           </div>
-          <ItemGrid label="Party inventory" items={inventory.map((it, i) => (i === bench ? null : it))} cols={INVENTORY_COLS} size={INVENTORY_SIZE}
-            canUse={canUse} unusableNote=", no one can use it" affixTiers
-            action={() => 'Place on bench'} onAction={place} />
+          {source === 'inventory' ? (
+            <ItemGrid label="Party inventory" items={inventory} cols={INVENTORY_COLS} size={INVENTORY_SIZE}
+              canUse={canUse} unusableNote=", no one can use it" affixTiers
+              action={() => 'Put on bench'} onAction={(idx) => toggle({ kind: 'inventory', idx })}
+              selected={(idx) => sameBenchRef(bench, { kind: 'inventory', idx })} />
+          ) : (
+            <GearView member={party[source]} memberIdx={source} bench={bench} partyLevel={enchanter.party.partyLevel} onBench={toggle} />
+          )}
         </section>
       )}
 
@@ -300,25 +336,26 @@ function BenchDecor({ mode }: { mode: Mode }) {
 
 // ─── The item column ──────────────────────────────────────────────────────────
 
-/** The item on the bench (or its empty slot), its implicit, and the tier total against the party level's cap. */
-function ItemColumn({ item, partyLevel, onTakeBack }: { item: Item | null; partyLevel: number; onTakeBack: () => void }) {
+/** The item on the bench (or its empty slot), who wears it, its implicit, and the tier total against the party level's cap. */
+function ItemColumn({ item, owner, partyLevel, onClear }: { item: Item | null; owner: string | null; partyLevel: number; onClear: () => void }) {
   const cap = tierSumCap(partyLevel);
   const sum = item ? itemTierSum(item.affixes) : 0;
   const atCap = !!item && sum >= cap;
   const glow = item ? rarityGlow(item) : null;
-  const takeBack = (e: MouseEvent) => { e.preventDefault(); onTakeBack(); };
+  const clear = (e: MouseEvent) => { e.preventDefault(); onClear(); };
   return (
     <div className="flex-none w-[168px] flex flex-col">
       {item ? (
         <>
-          <button type="button" className={`rf-cell is-filled ${glow!.className}`} aria-label={`${item.name} on the bench. Click to take it back.`}
-            onClick={onTakeBack} onContextMenu={takeBack}
+          <button type="button" className={`rf-cell is-filled ${glow!.className}`} aria-label={`${item.name} on the bench. Click to clear the bench.`}
+            onClick={onClear} onContextMenu={clear}
             style={{ ...glow!.style, width: 72, height: 72, borderColor: 'color-mix(in srgb, var(--ac) 45%, var(--rift-edge))',
               boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.04), inset 0 -2px 8px rgba(0, 0, 0, 0.6), 0 0 28px color-mix(in srgb, var(--ac) 28%, transparent)' }}>
             <ItemIcon item={item} className="w-[48px] h-[48px]" />
           </button>
           <span className="block mt-2.5 font-display text-sm leading-[1.25] tracking-[0.03em]" style={{ color: RARITY_COLOR[item.rarity] }}>{item.name}</span>
           <span className="block mt-[3px] text-[11px] capitalize text-rift-muted">{itemTypeLine(item)}</span>
+          {owner && <span className="block mt-1 text-[11px]" style={{ color: 'var(--ac)' }}>Equipped · {owner}</span>}
           <span className="block mt-2 pt-2 text-xs text-rift-ink" style={{ borderTop: '1px solid color-mix(in srgb, var(--ac) 22%, var(--rift-seam))' }}>
             {item.implicit ? formatModifier(item.implicit.stat, item.implicit.value) : ''}
           </span>
@@ -328,7 +365,7 @@ function ItemColumn({ item, partyLevel, onTakeBack }: { item: Item | null; party
           <div className="rf-cell" aria-hidden="true"
             style={{ width: 72, height: 72, borderStyle: 'dashed', borderColor: 'color-mix(in srgb, var(--ac) 35%, var(--rift-edge))',
               boxShadow: '0 0 22px color-mix(in srgb, var(--ac) 14%, transparent), inset 0 1px 6px rgba(0, 0, 0, 0.7)' }} />
-          <span className="block mt-2.5 text-xs leading-normal text-rift-label">Right-click an item in your inventory to place it here.</span>
+          <span className="block mt-2.5 text-xs leading-normal text-rift-label">Right-click an item in your inventory or on a party member to put it here.</span>
         </>
       )}
       <div className="mt-auto">
@@ -346,6 +383,73 @@ function ItemColumn({ item, partyLevel, onTakeBack }: { item: Item | null; party
           ))}
         </div>
         <span className="block mt-[7px] text-[11px] leading-[1.4] text-rift-off">The cap rises with party level.</span>
+      </div>
+    </div>
+  );
+}
+
+// ─── A member's gear ──────────────────────────────────────────────────────────
+
+/** One of a member's gear slots (the party window's arrangement): right-click (or Enter / Space) puts its item on the bench. */
+function GearSlotButton({ slot, item, picked, onBench }: { slot: GearSlot; item: Item | null; picked: boolean; onBench: () => void }) {
+  const Icon = SLOT_ICON[slot];
+  const pos = { gridColumn: SLOT_POS[slot].col, gridRow: SLOT_POS[slot].row };
+  const label = <span className="text-[10px] leading-none tracking-[0.08em] uppercase">{SLOT_LABEL[slot]}</span>;
+  if (!item) {
+    return (
+      <div className="rf-eqs opacity-60" style={{ ...pos, height: 42 }} role="img" aria-label={`${SLOT_LABEL[slot]}: empty`}>
+        <Icon className="w-5 h-5 text-rift-rim" />
+        {label}
+      </div>
+    );
+  }
+  const glow = rarityGlow(item);
+  return (
+    <Tooltip gap={10} style={pos} content={<ItemTooltipContent item={item} clickAction="Put on bench" affixTiers />}>
+      <button type="button" className={`rf-eqs is-filled ${glow.className} ${picked ? 'is-bench' : ''}`} style={{ ...glow.style, height: 42 }}
+        aria-label={`${SLOT_LABEL[slot]}: ${item.name}, ${item.rarity}${picked ? ', on the bench' : ''}`}
+        onContextMenu={(e) => { e.preventDefault(); onBench(); }}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onBench(); } }}>
+        <ItemIcon item={item} className="w-[22px] h-[22px]" />
+        {label}
+      </button>
+    </Tooltip>
+  );
+}
+
+/**
+ * A member's gear, as the bottom panel shows it: the slots as in the party window, and a read-only list of each
+ * piece's tier total against the cap (which pieces still have room).
+ */
+function GearView({ member, memberIdx, bench, partyLevel, onBench }: {
+  member: PartyMemberConfig; memberIdx: number; bench: BenchRef | null; partyLevel: number; onBench: (ref: BenchRef) => void;
+}) {
+  const cap = tierSumCap(partyLevel);
+  return (
+    <div className="flex gap-6 h-[246px]">
+      <div role="group" aria-label={`${member.characterName} equipment`} className="flex-none grid gap-x-6"
+        style={{ gridTemplateColumns: 'repeat(3, 84px)', gridTemplateRows: 'repeat(5, 42px)', rowGap: 9 }}>
+        {GEAR_SLOTS.map((slot) => {
+          const ref: BenchRef = { kind: 'gear', member: memberIdx, slot };
+          return <GearSlotButton key={slot} slot={slot} item={member.gear[slot]} picked={sameBenchRef(bench, ref)} onBench={() => onBench(ref)} />;
+        })}
+      </div>
+      <div className="flex-1 min-w-0 flex flex-col">
+        <h3 className="m-0 font-display font-normal text-lg tracking-[0.05em] text-rift-bright">{member.characterName}</h3>
+        <span className="mt-[3px] text-[10px] tracking-[0.12em] uppercase text-rift-off">{CLASSES[member.selectedClass].name} · Level {partyLevel}</span>
+        <div className="mt-3 border-t border-rift-seam">
+          <div className="flex justify-between pt-1.5 pb-1 text-[10px] tracking-[0.1em] uppercase text-rift-off"><span>Gear</span><span>Tier total</span></div>
+          {GEAR_SLOTS.map((slot) => {
+            const worn = member.gear[slot], sum = worn ? itemTierSum(worn.affixes) : 0;
+            return (
+              <div key={slot} className="rf-grow">
+                <span className="flex-none w-[74px] text-[10px] tracking-[0.08em] uppercase text-rift-off">{SLOT_LABEL[slot]}</span>
+                <span className="flex-1 min-w-0 whitespace-nowrap overflow-hidden text-ellipsis" style={{ color: worn ? RARITY_COLOR[worn.rarity] : 'var(--rift-off)' }}>{worn?.name ?? ''}</span>
+                <span className="flex-none" style={{ color: !worn ? 'var(--rift-off)' : sum >= cap ? 'var(--tier-cap)' : 'var(--rift-ink)' }}>{worn ? `${sum} / ${cap}` : '—'}</span>
+              </div>
+            );
+          })}
+        </div>
       </div>
     </div>
   );
@@ -382,14 +486,16 @@ function Pips({ tier, next, color }: { tier: number; next: boolean; color: strin
 }
 
 /** The bench's four affix rows (two per group), as each service shows them. */
-function AffixRows({ mode, item, party, picked, flash, onUpgrade, onBlocked, onOpenPicker, onTogglePick }: {
-  mode: Mode; item: Item | null; party: BenchParty; picked: number[]; flash: { row: number; n: number };
+function AffixRows({ mode, item, worn, party, picked, flash, onUpgrade, onBlocked, onOpenPicker, onTogglePick }: {
+  /** `worn`: the item is worn, so nothing can be extracted from it (Disenchant shows its affixes, with nothing to pick). */
+  mode: Mode; item: Item | null; worn: boolean; party: BenchParty; picked: number[]; flash: { row: number; n: number };
   onUpgrade: (idx: number, row: number) => void;
   onBlocked: (why: string) => void;
   onOpenPicker: (row: number) => void;
   onTogglePick: (idx: number) => void;
 }) {
   const rows = item ? benchRows(item) : BENCH_ROWS.map(() => null);
+  const pickable = mode === 'disenchant' && !worn;
   return (
     <div role="list" aria-label="Affixes" className="flex flex-col gap-1">
       {rows.map((idx, row) => {
@@ -417,11 +523,11 @@ function AffixRows({ mode, item, party, picked, flash, onUpgrade, onBlocked, onO
         const affix = item.affixes[idx], stat = affix.stat as AffixStat, tier = affix.tier ?? 1, name = shardName(stat);
         const why = mode === 'enchant' ? upgradeBlocked(item, idx, party) : null;
         const canNext = mode === 'enchant' && tier < MAX_TIER;
-        const sel = mode === 'disenchant' && picked.includes(idx);
+        const sel = pickable && picked.includes(idx);
         const have = shardCount(party.shards, stat);
         return (
-          <div key={row} role="listitem" className={`rf-erow ${sel ? 'is-sel' : ''} ${mode === 'disenchant' ? 'can-pick' : ''}${fl}`} style={style}
-            onClick={mode === 'disenchant' ? () => onTogglePick(idx) : undefined}>
+          <div key={row} role="listitem" className={`rf-erow ${sel ? 'is-sel' : ''} ${pickable ? 'can-pick' : ''}${fl}`} style={style}
+            onClick={pickable ? () => onTogglePick(idx) : undefined}>
             <span className="min-w-0">
               <span className="block text-xs leading-4 text-rift-ink whitespace-nowrap">{name}</span>
               <span className="block text-[11px] leading-[14px] text-rift-muted whitespace-nowrap">
@@ -437,7 +543,7 @@ function AffixRows({ mode, item, party, picked, flash, onUpgrade, onBlocked, onO
                   aria={why ? `Upgrade ${name} unavailable: ${why.long}` : `Upgrade ${name} to tier ${tier + 1}, ${upgradeCost(tier + 1)} gold`}
                   onClick={() => (why ? onBlocked(why.long) : onUpgrade(idx, row))} />
               )}
-              {mode === 'disenchant' && (
+              {pickable && (
                 <button type="button" role="checkbox" aria-checked={sel} aria-label={`Extract ${name}`} className={`rf-chk ${sel ? 'is-on' : ''}`}
                   onClick={(e) => { e.stopPropagation(); onTogglePick(idx); }}>
                   <svg aria-hidden="true" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: sel ? 1 : 0 }}>
@@ -454,12 +560,22 @@ function AffixRows({ mode, item, party, picked, flash, onUpgrade, onBlocked, onO
 }
 
 /** The bench's footer: a line of help, and (Disenchant, Shatter) the main button, which asks a second click to confirm. */
-function Footer({ mode, item, picked, gold, armed, onBlocked, onArm, onConfirm, onDisarm }: {
-  mode: Mode; item: Item | null; picked: number[]; gold: number; armed: boolean;
+function Footer({ mode, item, worn, picked, gold, armed, onBlocked, onArm, onConfirm, onDisarm }: {
+  /** `worn`: the item is worn, which can't be destroyed: the button stays blocked, "Unequip first". */
+  mode: Mode; item: Item | null; worn: boolean; picked: number[]; gold: number; armed: boolean;
   onBlocked: (why: string) => void; onArm: () => void; onConfirm: () => void; onDisarm: () => void;
 }) {
   if (mode === 'enchant') {
     return <div className="mt-auto h-[38px] flex items-center text-[11px] leading-[1.45] text-rift-off">Each change uses one matching shard.</div>;
+  }
+  if (worn && item) {
+    return (
+      <div className="mt-auto h-[38px] flex items-center justify-between gap-3">
+        <span className="text-[11px] leading-[1.45] text-rift-off">Equipped gear can't be destroyed. Unequip it first.</span>
+        <ActButton className="rf-main" label="Unequip first" blocked aria="Unavailable: unequip the item first"
+          onClick={() => onBlocked(`Unequip ${item.name} in the party screen first.`)} />
+      </div>
+    );
   }
   const dis = mode === 'disenchant';
   const count = item?.affixes.length ?? 0;

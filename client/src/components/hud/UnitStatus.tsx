@@ -1,7 +1,7 @@
 // Status shown above a unit on the map: a row of effect markers (buffs and
 // debuffs, each with a tooltip) over a thin HP bar, and an MP bar for party members.
-import type { ActiveBuff, ActiveDot, ActiveHot, DamageElement } from '../../data/units/stats';
-import { capitalize, describeTrigger, formatModifier } from '../../data/detailStrings';
+import { isHarmful, isPassiveEntry, type ActiveBuff, type ActiveDot, type ActiveHot, type DamageElement } from '../../data/units/stats';
+import { auraText, capitalize, describeTrigger, formatModifier, sentenceText } from '../../data/detailStrings';
 import { DAMAGE_ELEMENT_COLOR } from '../../data/constants';
 import { Tooltip } from '../Tooltip';
 
@@ -10,7 +10,7 @@ export interface StatusMarker {
   name: string;
   /** Helps (buff, heal over time) or hurts (debuff, damage over time). */
   buff: boolean;
-  /** Its bearer's turns left (the longest of its stacks). */
+  /** Its bearer's turns left (the longest of its stacks); Infinity for an aura's effect, which lasts while its unit is inside. */
   turns: number;
   /** How many stacks of it are on the unit (a buff, debuff, HoT or DoT landed more than once). */
   stacks: number;
@@ -22,22 +22,27 @@ export interface StatusMarker {
 
 const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? '' : 's'}`;
 
+/** How long a marker's effect lasts, as its tooltip and label say it: 'while in aura' for an aura's effect (Infinity turns). */
+const timeLeft = (turns: number) => (Number.isFinite(turns) ? `${plural(turns, 'turn')} left` : 'while in aura');
+
 /** A unit's effects: one marker per buff source (its stats together, its stacks counted), and per HoT and DoT ability. */
 export function statusMarkers(buffs: ActiveBuff[], hots: ActiveHot[], dots: ActiveDot[]): StatusMarker[] {
   const bySource = new Map<string, ActiveBuff[]>();
   for (const b of buffs) {
-    if (!Number.isFinite(b.turnsLeft)) continue; // permanent (gear) bonuses aren't effects
+    if (isPassiveEntry(b)) continue; // permanent (gear, passive) bonuses aren't effects
     const key = b.source ?? b.id;
     bySource.set(key, [...(bySource.get(key) ?? []), b]);
   }
   const markers: StatusMarker[] = [...bySource].map(([name, list]) => ({
     name,
-    buff: !list.some((b) => b.amount < 0 || (b.percent ?? 0) < 0 || b.roots || b.trigger?.debuff),
+    buff: !list.some(isHarmful),
     turns: Math.max(...list.map((b) => b.turnsLeft)),
-    stacks: new Set(list.map((b) => b.stack?.id ?? b.id)).size,
+    // An aura's effects have no stack: each is one (its key), whichever bearer it comes from
+    stacks: new Set(list.map((b) => b.fromAura?.key ?? b.stack?.id ?? b.id)).size,
     // Each line once: stacks of one effect read the same
     effect: [...new Set(list.flatMap((b) => [
       ...(b.roots ? ["Rooted: can't move"] : []),
+      ...(b.aura ? [capitalize(sentenceText(auraText(b.aura.def)))] : []),
       ...(b.trigger ? [describeTrigger(b.trigger.def)] : []),
       ...(b.amount ? [formatModifier(b.stat, b.amount)] : []),
       ...(b.percent ? [formatModifier(b.stat, b.percent, true)] : []),
@@ -53,10 +58,12 @@ export function statusMarkers(buffs: ActiveBuff[], hots: ActiveHot[], dots: Acti
     }
     for (const g of groups.values()) markers.push(marker(g[g.length - 1], g.length, Math.max(...g.map((t) => t.turnsLeft))));
   };
-  ticking(hots, (h, stacks, turns) => ({
+  // (A permanent one that is no aura's, a passive effect, shows no marker: as with buffs)
+  const shown = <T extends { turnsLeft: number; fromAura?: unknown }>(list: T[]) => list.filter((t) => !isPassiveEntry(t));
+  ticking(shown(hots), (h, stacks, turns) => ({
     name: h.name ?? 'Regeneration', buff: true, turns, stacks, effect: `Heals ${h.healPerTurn} each turn.`, element: h.damageElement,
   }));
-  ticking(dots, (d, stacks, turns) => ({
+  ticking(shown(dots), (d, stacks, turns) => ({
     name: d.name ?? capitalize(d.damageElement),
     buff: false,
     turns,
@@ -77,13 +84,13 @@ function Marker({ m }: { m: StatusMarker }) {
       content={
         <div className="w-[168px] box-border px-2.5 py-2 text-left">
           <span className="block font-display text-xs tracking-[0.04em] text-rift-bright">{m.name}{m.stacks > 1 && ` ×${m.stacks}`}</span>
-          <span className="block mt-[3px] text-[10px] tracking-[0.1em] uppercase text-rift-label">{m.buff ? 'Buff' : 'Debuff'} · {plural(m.turns, 'turn')} left</span>
+          <span className="block mt-[3px] text-[10px] tracking-[0.1em] uppercase text-rift-label">{m.buff ? 'Buff' : 'Debuff'} · {timeLeft(m.turns)}</span>
           <span className="block mt-1.5 text-[11px] leading-[1.5] text-rift-soft">{m.stacks > 1 && 'Each stack: '}{m.effect}</span>
         </div>
       }
     >
       <span
-        aria-label={`${m.name}, ${m.buff ? 'buff' : 'debuff'}, ${plural(m.turns, 'turn')} remaining`}
+        aria-label={`${m.name}, ${m.buff ? 'buff' : 'debuff'}, ${timeLeft(m.turns)}`}
         className="inline-flex items-center justify-center w-4 h-4 box-border bg-rift-raised rounded-sm text-rift-soft"
         // Solid for a buff, dashed for a debuff; in the effect's element color, else the plain buff/debuff color
         style={{

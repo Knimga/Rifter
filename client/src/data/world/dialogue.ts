@@ -8,7 +8,7 @@ import type { DungeonKey } from './dungeons';
 import { hasTaken, questHolds, type QuestCondition, type QuestLog } from './quests';
 
 /**
- * What finishing a conversation or a topic does (GameScreen, runDialogueEffects): give the party a quest, move one it
+ * What finishing a conversation or a topic does (useDialogue, runDialogueEffects): give the party a quest, move one it
  * has on to its next step, complete one, or put a rift key on the party's keyring (a key it found without knowing
  * what it was, named at last).
  */
@@ -116,34 +116,44 @@ export const DIALOGUES: Record<string, Conversation[]> = {
       ],
       // The strange object the party found in the Dark Tunnel is a rift key, now known: it goes on the keyring
       effects: [{ kind: 'completeQuest', quest: 'seek-ardas' }, { kind: 'giveKey', key: 'crypt' }, { kind: 'giveQuest', quest: 'use-the-rifter' }],
-    },
-    // Back from the rift, its boss defeated: Ardas completes Ileena's errand (placeholder text: Ardas's words to come)
-    {
-      when: [{ active: 'use-the-rifter', step: 'return-ardas' }],
-      opening: ["[Ardas's words as the party returns from the rift.]"],
-      effects: [{ kind: 'completeQuest', quest: 'use-the-rifter' }],
-    },
+    }, 
     {
       when: [{ active: 'use-the-rifter', step: 'speak-ileena' }],
       opening: ['Have you spoken with Ileena?'],
       topics: [FAREWELL],
     },
+    // Back from the rift, its boss defeated: Ardas completes "Use the Rifter"
+    {
+      when: [{ active: 'use-the-rifter', step: 'return-ardas' }],
+      opening: [
+        "Ha! You've done it! And you've returned with another rift key! So... a pattern is established. Defeating a rift-guardian grants you access to the next one. And you still hold the first key, and can revisit at any time.",
+        "I don't know where this cycle will lead, but we must follow it. It is the only forward motion we have. Maybe inside one of these dimensions we will find something that can lead us to answers, or salvation.",
+        "Take some time to rest. See Denisel to trade for a new piece of gear, and Lynn to enchant what you have. When you're ready, use the Rifter again, and keep exploring. Come to me again if you find something.",
+        "Good luck!"
+      ],
+      effects: [{ kind: 'completeQuest', quest: 'use-the-rifter' }],
+    },
     {
       opening: ["Ah... Still here. Good. What would you like to know?"],
       topics: [
         {
-          id: 'sanctum',
-          prompt: 'What is this place?',
+          id: 'sanctum-other-people',
+          prompt: 'How are all these people in the Sanctum?',
           statements: [
-            'This is the Sanctum. Old walls, older wards. Whoever raised them knew what waits beyond, and built against it.',
-            'The void presses on these stones from every side. The sigils on the walls still hold, though fewer of them glow than once did.',
+            "Voth almost certainly brought each one of us here. It's hard to imagine how else we could've ended up in His domain. All we can do is try to make what life we can.",
+            "That means different things for different people. Denisel gathers equipment left behind by the many who have passed through, and curates a collection worth browsing. Lynn has studied the strange shards that drop from enemies in the rifts, and has found how to use them to empower gear. Ileena has found meaning in the construction of the Rifter, and learning the secrets of the void.",
+            "As for me, I record what happens here, so it is not forgotten, and try to find out the reason behind all this.",
+            "Though the void rages outside these walls, the Sanctum is remarkably safe. That is why staying here is not so terrible a prospect."          
           ],
         },
         {
-          id: 'ardas',
-          prompt: 'Who are you?',
+          id: 'why-voth',
+          prompt: 'Why did Voth bring us here?',
           statements: [
-            'A keeper of what little is still written down. Names, mostly. Some of them were travellers like you.',
+            "I ask myself this question daily. We may or may not ever find out. As I said, Voth is an aloof, distant god; He rarely ever speaks to mortals. But one thing is for certain: He knows we're here. The only reason this Sanctum still stands is because He allows it.",
+            "But just because Voth is aloof does not mean He doesn't have His own designs. Mortals amuse Him, and He delights in irritating His rival Arona, the goddess of cycles. She represents life and death, guiding new souls into new bodies and sheperding them away when they die. She is pure order and balance.",
+            "For Voth to take one of us from our proper cycle of death and place us here — is a theft, an interruption to Arona's order, an insult Voth surely enjoys.",
+            "The only thing we can do is survive, and try to learn what we can. That is why your coming with a rift key is so exciting. A chance to go beyond these walls! And see what can be gleaned."
           ],
         },
         FAREWELL,
@@ -158,10 +168,10 @@ export const DIALOGUES: Record<string, Conversation[]> = {
         '...if I can just... invert the luminal vector... create a localized thaumic fold... the oscillator might just... vibrate the etheric weave... which would allow separate temporal filaments... AH!!',
         "Oh... Hi. Right. Hello. You're new. Welcome! Ah...",
         "You have a KEY? YES. FANTASTIC. This'll be a chance to finally test my calibration adjustments to the resonance stabilizer rods. A second test is necessary. I will NOT siphon power from the crystal-lattice again... Not after Tuesday.",
-        "The Rifter? No no no... THIS is the Sympathetic Chrono-Spatial Astro-singularity Gateway Assembly. That silly Ardas... My device, my name! Not my fault he doesn't like consonants.",
+        "The Rifter? No no no... THIS is the Sympathetic Chrono-spatial Astro-singularity Gateway Assembly. That silly Ardas... My device, my name! Not my fault he doesn't like consonants.",
         "Right. So. Here's what you need to know: we're in the void. The void sits between every plane, and every plane is built upon it. Therefore, the void is closer to all planes than the planes are to each other.",
         "Meaning planar travel HERE is far easier and requires far less energy. That's why I've been able to build this device with such paltry resources.",
-        'Those rift keys... they lead to other planes. Mini-dimensions, so to speak, each with its own aspect. These are horribly dangerous places. Ardas did mention horrible danger, right? Terrible danger. Like I\'m staying right here. You go.',
+        'Those rift keys... they lead to other planes. Mini-dimensions, so to speak, each with its own aspect. These are horribly dangerous places. Ardas DID mention horrible danger, right? Terrible danger. Like I\'m staying right here. You go.',
         "Anyways... each mini-dimension contains a powerful guardian or master at the end. Defeating them is essential. You might die though. Well... you won't ACTUALLY die. You're already dead. You'll just return here, and you'll need to re-enter and try again.",
         'Place the key in the macro-aetheric contact aperture... er, the RECEPTACLE, I mean, there on the right. Enter the rift. Defeat the guardian at the end. Return to Ardas.',
       ],
@@ -179,9 +189,14 @@ export const DIALOGUES: Record<string, Conversation[]> = {
       ],
       topics: [
         {
-          id: '',
-          prompt: '',
-          statements: []
+          id: 'mini-dimensions',
+          prompt: 'What are these mini-dimensions?',
+          statements: [
+            "The dizzying variety of the planes can be overwhelming. Most mortals in the universe are hardly aware that their home is just one of countless universes! These mini-dimensions are small twigs of the vast branching tree of reality.",
+            "Each one has its own unique aspect — death, fire, nature, decay, iron, light, or any combination of concepts imaginable. If reality is a kaleidoscope, then each dimension is one colored mote.",
+            "They each hold their own power and value. And they are all worth exploring.",
+            "Bigger dimensions? Yes! The major planes. The places that people like you and me come from. These are harder to reach. They are older and longer-lived, and the etheric shells that separate them from the void are denser and more energetic. I don't know if the Rifter can handle accessing them yet. Maybe one day."
+          ]
         },
         FAREWELL
       ]

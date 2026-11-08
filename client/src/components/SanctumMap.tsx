@@ -3,6 +3,7 @@ import { FaCoins } from 'react-icons/fa';
 import { GiMagicPalm } from 'react-icons/gi';
 import type { TargetType } from '../data/combat/abilities';
 import { isAdjacent, posKey, samePos, type Pos } from '../data/world/grid';
+import { approachTile, closestReachable } from '../data/world/movement';
 import { SANCTUM, SANCTUM_RECEPTACLE, isSanctumWall, sanctumNpcAt } from '../data/world/sanctum';
 import { canTalkTo, npc, type NpcData } from '../data/world/npcs';
 import type { Conversation, DialogueTopic, QuestMark } from '../data/world/dialogue';
@@ -34,19 +35,23 @@ const SERVICE_ICON: Record<NonNullable<NpcData['service']>, ReactNode> = {
 };
 const npcIcon = (data: NpcData) => (data.service ? SERVICE_ICON[data.service] : undefined);
 
+/** What a click on a tile does (SanctumMap's clickPlan): walk to `walk` if set, then `use` if set. */
+interface ClickPlan { walk: Pos | null; use?: () => void }
+
 interface Props {
   playerPos: Pos;
   activeMoverPos: Pos;
   party: PartyTokenData[];
   /** Tiles the active mover can move to this turn (tile key -> steps), from GameScreen (partyMoveTargets). */
   moveTargets: Map<string, number>;
-  onMove: (pos: Pos) => void;
+  /** Move the leader to a reachable tile: true if it moved (a click then uses what it walked to). */
+  onMove: (pos: Pos) => boolean;
   /** The Rifter's state (dormant whenever the party arrives). */
   rifter: RifterState;
   /** The leader used the Rifter (its receptacle, from beside it): open its window. */
   onUseRifter: () => void;
-  /** The leader spoke to an NPC (from beside it): open its window. */
-  onTalkTo: (npcId: string) => void;
+  /** The leader spoke to an NPC (from beside it, standing at `leaderAt`): open its window. */
+  onTalkTo: (npcId: string, leaderAt: Pos) => void;
   /** NPC id → the tile it turns to face (the leader talking to it, then back to its own way). */
   npcAims: Record<string, UnitAim>;
   /**
@@ -98,38 +103,54 @@ export default function SanctumMap({ playerPos, activeMoverPos, party, moveTarge
   const objects = useMemo(() => [...rifterNow, ...SANCTUM_DOORS, ...SANCTUM_DECOR, ...npcObjects(npcAims)], [rifterNow, npcAims]);
   const canMoveTo = (p: Pos) => moveTargets.has(posKey(p));
 
-  const handleClick = (p: Pos) => {
-    if (isSanctumWall(p)) return;
-    const member = memberByKey.get(posKey(p));
+  /**
+   * What a click on `p` does: walk to the tile `walk` (if set), then `use` something (if set); null: nothing. The
+   * click runs it and the hover shows its walk. An NPC, the Rifter's receptacle or its open rift is used from beside
+   * it, or from afar after walking up to it; a tile that can't be reached (a wall, decor, too far) walks as close
+   * to it as the leader can get (no ability armed).
+   */
+  const clickPlan = (p: Pos): ClickPlan | null => {
+    const key = posKey(p);
+    const nearer = (): ClickPlan | null => {
+      const walk = activeTarget ? null : closestReachable(moveTargets, p, activeMoverPos);
+      return walk ? { walk } : null;
+    };
+    // `use` from beside `p` (told where the leader then stands), else after walking up to it, else as near as can be
+    const actAt = (use: (leaderAt: Pos) => void, usable: boolean): ClickPlan | null => {
+      if (!usable) return nearer();
+      if (isAdjacent(playerPos, p)) return { walk: null, use: () => use(playerPos) };
+      const walk = activeTarget ? null : approachTile(moveTargets, p, activeMoverPos);
+      return walk ? { walk, use: () => use(walk) } : nearer();
+    };
+
+    if (isSanctumWall(p)) return nearer();
+    const member = memberByKey.get(key);
     if (activeTarget) {
-      if (activeTarget === 'self') onAbilityUse(p);
-      else if (activeTarget === 'ally' && member) onAbilityUse(p);
-      else onAbilityDeselect();
-      return;
+      return { walk: null, use: () => (activeTarget === 'self' || (activeTarget === 'ally' && member) ? onAbilityUse(p) : onAbilityDeselect()) };
     }
     // Clicking a party member selects their action bar
-    if (member) { onMemberSelect(member.partyIndex); return; }
-    // An NPC, the leader beside it: speak to it (if it has anything to say: canTalkTo)
+    if (member) return { walk: null, use: () => onMemberSelect(member.partyIndex) };
+    // An NPC: speak to it (if it has anything to say: canTalkTo), the leader turning up beside it
     const standing = sanctumNpcAt(p);
-    if (standing) {
-      if (isAdjacent(playerPos, p) && canTalkTo(standing.id)) onTalkTo(standing.id);
-      return;
-    }
-    // The Rifter's receptacle, the leader beside it, opens its window
-    if (samePos(p, SANCTUM_RECEPTACLE)) {
-      if (rifterUsable && isAdjacent(playerPos, p)) onUseRifter();
-      return;
-    }
-    // Its open rift, the leader beside it, takes the party to the rift's dungeon
-    if (openRift && isRiftTile(p)) {
-      if (isAdjacent(playerPos, p)) onEnterRift(openRift);
-      return;
-    }
-    if (canMoveTo(p)) onMove(p);
+    if (standing) return actAt((leaderAt) => onTalkTo(standing.id, leaderAt), canTalkTo(standing.id));
+    // The Rifter's receptacle opens its window
+    if (samePos(p, SANCTUM_RECEPTACLE)) return actAt(onUseRifter, rifterUsable);
+    // Its open rift takes the party to the rift's dungeon
+    if (openRift && isRiftTile(p)) return actAt(() => onEnterRift(openRift), true);
+    return canMoveTo(p) ? { walk: p } : nearer();
+  };
+
+  const handleClick = (p: Pos) => {
+    const plan = clickPlan(p);
+    if (!plan) return;
+    if (!plan.walk || onMove(plan.walk)) plan.use?.();
   };
 
   // Stable for the memoized tiles; always runs the latest handleClick
   const onTileClick = useStableHandler(handleClick);
+
+  // Where a click on the hovered tile would walk to (its move line shows it, and the tile lights)
+  const hoverWalk = hover.hovered ? clickPlan(hover.hovered)?.walk ?? null : null;
 
   const tile = (p: Pos) => {
     const isWall = isSanctumWall(p);
@@ -141,7 +162,7 @@ export default function SanctumMap({ playerPos, activeMoverPos, party, moveTarge
     const allyTarget = !isWall && activeTarget === 'ally' && memberByKey.has(posKey(p));
     return (
       <FloorTile key={posKey(p)} p={p} hover={hover} onClick={onTileClick}
-        brighten={!isWall && !activeTarget && canMoveTo(p) && hover.isHovered(p)}>
+        brighten={!isWall && !!hoverWalk && samePos(p, hoverWalk)}>
         {allyTarget && <TileHighlight kind="ally" />}
         {isNpcNear && <UsableGlow color="var(--glow)" hovered={hover.isHovered(p)} />}
         {isReceptacle && <UsableGlow color={interactiveObjectGlow('rifter')} hovered={hover.isHovered(p)} />}
@@ -162,9 +183,7 @@ export default function SanctumMap({ playerPos, activeMoverPos, party, moveTarge
   const floor = (
     <>
       <FloorGrid cols={SANCTUM.width} rows={SANCTUM.height} tile={tile} />
-      {!activeTarget && hover.hovered && canMoveTo(hover.hovered) && (
-        <MoveLineOverlay from={activeMoverPos} to={hover.hovered} />
-      )}
+      {hoverWalk && <MoveLineOverlay from={activeMoverPos} to={hoverWalk} />}
     </>
   );
 

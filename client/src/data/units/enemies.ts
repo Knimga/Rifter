@@ -1,7 +1,7 @@
-import { warnIgnoredEffects, warnIgnoredTriggers, type Ability, type PassiveTrigger } from '../combat/abilities';
+import { warnCreatureTable, type Ability, type PassiveEffect } from '../combat/abilities';
 import type { Passive, ScalingPassive } from './classes';
 import type { AttributeKey, SkillKey, ActiveBuff, ActiveHot, ActiveDot, DamageElement } from './stats';
-import { ATTRIBUTE_KEYS, ATTRIBUTE_POINTS_PER_LEVEL, calculateStats, recomputeStats } from './stats';
+import { ATTRIBUTE_KEYS, ATTRIBUTE_POINTS_PER_LEVEL, calculateStats, passiveEffectEntries, recomputeStats } from './stats';
 import type { Stats } from './stats';
 import type { ModelLink } from '../../forge/core/types';
 import { footprintKeys, type Body, type Pos } from '../world/grid';
@@ -44,8 +44,9 @@ export interface CreatureClassData {
   // Optional passive system (same as players — enables elemental damage bonuses etc.)
   passives?: Record<string, Passive>;
   scalingPassives?: ScalingPassive[];
-  // Triggers it always has (always on, never run out: PassiveTrigger), e.g. striking back when parried
-  passiveTriggers?: PassiveTrigger[];
+  // Lasting effects it has for good (on it from the start, never run out: PassiveEffect, see passiveEffectEntries): a
+  // trigger (striking back when parried), an aura (a shaman's ward on the creatures round it), a buff, debuff, root, HoT or DoT
+  passiveEffects?: PassiveEffect[];
 
   // Forge design this creature renders as; each instance gets its own look (seeded from its id)
   model: ModelLink;
@@ -56,7 +57,7 @@ export interface CreatureClassData {
 
   // Hostile creatures only (EnemyClassData); a summon drops nothing and is worth no XP
   dropChance?: number;   // items dropped on death: its whole part guaranteed, its fraction the chance of one more (1.2: one, and 20% for a second)
-  dropsGold?: number;    // gold dropped on death, rolled apart from items and read the same way (rolls of 5-10 x its level, summed: data/gear/loot.ts rollGold); none if absent
+  dropsGold?: number;    // gold dropped on death, rolled apart from items and read the same way (rolls of GOLD_PER_LEVEL x its level, summed: data/gear/loot.ts rollGold); none if absent
   goldBonus?: number;    // percent more gold in what it drops (50: half as much again)
   xpMultiplier?: number; // XP worth relative to a standard enemy of its level (data/units/xp.ts killXp): tougher = more, bosses ~6
 }
@@ -71,12 +72,13 @@ export interface EnemyClassData extends CreatureClassData {
 
 /**
  * How a summoned creature came to be (absent on creatures placed on the map). A summon is a spell effect: it
- * gives no XP or loot when it dies, and vanishes when its turns run out or the fight ends.
+ * gives no XP or loot when it dies, and vanishes when its turns run out or the fight ends; a forever one (the
+ * party's: isForeverSummon) stays until it is slain or the party leaves the dungeon.
  */
 export interface SummonInfo {
   owner: string;      // its summoner's unitKey (a party member's 'party-<idx>', a creature's id); it stays if they die
   ability: string;    // the ability that summoned it (casting it again with its max out replaces the oldest)
-  turnsLeft: number; // its own turns left: it vanishes when this runs out (counted down at the end of each, creatureTurnEnd)
+  turnsLeft: number | 'forever'; // its own turns left: it vanishes when this runs out (counted down at the end of each, creatureTurnEnd); 'forever' never does
   allied: boolean;    // on the party's side (summoned by a party member or one of its allies); else the enemies'
 }
 
@@ -158,7 +160,7 @@ function generateEnemyAttributePoints(
 
 /**
  * Generate a fully-initialised EnemyInstance from a class definition + level.
- * Called by spawnDungeonEnemies in dungeonGen.ts.
+ * Called by spawnDungeonEnemies in data/world/gen/spawning.ts.
  */
 export function generateEnemyInstance(
   classData: CreatureClassData,
@@ -169,15 +171,17 @@ export function generateEnemyInstance(
   groupId: number,
 ): EnemyInstance {
   const pointsSpent = generateEnemyAttributePoints(level, classData.highAttributes, classData.lowAttributes);
-  const stats = calculateStats({ mode: 'enemy', classData, pointsSpent, level });
+  const passive = passiveEffectEntries(classData.passiveEffects, id);
+  const input = { mode: 'enemy', classData, pointsSpent, level } as const;
+  const stats = passive.buffs.length ? recomputeStats(input, passive.buffs) : calculateStats(input);
 
   return {
     id,
     classData,
     level,
     pointsSpent,
-    buffs: [],
-    hots: [],
+    buffs: passive.buffs,
+    hots: passive.hots,
     stats,
     pos,
     currentHp: stats.hp,
@@ -185,7 +189,7 @@ export function generateEnemyInstance(
     aggroed: false,
     zoneId,
     groupId,
-    dots: [],
+    dots: passive.dots,
   };
 }
 
@@ -199,11 +203,21 @@ export const bodyOf = (e: Pick<EnemyInstance, 'pos' | 'classData'>): Body => ({ 
 export const creatureTiles = (creatures: Pick<EnemyInstance, 'pos' | 'classData'>[]): Set<string> =>
   new Set(creatures.flatMap(e => footprintKeys(bodyOf(e))));
 
+/** A creature's display name: its class's, with "(Summoned)" after it for a summon (to tell it from a map-placed one of its type). */
+export const creatureName = (e: Pick<EnemyInstance, 'classData' | 'summon'>) =>
+  e.summon ? `${e.classData.name} (Summoned)` : e.classData.name;
+
 /** A creature the party fights (not one it summoned). */
 export const isHostile = (e: EnemyInstance) => !e.summon?.allied;
 
 /** A creature on the party's side: one it summoned. */
 export const isAlly = (e: EnemyInstance): e is EnemyInstance & { summon: SummonInfo } => !!e.summon?.allied;
+
+/**
+ * One of the party's forever summons (abilities.ts 'summon' effect, `turns: 'forever'`): it outlasts fights, marches
+ * with the party (movement.ts marchParty), goes through doors with it and joins every fight it starts.
+ */
+export const isForeverSummon = (e: EnemyInstance) => isAlly(e) && e.summon.turnsLeft === 'forever';
 
 /**
  * A creature's basic attack (its "weapon", for a trigger's weaponAttack): its first enemy-target ability with no
@@ -299,7 +313,7 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
   {
     id: 'specter',
     name: 'Specter',
-    attributes: { mind: 4, spirit: 4 },
+    attributes: { mind: 3, spirit: 3 },
     highAttributes: ['mind', 'spirit'],
     lowAttributes: ['strength', 'toughness'],
     baseHp: 20,
@@ -346,7 +360,7 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
   {
     id: 'wight',
     name: 'Wight',
-    attributes: { mind: 4, strength: 4, toughness: 2 },
+    attributes: { mind: 3, strength: 3, toughness: 3 },
     highAttributes: ['mind', 'strength'],
     lowAttributes: ['spirit', 'finesse'],
     baseHp: 30,
@@ -357,12 +371,12 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
       parry: { name: 'Ancient Warrior', flat: 5 },
       meleeHit: { name: 'Ancient Warrior', flat: 5 }
     },
-    passiveTriggers: [
-      { name: 'Chill', damageElement: 'ice', trigger: {
+    passiveEffects: [
+      { name: 'Chill', damageElement: 'ice', effect: { type: 'buff', trigger: {
         when: 'attacking', on: 'hit', categories: ['melee'], chance: 100,
         effects: [
           {type: 'damage', appliesTo: 'target', damageElement: 'ice', minDamage: 1, maxDamage: 1 }]
-      }}
+      }}}
     ],
     abilities: [
       {
@@ -398,7 +412,7 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
   {
     id: 'lava-slime',
     name: 'Lava Slime',
-    attributes: { toughness: 2, mind: 4, spirit: 2 },
+    attributes: { toughness: 2, mind: 4 },
     highAttributes: ['toughness', 'mind'],
     lowAttributes: ['finesse', 'speed'],
     baseHp: 15,
@@ -509,9 +523,9 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
     attributes: { mind: 4, spirit: 4 },
     highAttributes: ['mind', 'spirit'],
     lowAttributes: ['toughness', 'strength'],
-    baseHp: 30,
+    baseHp: 40,
     baseArmor: 11,
-    resistances: { fire: 50 },
+    resistances: { fire: 50, physical: 20 },
     passives: {
       dodge: { name: 'Ethereal', flat: 10 },
       magicCrit: { name: 'Incendiary', flat: 5 }
@@ -563,7 +577,7 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
   {
     id: 'fungal-spore',
     name: 'Fungal Spore',
-    attributes: { finesse: 3, speed: 6 },
+    attributes: { finesse: 2, speed: 2 },
     highAttributes: ['finesse', 'speed'],
     lowAttributes: ['toughness', 'strength'],
     baseHp: 10,
@@ -584,7 +598,7 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
         attackCategory: 'magic',
         selfDestruct: true,
         effects: [
-          { type: 'damage', appliesTo: 'target', damageElement: 'nature', minDamage: 12, maxDamage: 12 }
+          { type: 'damage', appliesTo: 'target', damageElement: 'nature', minDamage: 10, maxDamage: 10 }
         ]
       }
     ],
@@ -595,7 +609,7 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
   {
     id: 'sporetender',
     name: 'Sporetender',
-    attributes: { spirit: 4, mind: 3, finesse: 4 },
+    attributes: { spirit: 4, mind: 2, finesse: 2 },
     highAttributes: ['spirit','mind'],
     lowAttributes: ['speed', 'strength'],
     baseHp: 30,
@@ -628,13 +642,12 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
       },
       {
         name: 'Rot-thorn',
-        mpCost: 4,
+        mpCost: 3,
         apCost: 1,
         range: 4,
         target: 'enemy',
         effects: [
-          { type: 'damage', appliesTo: 'target', damageElement: 'nature', minDamage: 3, maxDamage: 5 },
-          { type: 'dot', appliesTo: 'target', damageElement: 'poison', damagePerTurn: 3, turns: 3 }
+          { type: 'damage', appliesTo: 'target', damageElement: 'nature', minDamage: 3, maxDamage: 5 }
         ]
       }
     ],
@@ -653,9 +666,20 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
     baseArmor: 16,
     resistances: { nature: 30 },
     passives: {
-      meleeHit: { name: 'Clumsy', flat: -10 },
+      meleeHit: { name: 'Clumsy', flat: -5 },
       movement: { name: 'Shambler', flat: -1 }
     },
+    passiveEffects: [
+      { 
+        name: 'Acrid Stench', damageElement: 'poison',
+        effect: { type: 'aura', aura: {
+          area: 'blast1', effects: [
+            { type: 'debuff', appliesTo: 'enemies', stats: { meleeHit: -5 } },
+            { type: 'dot', appliesTo: 'enemies', damageElement: 'nature', damagePerTurn: 3 }
+          ]
+        } }
+      }
+    ],
     abilities: [
       {
         name: 'Slam',
@@ -668,20 +692,6 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
           { type: 'damage', appliesTo: 'target', damageElement: 'physical', minDamage: 8, maxDamage: 10 },
           { type: 'damage', appliesTo: 'target', damageElement: 'nature', minDamage: 4, maxDamage: 5 },
         ]
-      },
-      {
-        name: 'Acrid Stench',
-        mpCost: 10,
-        apCost: 2,
-        range: 0,
-        target: 'enemy',
-        area: 'blast1',
-        attackCategory: 'magic',
-        displayElement: 'nature',
-        effects: [
-          { type: 'dot', appliesTo: 'target', damageElement: 'nature', damagePerTurn: 4, turns: 3 },
-          { type: 'debuff', appliesTo: 'target', damageElement: 'nature', stats: { meleeHit: -5 }, turns: 3 }
-        ]
       }
     ],
     dropChance: 0.4,
@@ -693,12 +703,12 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
   {
     id: 'rotfly-swarm',
     name: 'Rotfly Swarm',
-    attributes: { finesse: 3, speed: 3 },
+    attributes: { finesse: 4, speed: 2 },
     highAttributes: ['speed', 'finesse'],
     lowAttributes: ['toughness', 'strength'],
     baseHp: 15,
-    baseArmor: 3,
-    resistances: { nature: 30, physical: 20 },
+    baseArmor: 0,
+    resistances: { nature: 30, physical: 10 },
     passives: {
       dodge: { name: 'Swarm', flat: 20 }
     },
@@ -759,7 +769,7 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
         ]
       },
       {
-        name: 'Lob Globule',
+        name: 'Toxin Glob',
         mpCost: 7,
         range: 4,
         apCost: 2,
@@ -768,8 +778,8 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
         attackCategory: 'magic',
         displayElement: 'poison',
         effects: [
-          { type: 'damage', appliesTo: 'target', damageElement: 'poison', minDamage: 6, maxDamage: 8 },
-          { type: 'dot', appliesTo: 'target', damageElement: 'poison', damagePerTurn: 5, turns: 3 }
+          { type: 'damage', appliesTo: 'target', damageElement: 'poison', minDamage: 5, maxDamage: 7 },
+          { type: 'dot', appliesTo: 'target', damageElement: 'poison', damagePerTurn: 4, turns: 3 }
         ]
       }
     ],
@@ -781,11 +791,11 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
   {
     id: 'goblin-warrior',
     name: 'Goblin Warrior',
-    attributes: { toughness: 2, finesse: 4, strength: 2 },
+    attributes: { toughness: 2, strength: 4 },
     highAttributes: ['speed', 'strength'],
     lowAttributes: ['mind', 'spirit'],
     baseHp: 15,
-    baseArmor: 19,
+    baseArmor: 20,
     passives: {
       initiative: { name: 'Quick-witted', flat: 5 },
       block: { name: 'Goblin Buckler', flat: 5 },
@@ -835,7 +845,7 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
   {
     id: 'goblin-archer',
     name: 'Goblin Archer',
-    attributes: { toughness: 2, finesse: 4, speed: 2 },
+    attributes: { toughness: 2, finesse: 4 },
     highAttributes: ['speed', 'finesse'],
     lowAttributes: ['mind', 'spirit'],
     baseHp: 15,
@@ -881,7 +891,7 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
   {
     id: 'goblin-shaman',
     name: 'Goblin Shaman',
-    attributes: { toughness: 2, spirit: 4, speed: 2 },
+    attributes: { toughness: 2, spirit: 4 },
     highAttributes: ['spirit', 'finesse'],
     lowAttributes: ['mind', 'strength'],
     baseHp: 20,
@@ -1041,7 +1051,7 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
     id: 'black-centipede',
     name: 'Black Centipede',
     large: true,
-    attributes: { toughness: 6, strength: 4, mind: 4 },
+    attributes: { toughness: 6, strength: 4 },
     highAttributes: ['toughness', 'strength'],
     lowAttributes: ['spirit', 'speed'],
     baseHp: 60,
@@ -1062,7 +1072,7 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
         attackCategory: 'melee',
         displayElement: 'physical',
         effects: [
-          { type: 'damage', appliesTo: 'target', damageElement: 'physical', minDamage: 9, maxDamage: 13 }
+          { type: 'damage', appliesTo: 'target', damageElement: 'physical', minDamage: 11, maxDamage: 15 }
         ]
       },
 
@@ -1097,12 +1107,12 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
     passives: {
       movement: { name: 'Skitterer', flat: 1 }
     },
-    passiveTriggers: [
-      { name: 'Venomous', damageElement: 'poison', trigger: {
+    passiveEffects: [
+      { name: 'Venomous', damageElement: 'poison', effect: { type: 'buff', trigger: {
         when: 'attacking', on: 'hit', categories: ['melee'], chance: 60,
         effects: [
           {type: 'dot', appliesTo: 'target', damageElement: 'poison', damagePerTurn: 5, turns: 3, maxStacks: 3 }]
-      }}
+      }}}
     ],
     abilities: [
       {
@@ -1138,8 +1148,8 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
   {
     id: 'eyelax',
     name: 'Eyelax',
-    attributes: { finesse: 2, mind: 4, speed: 2 },
-    highAttributes: ['mind', 'speed'],
+    attributes: { toughness: 2, mind: 4 },
+    highAttributes: ['mind', 'toughness'],
     lowAttributes: ['spirit', 'strength'],
     baseHp: 30,
     baseArmor: 19,
@@ -1148,12 +1158,12 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
       dodge: { name: 'Wily', flat: 5 },
       magicResistance: { name: 'Voidblood', flat: 20 }
     },
-    passiveTriggers: [
-      { name: 'Spelleater', damageElement: 'shadow', trigger: {
+    passiveEffects: [
+      { name: 'Spelleater', damageElement: 'shadow', effect: { type: 'buff', trigger: {
         when: 'attacked', on: 'hit', categories: ['magic'], chance: 100,
         effects: [
           {type: 'buff', appliesTo: 'caster', damageElement: 'shadow', stats: { shadowDamage: 3, armor: 5 }, turns: 3 }]
-      }}
+      }}}
     ],
     abilities: [
       {
@@ -1191,11 +1201,12 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
   {
     id: 'voidling',
     name: 'Voidling',
-    attributes: { finesse: 3, mind: 3, spirit: 2 },
+    attributes: { finesse: 2, mind: 2, spirit: 2 },
     highAttributes: ['mind', 'finesse'],
     lowAttributes: ['toughness', 'strength'],
     baseHp: 15,
     baseArmor: 10,
+    resistances: { shadow: 20 },
     abilities: [
       {
         name: 'Umbral Claws',
@@ -1229,8 +1240,5 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
 ];
 
 // Effects an ability (or a passive trigger) would silently ignore: warned at load
-for (const c of ENEMY_CLASSES) {
-  warnIgnoredEffects(`enemies › ${c.id}`, c.abilities);
-  warnIgnoredTriggers(`enemies › ${c.id}`, c.passiveTriggers);
-}
+warnCreatureTable('enemies', ENEMY_CLASSES);
 

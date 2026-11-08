@@ -9,7 +9,7 @@ import { ARMOR_SLOTS, GEAR_SLOTS, JEWELRY_KINDS, MAGIC_ELEMENTS } from './types'
 
 import { ARMOR_TYPE_DATA, ARMOR_SLOT_VALUE, BASE_ARMOR_MULTIPLIER, ARMOR_SERIES, STARTER_ARMOR_SERIES, armorName } from './armor';
 import { itemValue } from './value';
-import { SHIELD_ARMOR_MULTIPLIER, SHIELDS, STARTER_SHIELDS, SHIELD_IMPLICIT, OFFHANDS } from './offhands';
+import { SHIELD_ARMOR_MULTIPLIER, SHIELDS, STARTER_SHIELDS, SHIELD_IMPLICIT, OFFHANDS, shieldInvalidAffixes } from './offhands';
 import { JEWELRY, droppableJewelry } from './jewelry';
 import { STARTER_WEAPON_SERIES, WEAPON_SERIES, WEAPON_TYPE_DATA, weaponInvalidAffixes, weaponName } from './weapons';
 import { AFFIX_SLOTS_PER_GROUP, rollAffixes, starvedAffixGroups, type AffixItemKind } from './affixes';
@@ -104,7 +104,10 @@ function resolveImplicit(def: ImplicitDef, level: number): Affix {
 // affixes leave a group too few stats
 for (const [kind, invalid] of [
   ...(Object.keys(WEAPON_TYPE_DATA) as WeaponType[]).map(t => [`weapon type '${t}'`, weaponInvalidAffixes(t)] as const),
-  ...Object.entries(ARMOR_TYPE_DATA).map(([t, d]) => [`armor/shield type '${t}'`, d.invalidAffixes] as const),
+  ...(Object.entries(ARMOR_TYPE_DATA) as [ArmorProficiency, (typeof ARMOR_TYPE_DATA)[ArmorProficiency]][]).flatMap(([t, d]) => [
+    [`armor type '${t}'`, d.invalidAffixes] as const,
+    [`shield type '${t}'`, shieldInvalidAffixes(t)] as const,
+  ]),
   ...(Object.entries(OFFHANDS) as [OffhandKind, (typeof OFFHANDS)[OffhandKind]][]).flatMap(([kind, o]) => o.drops.map(t => [`${kind} '${t.id}'`, t.invalidAffixes] as const)),
   ...JEWELRY_KINDS.flatMap(kind => JEWELRY[kind].map(t => [`${kind} '${t.id}'`, t.invalidAffixes] as const)),
 ]) {
@@ -177,7 +180,7 @@ export function generateShield(
   const pool = starter ? STARTER_SHIELDS : SHIELDS;
   const template = pickSeriesForLevel(armorType ? pool.filter(s => s.armorType === armorType) : pool, level);
   const typeData = ARMOR_TYPE_DATA[template.armorType];
-  const rolled = rollAffixes(typeData.invalidAffixes, level, { enabled: affixes, rarityWeights, partyLevel, kind: 'oneHand' }); // an offhand
+  const rolled = rollAffixes(shieldInvalidAffixes(template.armorType), level, { enabled: affixes, rarityWeights, partyLevel, kind: 'oneHand' }); // an offhand
   return {
     id: newItemId(),
     name: template.name,
@@ -243,7 +246,7 @@ export function itemAffixRules(item: Item): { invalid: ReadonlySet<BuffableStat>
     return { invalid: new Set(weaponInvalidAffixes(item.weaponType)), kind: WEAPON_TYPE_DATA[item.weaponType].twoHanded ? 'twoHand' : 'oneHand' };
   }
   if (isArmorItem(item)) return { invalid: new Set(ARMOR_TYPE_DATA[item.armorType].invalidAffixes), kind: 'armor' };
-  if (isShieldItem(item)) return { invalid: new Set(ARMOR_TYPE_DATA[item.armorType].invalidAffixes), kind: 'oneHand' };
+  if (isShieldItem(item)) return { invalid: new Set(shieldInvalidAffixes(item.armorType)), kind: 'oneHand' };
   if (isOffhandItem(item)) {
     const { drops, starter } = OFFHANDS[item.offhandKind];
     return { invalid: new Set([...drops, ...starter].find(t => t.name === item.name)?.invalidAffixes ?? []), kind: 'oneHand' };

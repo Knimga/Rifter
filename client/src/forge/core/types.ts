@@ -170,7 +170,7 @@ export interface MeshData {
   /** 1 byte per triangle: index into partNames. */
   part: Uint8Array;
   partNames: string[];
-  /** Part name -> pivot point (for future animation). */
+  /** Part name -> pivot point: what its spins (PartSpin) and animations (PartTurn, PartGrow) turn and scale it about. */
   pivots: Record<string, Vec3>;
   /** Named attach points: feet, overhead, hand_l, hand_r, grip, tip... */
   anchors: Record<string, Vec3>;

@@ -7,6 +7,7 @@ import type { AffixStat } from '../data/gear/affixes';
 import { SHARD_CATEGORIES, SHARDS, shardCategory, shardCount, shardName, type ShardCategory, type ShardCategoryId, type ShardCounts } from '../data/gear/shards';
 import { loot } from '../data/gear/loot';
 import { linkedDesign } from '../forge/core/link';
+import { mulberry32 } from '../forge/core/rng';
 import { designs } from '../forge/registry.vite';
 import ModelIcon from './ModelIcon';
 import type { IconTurn } from '../viewEngine/three/icons';
@@ -110,14 +111,8 @@ export default function ShardsTab({ counts, category, onCategory, showAll, onSho
 function shardTurn(stat: AffixStat): IconTurn {
   let h = 0;
   for (const ch of stat) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
-  // Three uniform numbers in [0, 1) from the seed (mulberry32)
-  const next = () => {
-    h = (h + 0x6d2b79f5) >>> 0;
-    let t = h;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
+  // Three uniform numbers in [0, 1) from the seed
+  const next = mulberry32(h);
   const u1 = next(), u2 = next(), u3 = next();
   const a = Math.sqrt(1 - u1), b = Math.sqrt(u1), p = 2 * Math.PI * u2, q = 2 * Math.PI * u3;
   return [a * Math.sin(p), a * Math.cos(p), b * Math.sin(q), b * Math.cos(q)];

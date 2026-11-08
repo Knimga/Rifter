@@ -106,6 +106,8 @@ const CATEGORY_DAMAGE: AffixRoll = { min: 1, tierSize: 2 };        // 1-2 ... 9-
 const CATEGORY_OFFENSE: AffixRoll = { min: 1, tierSize: 2 };       // %: 1-2 ... 9-10 (their crit, penetration)
 // %: 1, 2 ... 5 (their hit). Small: hit has nothing opposing it, and past +20 every attack lands (80% base)
 const CATEGORY_HIT: AffixRoll = { min: 1, tierSize: 1 };
+// %, points added to (increasedThreat) or taken from (reducedThreat) the threat multiplier: 1-4 ... 17-20
+const THREAT: AffixRoll = { min: 1, tierSize: 4, weight: 0.75 };
 const HEALING: AffixRoll = { min: 1, tierSize: 2 };                // 1-2 ... 9-10
 const HEALING_RECEIVED: AffixRoll = { min: 1, tierSize: 1, weight: 0.75 }; // 1 ... 5: on every heal and HoT tick the wearer gets
 const HP_REGEN: AffixRoll = { min: 1, tierSize: 1, minLevel: 5, weight: 0.75 };  // 1 ... 5; too strong this early
@@ -128,8 +130,9 @@ const ELEMENT_ROLLS: Record<'Hit' | 'Crit' | 'Damage' | 'Resistance' | 'Penetrat
 
 /**
  * Buffable stats that never roll on gear (only buffs, debuffs and class passives change them): +1 AP on an
- * item would be far too strong, threat is a class's identity (a tank's draw, a rogue's subtlety), not loot's,
- * and a whole extra tile per move is the same.
+ * item would be far too strong and a whole extra tile per move is the same. Threat is a class's identity (a
+ * tank's draw, a rogue's subtlety): gear only nudges it, through increasedThreat and reducedThreat (each limited
+ * to its own kinds of item), never the multiplier itself.
  */
 export const NON_AFFIX_STATS = ['apMax', 'threatMultiplier', 'movement'] as const satisfies readonly BuffableStat[];
 /** A stat that can roll as an affix. */
@@ -148,6 +151,8 @@ export const AFFIX_ROLLS: Record<AffixStat, AffixRoll> = {
   block: AVOIDANCE,
   glancingBlow: AVOIDANCE,
   initiative: INITIATIVE,
+  increasedThreat: THREAT,
+  reducedThreat: THREAT,
   meleeDamage: CATEGORY_DAMAGE,
   rangedDamage: CATEGORY_DAMAGE,
   magicDamage: CATEGORY_DAMAGE,
@@ -191,6 +196,7 @@ const GROUP_STATS: Record<AffixGroup, AffixStat[]> = {
     ...elementStats(['Resistance']),
     'hp', 'mp', 'armor', 'dodge', 'parry', 'block', 'glancingBlow',
     'hpRegen', 'mpRegen', 'magicResistance', 'healing', 'healingReceived', 'initiative',
+    'increasedThreat', 'reducedThreat',
     'redoubt', 'devotion', 'evasion', 'perception', 'subtlety',
   ],
 };
@@ -237,11 +243,11 @@ export const RarityPerAffixCount: Record<number, Rarity> = {
  * toward the rarer end: see RARITY_TILT_PER_LEVEL and rarityWeights (below).
  */
 export const RARITY_WEIGHT: Record<Rarity, number> = {
-  Common: 45,
+  Common: 40,
   Quality: 30,
-  Superior: 15,
-  Rare: 5,
-  Exquisite: 5,
+  Superior: 20,
+  Rare: 7,
+  Exquisite: 3,
 };
 
 /**

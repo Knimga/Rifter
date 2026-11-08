@@ -5,8 +5,17 @@ import { TILE_SIZE } from '../viewEngine/board';
 /** An icon a float can show before its text: 'gold', the coin (gold picked up). */
 export type FloatIcon = 'gold';
 
-/** A float's special look: 'levelUp', larger, brighter and glowing (the party leveling up). */
-export type FloatLook = 'levelUp';
+/**
+ * A float's special look: 'levelUp', larger, brighter and glowing (the party leveling up); 'quest', in the display
+ * font, regular weight and a little larger (a quest's news, a rift key found).
+ */
+export type FloatLook = 'levelUp' | 'quest';
+
+const LOOK_CLASS: Record<FloatLook | 'combat', string> = {
+  combat: 'font-bold text-sm',
+  levelUp: 'font-bold rf-float-levelup',
+  quest: 'rf-float-quest',
+};
 
 export interface FloatingText {
   id: number;
@@ -25,14 +34,17 @@ interface Props {
   /** Where the text starts on the board (px): its tile's projected center, a little above the floor. */
   at: { left: number; top: number };
   onComplete: (id: number) => void;
+  /** Not drawn (over a tile the party doesn't see), but it still ends on time: it never shows up later, out of turn. */
+  hidden?: boolean;
 }
 
-export default function FloatingCombatText({ ft, at, onComplete }: Props) {
+export default function FloatingCombatText({ ft, at, onComplete, hidden = false }: Props) {
   useEffect(() => {
     const timer = setTimeout(() => onComplete(ft.id), DURATION_MS);
     return () => clearTimeout(timer);
   }, [ft.id, onComplete]);
 
+  if (hidden) return null;
   return (
     <div
       className="absolute z-30 pointer-events-none flex items-center justify-center"
@@ -40,7 +52,7 @@ export default function FloatingCombatText({ ft, at, onComplete }: Props) {
     >
       {/* As wide as its text, up to a few words' worth before it wraps (not the tile's narrow width), centered on it */}
       <span
-        className={`shrink-0 w-max max-w-[240px] text-center font-bold drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)] ${ft.look === 'levelUp' ? 'rf-float-levelup' : 'text-sm'} ${ft.icon ? 'inline-flex items-center gap-1 whitespace-nowrap' : ''}`}
+        className={`shrink-0 w-max max-w-[240px] text-center drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)] ${LOOK_CLASS[ft.look ?? 'combat']} ${ft.icon ? 'inline-flex items-center gap-1 whitespace-nowrap' : ''}`}
         style={{ color: ft.color, animation: `floatUp ${DURATION_MS}ms ease-out forwards` }}
       >
         {ft.icon === 'gold' && <FaCoins aria-hidden="true" className="w-3 h-3 shrink-0" style={{ color: 'var(--rift-gold)' }} />}

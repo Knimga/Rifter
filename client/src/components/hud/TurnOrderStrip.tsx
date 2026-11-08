@@ -30,7 +30,7 @@ export default function TurnOrderStrip({ round, turnOrder, currentTurnIndex, ene
           return (
             <li key={c.id} className="flex min-w-0" style={{ flex: '0 1 112px' }}>
               {/* The name, in full, in case the pill cuts it short */}
-              <Hint text={c.isAlly ? `${name} (summoned)` : name} className="flex min-w-0 w-full">
+              <Hint text={name} className="flex min-w-0 w-full">
                 <button type="button"
                   className={`rf-pill ${partySide ? '' : 'is-enemy'} ${current ? 'is-current' : ''} ${done ? 'is-done' : ''}`}
                   aria-current={current}

@@ -8,7 +8,7 @@ import { interactiveObjectModel } from '../data/world/interactiveObjects';
 import { ARRIVAL_PORTAL_COLOR, RIFT_MODELS, SANCTUM_RIFT_COLOR } from '../data/world/rifts';
 import { placeClutter, type ClutterKind } from '../forge/terrain/clutter';
 import { decorObject, type DecorObjectData } from '../data/world/decorObjects';
-import type { ClutterConfig, DungeonConfig, ZoneData } from '../data/world/dungeonGen';
+import type { ClutterConfig, DungeonConfig, ZoneData } from '../data/world/gen';
 import { posKey, type Pos } from '../data/world/grid';
 
 /**
@@ -38,9 +38,12 @@ export const doorAt = (id: string, doorObject: string, pos: Pos, isFloor: (p: Po
 export const doorObjects = (zone: ZoneData, doorObject: string): SceneryObject[] =>
   zone.doors.map((d) => doorAt(d.id, doorObject, d.pos, floorOf(zone)));
 
-/** A zone's rift back to the Sanctum, at `pos`: the Rift in SANCTUM_RIFT_COLOR, facing the floor it opens onto. */
-export const riftObject = (zone: ZoneData, pos: Pos, id: string): SceneryObject =>
-  ({ id, link: RIFT_MODELS.rift.model, pos, facing: facingOpenSide(pos, floorOf(zone)), tint: SANCTUM_RIFT_COLOR });
+/**
+ * A zone's rift back to the Sanctum, at `pos`: the Rift in SANCTUM_RIFT_COLOR, facing the floor it opens onto.
+ * `opening`: it opens as it appears (a boss room's, as its boss falls); otherwise it stands open.
+ */
+export const riftObject = (zone: ZoneData, pos: Pos, id: string, opening = false): SceneryObject =>
+  ({ id, link: RIFT_MODELS.rift.model, pos, facing: facingOpenSide(pos, floorOf(zone)), tint: SANCTUM_RIFT_COLOR, ...(opening ? { played: ['open'], playIn: true } : {}) });
 
 /**
  * A portal the party arrives through at the game's opening (GameScreen's arrival): a rift in ARRIVAL_PORTAL_COLOR on a

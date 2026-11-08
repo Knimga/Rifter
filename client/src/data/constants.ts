@@ -67,6 +67,14 @@ export const OUT_OF_COMBAT_REGEN_INTERVAL_MS = 3000;
  */
 export const AIM_TURN_LEAD_MS = 180;
 
+/**
+ * A movement ability's look (Ability.move): a 'dash' glides along its path this long a tile (fast: a walk takes 200 ms
+ * a tile); a 'blink' fades out and back in over BLINK_MS in all, and appears where it lands. The rest of the ability
+ * lands once the move has played.
+ */
+export const DASH_MS_PER_TILE = 70;
+export const BLINK_MS = 320;
+
 /** How long a party member's turn lingers once it has nothing left to spend (no AP, no paid tiles), before it ends by itself. */
 export const AUTO_END_TURN_DELAY_MS = 600;
 

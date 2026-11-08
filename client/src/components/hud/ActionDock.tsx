@@ -1,14 +1,15 @@
 // The action bar (bottom centre): the acting member (portrait, name, class,
 // movement and, in combat, its AP tracker), five slots (weapon attack or an ability, its AP cost as dots;
 // right-click to assign; number keys 1-5 use them like clicks) and End Turn (Space). A slot dims when its ability
-// costs more MP or AP than the member has, or the member can't act now.
+// costs more MP or AP than the member has, a rooted member's movement ability, or the member can't act now.
 import { createElement, useEffect, useRef, useState, type CSSProperties, type MouseEvent } from 'react';
 import { CLASSES } from '../../data/units/classes';
 import { mpCostAt, type Ability } from '../../data/combat/abilities';
 import type { PartyMemberConfig } from '../../data/units/party';
-import type { Stats } from '../../data/units/stats';
+import type { ActiveBuff, Stats } from '../../data/units/stats';
 import { heldWeapon } from '../../data/gear';
 import { toAction } from '../../data/combat/abilityExecution';
+import { rootBlocks } from '../../data/combat/abilityMoves';
 import { ClickHint, TextTip, Tooltip } from '../Tooltip';
 import ItemIcon from '../ItemIcon';
 import AbilityCard, { ApDots, abilityTint } from '../ui/AbilityCard';
@@ -24,10 +25,12 @@ const SLOT_KEYS = 5;
 /** What an action bar slot holds: the weapon attack, an ability, or nothing. */
 export type SlotContent = 'weapon-attack' | Ability | null;
 
-export default function ActionDock({ member, stats, mp, slots, onSlotsChange, armedSlot, onArmedSlotChange, inCombat, canAct, ap, paidTiles, onEndTurn }: {
+export default function ActionDock({ member, stats, mp, buffs, slots, onSlotsChange, armedSlot, onArmedSlotChange, inCombat, canAct, ap, paidTiles, onEndTurn, keysEnabled }: {
   member: PartyMemberConfig;
   stats: Stats;
   mp: number;
+  /** The member's active buffs and debuffs: a root dims its movement abilities. */
+  buffs: ActiveBuff[];
   slots: SlotContent[];
   onSlotsChange: (slots: SlotContent[]) => void;
   armedSlot: number | null;
@@ -41,6 +44,8 @@ export default function ActionDock({ member, stats, mp, slots, onSlotsChange, ar
   paidTiles: number;
   /** End Turn (shown in combat only). */
   onEndTurn?: () => void;
+  /** Its keys (1-5, Space) work now: not while a window is open over the game or the party watches a scene. */
+  keysEnabled: boolean;
 }) {
   const [menuSlot, setMenuSlot] = useState<number | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -72,7 +77,9 @@ export default function ActionDock({ member, stats, mp, slots, onSlotsChange, ar
     const ability = slot === 'weapon-attack' ? weaponAttack : slot;
     const afford = !ability || mpCostAt(ability, stats.level) <= mp;
     const affordAp = !ability || !ap || ability.apCost <= ap.available;
-    return { slot, ability, afford, affordAp, usable: !!ability && afford && affordAp && canAct };
+    // A rooted member can't move by an ability either (rootBlocks)
+    const unrooted = !ability || !rootBlocks(ability, buffs);
+    return { slot, ability, afford, affordAp, unrooted, usable: !!ability && afford && affordAp && unrooted && canAct };
   };
   /** Clicking slot i, or pressing its number key: arm its ability (or disarm it, if armed), when usable. */
   const toggleSlot = (i: number) => {
@@ -81,12 +88,13 @@ export default function ActionDock({ member, stats, mp, slots, onSlotsChange, ar
   };
 
   // Number keys 1-5 use slots 1-5, like clicking them; Space ends the turn, like End Turn (in combat). Not while
-  // typing in a field, or with a modifier held.
+  // typing in a field, with a modifier held, or while its keys are off (keysEnabled: a window open, a scene playing).
   const toggleSlotRef = useLatest(toggleSlot);
   const endTurnRef = useLatest(inCombat ? onEndTurn : undefined);
+  const keysOnRef = useLatest(keysEnabled);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.repeat || e.ctrlKey || e.altKey || e.metaKey) return;
+      if (!keysOnRef.current || e.repeat || e.ctrlKey || e.altKey || e.metaKey) return;
       const target = e.target as HTMLElement | null;
       if (target && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))) return;
       if (e.key === ' ') {
@@ -101,7 +109,7 @@ export default function ActionDock({ member, stats, mp, slots, onSlotsChange, ar
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [toggleSlotRef, endTurnRef]);
+  }, [toggleSlotRef, endTurnRef, keysOnRef]);
 
   // The armed slot's AP cost, previewed on the tracker
   const armedContent = armedSlot !== null ? slots[armedSlot] : null;
@@ -131,8 +139,8 @@ export default function ActionDock({ member, stats, mp, slots, onSlotsChange, ar
       {/* Slots */}
       <div className="flex gap-2">
         {slots.map((_, i) => {
-          const { slot, ability, afford, affordAp, usable } = slotState(i);
-          const warning = !affordAp ? 'Not enough action points' : !afford ? 'Not enough mana' : undefined;
+          const { slot, ability, afford, affordAp, unrooted, usable } = slotState(i);
+          const warning = !affordAp ? 'Not enough action points' : !afford ? 'Not enough mana' : !unrooted ? 'Rooted: it can\'t move' : undefined;
           const armed = armedSlot === i && !!ability;
           const card = ability && (slot === 'weapon-attack' && weapon ? { ...ability, name: weapon.name } : ability);
           // The same element wash as the ability's card

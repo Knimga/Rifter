@@ -29,8 +29,12 @@ export interface ShardCategory {
   stats: AffixStat[];
 }
 
-/** A shard type's display name: the affix stat's label ('Fire Damage', 'HP Regen'). */
-export const shardName = (stat: AffixStat): string => formatStatLabel(stat);
+/**
+ * A shard type's display name: the affix stat's label ('Fire Damage', 'HP Regen'). The two threat stats both read
+ * 'Threat' on an item, so their shards keep the stats' own names.
+ */
+export const shardName = (stat: AffixStat): string =>
+  stat === 'increasedThreat' ? 'Increased Threat' : stat === 'reducedThreat' ? 'Reduced Threat' : formatStatLabel(stat);
 
 /** An element's stats for each of `suffixes` (fireDamage, iceDamage...), element by element. */
 const elementStats = (suffixes: readonly string[]) =>
@@ -52,7 +56,7 @@ export const SHARD_CATEGORIES: readonly ShardCategory[] = [
   { id: 'elemental', name: 'Elemental', color: 'var(--shard-elemental)', tint: [116, 82, 156], stats: byName(elementStats(['Damage', 'Hit', 'Crit', 'Penetration'])) },
   { id: 'resistance', name: 'Resistance', color: 'var(--shard-resistance)', tint: [84, 87, 94], stats: elementStats(['Resistance']) },
   { id: 'healing', name: 'Healing', color: 'var(--shard-healing)', tint: [62, 156, 123], stats: ['healing', 'healingReceived'] },
-  { id: 'tempo', name: 'Tempo', color: 'var(--shard-tempo)', tint: [176, 176, 172], stats: ['initiative'] },
+  { id: 'tempo', name: 'Tempo', color: 'var(--shard-tempo)', tint: [176, 176, 172], stats: ['initiative', 'increasedThreat', 'reducedThreat'] },
 ];
 
 /** Every shard type, in list order (category by category). */
@@ -82,7 +86,7 @@ export const categoryOfShard = (stat: AffixStat): ShardCategory => shardCategory
 /** The chance (0..1) that a dead enemy, any enemy, drops shards (a group of them: SHARD_DROP_COUNT). */
 export const SHARD_DROP_CHANCE = 0.05;
 /** How many shards one drop holds, an even pick from least to most, each of a random type. */
-export const SHARD_DROP_COUNT: [min: number, max: number] = [5, 10];
+export const SHARD_DROP_COUNT: [min: number, max: number] = [3, 9];
 
 /**
  * Shards dropped with a chance of `chance` (0..1; an enemy's SHARD_DROP_CHANCE, a container's `shardChance`): a group

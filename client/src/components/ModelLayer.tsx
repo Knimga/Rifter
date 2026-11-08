@@ -113,6 +113,8 @@ interface Props {
   renderEnemyOverlay?: (enemy: EnemyInstance) => ReactNode;
   /** Unit id ('party-0', an enemy id) → the tile it last aimed an ability at; a new `seq` turns it to face it. */
   aims?: Record<string, UnitAim>;
+  /** Unit id → how its model plays its next move (UnitMove): a movement ability's dash or blink, when its `seq` is new. */
+  moves?: Record<string, UnitMove>;
   /** Unit id → the feedback its model last showed (UnitFx); a new `seq` plays it. */
   fx?: Record<string, UnitFx>;
   /** Fog of war over the map (null or omitted: none). Drawn by the renderer over the floor and every model. */
@@ -148,7 +150,10 @@ export interface UnitAim {
   seq: number;
 }
 
-export default function ModelLayer({ board, party = [], enemies = [], loot = [], objects = [], renderEnemyOverlay, aims = {}, fx = {}, fog = null, onReady, terrain = null, terrainHost = null, designs = approvedDesigns }: Props) {
+/** How a unit's model plays its next move to a new tile when `seq` is new (a movement ability's dash or blink: MapUnit.move). */
+export type UnitMove = NonNullable<MapUnit['move']>;
+
+export default function ModelLayer({ board, party = [], enemies = [], loot = [], objects = [], renderEnemyOverlay, aims = {}, moves = {}, fx = {}, fog = null, onReady, terrain = null, terrainHost = null, designs = approvedDesigns }: Props) {
   const onReadyRef = useLatest(onReady);
   const hostRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<MapModelRenderer | null>(null);
@@ -199,8 +204,9 @@ export default function ModelLayer({ board, party = [], enemies = [], loot = [],
   const objectKey = objects.map((o) => `${o.id}:${o.link}:${o.seed ?? ''}:${o.held?.link ?? ''}:${o.pos.x},${o.pos.y}:${o.facing}:${o.played?.join('+') ?? ''}:${tintKey(o)}:${o.aim?.seq ?? ''}`).join('|');
   const aimKey = Object.entries(aims).map(([id, a]) => `${id}:${a.seq}`).join('|');
   const flashKey = Object.entries(fx).map(([id, f]) => `${id}:${f.flash ?? ''}`).join('|');
+  const moveKey = Object.entries(moves).map(([id, m]) => `${id}:${m.seq}`).join('|');
   const units: MapUnit[] = useMemo(() => {
-    const out: MapUnit[] = [...partyUnits, ...enemyUnits].map((u) => ({ ...u, ...(aims[u.id] && { aim: aims[u.id] }), ...(fx[u.id]?.flash !== undefined && { flash: fx[u.id].flash }) }));
+    const out: MapUnit[] = [...partyUnits, ...enemyUnits].map((u) => ({ ...u, ...(aims[u.id] && { aim: aims[u.id] }), ...(moves[u.id] && { move: moves[u.id] }), ...(fx[u.id]?.flash !== undefined && { flash: fx[u.id].flash }) }));
     for (const o of objects) {
       const design = linkedDesign(designs, o.link);
       if (!design) continue;
@@ -225,7 +231,7 @@ export default function ModelLayer({ board, party = [], enemies = [], loot = [],
     const live = new Set([...partyUnits, ...enemyUnits].map((u) => u.id).concat(objects.map((o) => o.look ?? o.id), loot.map(lootCacheId)));
     for (const id of cache.current.keys()) if (!live.has(id)) cache.current.delete(id);
     return out;
-  }, [partyUnits, enemyUnits, lootKey, objectKey, aimKey, flashKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [partyUnits, enemyUnits, lootKey, objectKey, aimKey, moveKey, flashKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // DOM that follows each unit's drawn position (models glide between tiles): the overlay above its head,
   // the active member's floor glow and a glow pulse behind its model. The renderer reports every change (onPlace); a newly mounted

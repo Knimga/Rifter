@@ -1,5 +1,5 @@
-// The enchanter's services (an NPC with the 'enchanting' service, data/world/npcs.ts), on one item from the party's
-// inventory placed on her bench, paid in gold and affix shards (shards.ts):
+// The enchanter's services (an NPC with the 'enchanting' service, data/world/npcs.ts), on one item of the party's, in the
+// inventory or worn (the item her bench points at: it never moves), paid in gold and affix shards (shards.ts):
 // - Enchant: upgrade an affix a tier (one shard of its stat) or add a new one at tier 1 (one shard of the new stat).
 //   The item keeps its affix groups (AFFIX_SLOTS_PER_GROUP of each: the bench's four rows) and the sum of its tiers
 //   stays within the party level's cap (tierSumCap). A new affix is never one the item's type can't roll, or a stat
@@ -7,16 +7,18 @@
 // - Disenchant: extract the chosen affixes as shards (one each); the item is destroyed. The price climbs steeply with
 //   each extra affix.
 // - Shatter: a random number of its affixes (at least one) come back as shards; the item is destroyed. Cheap.
+//   (Both only on carried items: worn gear can't be destroyed, it has to be unequipped first.)
 // - Sell shards: each sells for SHARD_PRICE, and can be bought back for the same.
 // Adding or removing affixes changes an item's rarity (its affix count: RarityPerAffixCount), and its value with it.
 // Tune the prices here.
-import type { Affix, Item } from './types';
+import type { Affix, GearSlot, GearSlots, Item } from './types';
+import type { Inventory } from './inventory';
 import { itemAffixRules } from '.';
 import { AFFIX_GROUP, AFFIX_ROLLS, AFFIX_SLOTS_PER_GROUP, MAX_TIER, RarityPerAffixCount, itemTierSum, rollAffixValue, tierRange, tierSumCap, type AffixGroup, type AffixStat } from './affixes';
 import { RARITY_VALUE } from './value';
 import { SHARDS, addShards, shardCount, shardName, type ShardCounts } from './shards';
 import { formatSigned } from '../detailStrings';
-import { statSuffix } from '../units/stats';
+import { shownStatValue, statSuffix } from '../units/stats';
 import { randInt, shuffle } from '../random';
 
 // ─── Prices ───────────────────────────────────────────────────────────────────
@@ -34,6 +36,22 @@ export const SHARD_PRICE = 20;
 
 // ─── The bench ────────────────────────────────────────────────────────────────
 
+/**
+ * The item on the bench: a pointer to where it lives (an inventory slot, or a slot of a member's gear), never a copy;
+ * it stays there, worn or carried, while it is on the bench.
+ */
+export type BenchRef = { kind: 'inventory'; idx: number } | { kind: 'gear'; member: number; slot: GearSlot };
+
+/** Whether two bench pointers name the same item. */
+export const sameBenchRef = (a: BenchRef | null, b: BenchRef | null) =>
+  !!a && !!b && (a.kind === 'inventory' ? b.kind === 'inventory' && a.idx === b.idx : b.kind === 'gear' && a.member === b.member && a.slot === b.slot);
+
+/** The item a bench pointer names (null: empty bench, or the slot is empty). */
+export function benchItem(ref: BenchRef | null, inventory: Inventory, party: readonly { gear: GearSlots }[]): Item | null {
+  if (!ref) return null;
+  return ref.kind === 'inventory' ? inventory[ref.idx] ?? null : party[ref.member]?.gear[ref.slot] ?? null;
+}
+
 /** The bench's affix rows, top to bottom: each row's group (AFFIX_SLOTS_PER_GROUP of each). */
 export const BENCH_ROWS: readonly AffixGroup[] = [1, 1, 2, 2];
 
@@ -49,12 +67,14 @@ export function benchRows(item: Item): (number | null)[] {
 }
 
 /** A stat's value as the bench shows it: '+3', '+2%'. */
-export const affixValueText = (stat: string, value: number) => `${formatSigned(value)}${statSuffix(stat)}`;
+export const affixValueText = (stat: string, value: number) => `${formatSigned(shownStatValue(stat, value))}${statSuffix(stat)}`;
 
 /** What a tier of a stat rolls on this item, as the bench shows it: '+4–6', '+3%' (one value). */
 export function tierValueText(item: Item, stat: AffixStat, tier: number): string {
   const [lo, hi] = tierRange(AFFIX_ROLLS[stat], tier, itemAffixRules(item).kind);
-  return lo === hi ? affixValueText(stat, lo) : `${formatSigned(lo)}–${hi}${statSuffix(stat)}`;
+  if (lo === hi) return affixValueText(stat, lo);
+  // A reduction runs the other way: −1 to −4, shown '−1–4' (its largest first)
+  return `${formatSigned(shownStatValue(stat, lo))}–${Math.abs(shownStatValue(stat, hi))}${statSuffix(stat)}`;
 }
 
 /** What the party brings to the bench: its level (the tier cap), shards and gold. */
@@ -66,7 +86,7 @@ export interface BenchParty {
 
 /** Why an action can't be done: a short label for its button, and the full reason for the status line. */
 export interface Blocked {
-  short: 'Max tier' | 'Tier cap' | 'No shard' | 'Need gold';
+  short: 'Max tier' | 'Tier cap' | 'No slot' | 'No shard' | 'Need gold';
   long: string;
 }
 
@@ -100,6 +120,8 @@ export function addableShards(item: Item, group: AffixGroup, shards: ShardCounts
 
 /** Why an affix can't be added in a slot of `group`, if it can't (checked in this order); null if it can. */
 export function addBlocked(item: Item, group: AffixGroup, party: BenchParty): Blocked | null {
+  // The group's AFFIX_SLOTS_PER_GROUP slots are all taken (the bench offers adding only on an empty row: checked here too)
+  if (item.affixes.filter((a) => affixGroup(a) === group).length >= AFFIX_SLOTS_PER_GROUP) return { short: 'No slot', long: 'This item has no free slot of that kind.' };
   if (!underTierCap(item, party)) return tierCapReason(party);
   if (addableShards(item, group, party.shards).length === 0) return { short: 'No shard', long: 'You carry no shard that fits this slot.' };
   if (party.gold < addAffixCost(item.affixes.length)) return { short: 'Need gold', long: 'Not enough gold to add an affix.' };

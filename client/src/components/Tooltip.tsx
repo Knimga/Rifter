@@ -104,7 +104,7 @@ export function TextTip({ children }: { children: ReactNode }) {
 // ─── Item tooltips ────────────────────────────────────────────────────────────
 
 /** What right-clicking the item does here, if anything (equip it, unequip it, take it from a container, enchant it). */
-export type ItemClickAction = 'Equip' | 'Unequip' | 'Loot' | 'Place on bench';
+export type ItemClickAction = 'Equip' | 'Unequip' | 'Loot' | 'Put on bench';
 
 /**
  * An item's side of a trade (the vendor window), shown at the bottom of its tooltip instead of its sell value: its
@@ -212,7 +212,7 @@ function ItemTip({ item, type, proficient, clickAction, canCompare, canCompareOt
         <div className="mt-2 pt-2 border-t border-rift-line text-[11px] leading-[1.6]">
           {compare.damage && <DamageDelta {...compare.damage} />}
           {compare.deltas.length === 0 && !compare.damage ? <div className="text-rift-muted">No stat changes</div>
-            : compare.deltas.map(({ stat, delta }) => <div key={stat} className={delta > 0 ? 'text-rift-up' : 'text-rift-down'}>{formatModifier(stat, delta)}</div>)}
+            : compare.deltas.map(({ stat, delta }) => <div key={stat} className={stat === 'increasedThreat' ? 'text-rift-ink' : delta > 0 ? 'text-rift-up' : 'text-rift-down'}>{formatModifier(stat, delta)}</div>)}
         </div>
       )}
     </div>

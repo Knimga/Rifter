@@ -3,7 +3,7 @@
 // proficiencies, and abilities.
 import { lazy, Suspense, useMemo, useRef, useState, type MouseEvent } from 'react';
 import { CLASSES, ROLE_ICONS, type ClassKey, type ArmorProficiency, type Role } from '../data/units/classes';
-import { capitalizeWords, formatPassiveValue, formatStatLabel, triggerSentence } from '../data/detailStrings';
+import { capitalizeWords, formatPassiveValue, formatStatLabel, passiveEffectSentences } from '../data/detailStrings';
 import { heldWeapon } from '../data/gear';
 import { HERO_NAMES, startingGear } from '../data/units/party';
 import { pick } from '../data/random';
@@ -60,8 +60,10 @@ function RoleIcons({ roles, labels = false }: { roles: Role[]; labels?: boolean 
 }
 
 
-export default function CharacterSelectScreen({ onStart, onBack }: {
+export default function CharacterSelectScreen({ onStart, onSkipToSanctum, onBack }: {
   onStart: (party: PartyPick[]) => void;
+  /** TEMP (testing only): start with the opening skipped, in the Sanctum. */
+  onSkipToSanctum: (party: PartyPick[]) => void;
   onBack: () => void;
 }) {
   const [focusKey, setFocusKey] = useState<ClassKey | null>(null);
@@ -80,6 +82,7 @@ export default function CharacterSelectScreen({ onStart, onBack }: {
   // Every party needs someone who can heal (a class with the healer role)
   const hasHealer = slots.some((s) => s.classKey && CLASSES[s.classKey].roles.includes('healer'));
   const ready = filled === 3 && named === 3 && hasHealer;
+  const picks = (): PartyPick[] => slots.map((s) => ({ classKey: s.classKey!, name: s.name.trim() }));
   const placeOf = (key: ClassKey) => slots.findIndex((s) => s.classKey === key);
   const update = (fn: (next: Slot[]) => void) => setSlots((prev) => { const next = prev.map((s) => ({ ...s })); fn(next); return next; });
 
@@ -124,6 +127,11 @@ export default function CharacterSelectScreen({ onStart, onBack }: {
             <svg aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.25"><path d="M13 8H3M7 4L3 8l4 4" /></svg>
             Back
           </button>
+          {/* TEMP (testing only): straight to the Sanctum, the opening skipped */}
+          <RiftButton size="sm" className="absolute right-0 top-1" disabled={!ready}
+            onClick={(e) => { stop(e); fadeOut(() => onSkipToSanctum(picks())); }}>
+            Skip to Sanctum
+          </RiftButton>
           <h1 className="m-0 font-display font-normal leading-[1.1] tracking-[0.1em] text-rift-ink"
             style={{ fontSize: 'clamp(26px, 3.2vw, 40px)', textShadow: '0 -1px 0 rgba(255, 255, 255, 0.07), 0 3px 2px rgba(0, 0, 0, 0.85), 0 0 36px color-mix(in srgb, var(--glow) 14%, transparent)' }}>
             Assemble Your Party
@@ -191,10 +199,10 @@ export default function CharacterSelectScreen({ onStart, onBack }: {
                         <span className="block text-[11px] text-rift-label">{p.name}</span>
                       </p>
                     ))}
-                    {/* Its passive triggers: what each does, in words, and its name */}
-                    {focus.passiveTriggers?.map((p) => (
+                    {/* Its passive effects: what each does, in words, and its name */}
+                    {focus.passiveEffects?.map((p) => (
                       <div key={p.name} className="mb-2 text-[13px] leading-[1.4] text-rift-muted">
-                        <EffectSentence parts={triggerSentence(p.trigger, undefined, 'you')} />
+                        {passiveEffectSentences(p).map((s, i) => <EffectSentence key={i} parts={s} />)}
                         <span className="block text-[11px] text-rift-label">{p.name}</span>
                       </div>
                     ))}
@@ -287,7 +295,7 @@ export default function CharacterSelectScreen({ onStart, onBack }: {
                   : <span className="text-xs tracking-[0.04em] text-rift-muted">{startHint}</span>}
               </span>
               <RiftButton size="lg" className="!min-h-[52px] !px-12" disabled={!ready}
-                onClick={() => fadeOut(() => onStart(slots.map((s) => ({ classKey: s.classKey!, name: s.name.trim() }))), OPENING_FADE_MS)}>
+                onClick={() => fadeOut(() => onStart(picks()), OPENING_FADE_MS)}>
                 Start Game
               </RiftButton>
             </div>

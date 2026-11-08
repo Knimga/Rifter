@@ -1,4 +1,4 @@
-import { gearSlotsFor, type GearSlot, type GearSlots, type Item } from './types';
+import { ARMOR_SLOTS, JEWELRY_KINDS, gearSlotsFor, type GearSlot, type GearSlots, type Item, type JewelryKind, type Rarity } from './types';
 import { isWeaponItem, isShieldItem, isOffhandItem, isArmorItem, isJewelryItem } from '.';
 import { OFFHAND_PROFICIENCY } from './offhands';
 import { WEAPON_TYPE_DATA } from './weapons';
@@ -39,6 +39,35 @@ export function addItem(slots: Inventory, item: Item): Inventory {
 /** The slots with the items in `from` and `to` trading places (moving one to an empty slot leaves its own empty). */
 export function moveItem(slots: Inventory, from: number, to: number): Inventory {
   return setSlot(setSlot(slots, to, slots[from]), from, slots[to]);
+}
+
+/** Rarities, lowest first. */
+const RARITY_ORDER: readonly Rarity[] = ['Common', 'Quality', 'Superior', 'Rare', 'Exquisite'];
+
+/**
+ * Where an item sorts in the auto-sort (sortInventory): weapons (by type), shields, other offhands (quivers, foci),
+ * armor (helm, chest, gloves, boots), then amulets and rings.
+ */
+function sortGroup(item: Item): [number, number] {
+  if (isWeaponItem(item)) return [0, Object.keys(WEAPON_TYPE_DATA).indexOf(item.weaponType)];
+  if (isShieldItem(item)) return [1, 0];
+  if (isOffhandItem(item)) return [2, item.offhandKind === 'quiver' ? 0 : 1];
+  if (isArmorItem(item)) return [3, ARMOR_SLOTS.indexOf(item.slot)];
+  return [4, JEWELRY_KINDS.indexOf(item.slot as JewelryKind)];
+}
+
+/**
+ * The inventory with its items sorted by kind (sortGroup), the best first within a kind (rarity, then item level, then
+ * name), packed into the first slots with the empty ones after.
+ */
+export function sortInventory(slots: Inventory): Inventory {
+  const items = slots.filter((it): it is Item => !!it).map(item => ({ item, group: sortGroup(item) }));
+  items.sort((a, b) =>
+    a.group[0] - b.group[0] || a.group[1] - b.group[1]
+    || RARITY_ORDER.indexOf(b.item.rarity) - RARITY_ORDER.indexOf(a.item.rarity)
+    || b.item.level - a.item.level
+    || a.item.name.localeCompare(b.item.name));
+  return slots.map((_, i) => items[i]?.item ?? null);
 }
 
 /** A list of items (a chest's) without the one at `idx`: the rest close up. */

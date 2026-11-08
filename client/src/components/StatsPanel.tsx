@@ -1,8 +1,9 @@
-// The party window's Stats panel: seven dark boxes grouped by meaning. Vitals (HP
-// and MP bars with their regen), Defense (armor and magic resistance with the damage they stop), Avoidance,
-// Offense (melee / ranged / magic columns), Tempo (initiative, movement), Healing, and Resistances (one per damage
-// element). Every value is marked green / red when gear or an effect raises it, or an effect lowers it, and yellow
-// while level-up points change it (`shift`, Val).
+// The party window's Stats tab (CharacterSheet holds the panel and its tabs): six dark boxes grouped by meaning.
+// Vitals (HP and MP bars with their regen), Defense (armor and magic resistance with the damage they stop), Avoidance,
+// Offense (melee / ranged / magic columns), one box for Tempo (initiative, movement, threat) over Healing, and
+// Resistances (one per damage element). Every value is marked green / red when gear or an effect raises it, or an
+// effect lowers it, and yellow while level-up points change it (`shift`, Val). Threat is never green or red (higher
+// or lower is good or bad by class): it only keeps the tooltip.
 import { createContext, useContext, useEffect, useRef, type ReactNode } from 'react';
 import type { IconType } from 'react-icons';
 import { FaAnkh, FaFire, FaLeaf, FaRegSnowflake, FaShieldAlt } from 'react-icons/fa';
@@ -13,13 +14,13 @@ import { ImPlus } from 'react-icons/im';
 import { IoMdDownload } from 'react-icons/io';
 import { MdKeyboardDoubleArrowRight } from 'react-icons/md';
 import { SiMagic } from 'react-icons/si';
+import { TbCrosshair } from 'react-icons/tb';
 import { ROLE_ICONS } from '../data/units/classes';
 import { ATTACK_CATEGORY_COLOR, DAMAGE_ELEMENT_COLOR } from '../data/constants';
 import { formatStat, type BuffableStat, type DamageElement, type Stats } from '../data/units/stats';
-import { StatTooltips, capitalize } from '../data/detailStrings';
+import { StatTooltips, capitalize, formatSigned } from '../data/detailStrings';
 import { GLANCING_MULTIPLIER, damageReduction } from '../data/combat/attackResolution';
 import { Hint, TextTip, Tooltip } from './Tooltip';
-import { PanelTitle } from './ui/Panel';
 
 /** How a stat stands (CharacterSheet's `shift`): its value, what raises or lowers it, and its level-up change. */
 export interface Shift {
@@ -56,9 +57,11 @@ function pulse(el: HTMLElement | null) {
  * A value: green when gear or an effect raised it (hovering it shows by how much; `fmt` formats the bonus), red
  * when an effect lowers it, yellow while unconfirmed level-up points change it. It pulses yellow once when the
  * member's gear changes it.
+ * `neutral`: higher or lower isn't good or bad (Threat), so it is never green or red, and its tooltip shows whatever
+ * the gear or effects add, up or down (signed), in plain text.
  */
-export function Val({ shift: { value, dir, gear, effects, pending }, fmt = plain, children, className = '' }: {
-  shift: Shift; fmt?: (n: number) => string; children: ReactNode; className?: string;
+export function Val({ shift: { value, dir, gear, effects, pending }, fmt = plain, neutral = false, children, className = '' }: {
+  shift: Shift; fmt?: (n: number) => string; neutral?: boolean; children: ReactNode; className?: string;
 }) {
   const ref = useRef<HTMLSpanElement>(null);
   const { member, gear: worn } = useContext(GearChange);
@@ -69,12 +72,26 @@ export function Val({ shift: { value, dir, gear, effects, pending }, fmt = plain
     if (was.member === member && was.worn !== worn && was.value !== value) pulse(ref.current);
   }, [member, worn, value]);
 
+  // Neutral: no green or red, whatever moved it
+  const shown = neutral ? 0 : dir;
   const val = (
-    <span ref={ref} className={`inline-flex items-center ${pending ? 'rf-val-pend' : dir > 0 ? 'text-rift-up' : dir < 0 ? 'text-rift-down' : 'text-rift-ink'} ${className}`}>
+    <span ref={ref} className={`inline-flex items-center ${pending ? 'rf-val-pend' : shown > 0 ? 'text-rift-up' : shown < 0 ? 'text-rift-down' : 'text-rift-ink'} ${className}`}>
       {children}
-      {dir !== 0 && <span className="sr-only">{dir > 0 ? ' (raised by gear or an effect)' : ' (lowered by an effect)'}</span>}
+      {shown !== 0 && <span className="sr-only">{shown > 0 ? ' (raised by gear or an effect)' : ' (lowered by an effect)'}</span>}
     </span>
   );
+  if (neutral) {
+    const lines = ([['From gear', gear], ['From effects', effects]] as const).filter(([, n]) => Math.abs(n) > 1e-6);
+    if (lines.length === 0) return val;
+    return (
+      <Tooltip gap={6} className="inline-flex" content={
+        <div className="px-2.5 py-1.5 flex flex-col gap-0.5 text-xs whitespace-nowrap text-rift-soft">
+          {/* `fmt` signs a neutral stat's amounts itself */}
+          {lines.map(([label, n]) => <span key={label}>{label}: {fmt(n)}</span>)}
+        </div>
+      }>{val}</Tooltip>
+    );
+  }
   if (dir <= 0) return val;
   const lines = ([['From gear', gear], ['From effects', effects]] as const).filter(([, n]) => n > 0);
   return (
@@ -161,103 +178,105 @@ function Defense({ stat, label, icon: Icon, color, physical, stats, shift }: {
   );
 }
 
-/** An icon, a label and a value (Tempo, Healing). */
-function IconRow({ icon: Icon, color, label, shift, children }: { icon: IconType; color: string; label: string; shift: Shift; children: ReactNode }) {
+/** An icon, a label and a value (Tempo, Healing); `neutral` and `fmt` as for Val. */
+function IconRow({ icon: Icon, color, label, shift, neutral, fmt, children }: {
+  icon: IconType; color: string; label: string; shift: Shift; neutral?: boolean; fmt?: (n: number) => string; children: ReactNode;
+}) {
   return (
     <div className="flex items-center gap-2">
       <Icon aria-hidden className="flex-none w-4 h-4" style={{ color }} />
       <span className="rf-stlab flex-1 whitespace-nowrap">{label}</span>
-      <Val shift={shift} className="text-base leading-none">{children}</Val>
+      <Val shift={shift} neutral={neutral} fmt={fmt} className="text-[13px] leading-none">{children}</Val>
     </div>
   );
 }
 
+/** Threat as its difference from the 100% everyone starts at, signed: '+0%', '+12%', '−9%' (1 is 100%). */
+const threatPct = (multiplier: number) => `${formatSigned(Math.round(multiplier * 100))}%`;
+
 export default function StatsPanel({ stats, hp, mp, shift }: { stats: Stats; hp: number; mp: number; shift: StatShift }) {
   return (
-    <section aria-label="Stats" className="rf-panel flex-1 min-h-0 p-3 flex flex-col">
-      <PanelTitle variant="heading">Stats</PanelTitle>
-      <div className="flex-1 min-h-0 mt-1.5 flex flex-col gap-1.5">
-        {/* Vitals */}
-        <div className="rf-stcard flex-auto flex items-center gap-4">
-          <Vital label="HP" cur={hp} max={stats.hp} fill="var(--rift-hp-bar)" regen={stats.hpRegen}
-            maxShift={shift('hp', s => s.hp)} regenShift={shift('hpRegen', s => s.hpRegen)} />
-          <Vital label="MP" cur={mp} max={stats.mp} fill="var(--rift-mp-bar)" regen={stats.mpRegen}
-            maxShift={shift('mp', s => s.mp)} regenShift={shift('mpRegen', s => s.mpRegen)} />
-        </div>
+    <div role="tabpanel" aria-label="Stats" className="flex-1 min-h-0 mt-1.5 flex flex-col gap-1.5">
+      {/* Vitals */}
+      <div className="rf-stcard flex-auto flex items-center gap-4">
+        <Vital label="HP" cur={hp} max={stats.hp} fill="var(--rift-hp-bar)" regen={stats.hpRegen}
+          maxShift={shift('hp', s => s.hp)} regenShift={shift('hpRegen', s => s.hpRegen)} />
+        <Vital label="MP" cur={mp} max={stats.mp} fill="var(--rift-mp-bar)" regen={stats.mpRegen}
+          maxShift={shift('mp', s => s.mp)} regenShift={shift('mpRegen', s => s.mpRegen)} />
+      </div>
 
-        {/* Defense, Avoidance */}
-        <div className="flex-auto flex gap-1.5">
-          <div className="rf-stcard flex-1 min-w-0 flex flex-col justify-around gap-2">
-            <Defense stat="armor" label="Armor" icon={FaShieldAlt} color="var(--rift-soft)" physical stats={stats} shift={shift('armor', s => s.armor)} />
-            <Defense stat="magicResistance" label="Magic Res." icon={SiMagic} color="var(--cat-magic)" physical={false} stats={stats}
-              shift={shift('magicResistance', s => s.magicResistance)} />
-          </div>
-          <div className="rf-stcard flex-1 min-w-0 flex flex-col justify-around py-1">
-            {([['Dodge', 'dodge'], ['Parry', 'parry'], ['Block', 'block'], ['Glancing Blow', 'glancingBlow']] as const).map(([label, key]) => (
-              <div key={key} className="flex items-center justify-between gap-1.5 h-[22px] text-xs border-b border-rift-divider">
-                <TipLabel stat={key} stats={stats} className="text-rift-muted whitespace-nowrap">{label}</TipLabel>
-                <Val shift={shift(key, s => s[key])} fmt={v => formatStat(key, v)}>{formatStat(key, stats[key])}</Val>
-              </div>
-            ))}
-          </div>
+      {/* Defense, Avoidance */}
+      <div className="flex-auto flex gap-1.5">
+        <div className="rf-stcard flex-1 min-w-0 flex flex-col justify-around gap-2">
+          <Defense stat="armor" label="Armor" icon={FaShieldAlt} color="var(--rift-soft)" physical stats={stats} shift={shift('armor', s => s.armor)} />
+          <Defense stat="magicResistance" label="Magic Res." icon={SiMagic} color="var(--cat-magic)" physical={false} stats={stats}
+            shift={shift('magicResistance', s => s.magicResistance)} />
         </div>
-
-        {/* Offense; Tempo above Healing */}
-        <div className="flex-auto flex items-stretch gap-1.5">
-          <div role="group" aria-label="Offense" className="rf-stcard flex-none flex flex-col">
-            {/* One grid (header and rows), so a wide value widens its whole column; rows spread over the box's height */}
-            <div className="flex-1 grid content-around text-xs" style={{ gridTemplateColumns: OFFENSE_GRID }}>
-              <span />
-              {OFFENSE.map(({ key, name, icon: Icon }) => (
-                <span key={key} className="flex items-center justify-end h-5 border-b border-rift-divider" style={{ color: ATTACK_CATEGORY_COLOR[key] }}>
-                  <Hint text={name}><Icon aria-label={name} className="w-3 h-3" /></Hint>
-                </span>
-              ))}
-              {OFFENSE_ROWS.map(row => [
-                <span key={row} className="flex items-center h-5 text-rift-muted">{OFFENSE_ROW_LABEL[row]}</span>,
-                ...OFFENSE.map(({ key }) => {
-                  const stat = `${key}${capitalize(row)}` as BuffableStat;
-                  const v = stats[key][row];
-                  return (
-                    <span key={`${row}-${key}`} className="flex items-center justify-end h-5 pl-1">
-                      <Val shift={shift(stat, s => s[key][row])} fmt={row === 'damage' ? undefined : v => formatStat(stat, v)} className="text-[10px]">{row === 'damage' ? `+${v}` : formatStat(stat, v)}</Val>
-                    </span>
-                  );
-                }),
-              ])}
+        <div className="rf-stcard flex-1 min-w-0 flex flex-col justify-around py-1">
+          {([['Dodge', 'dodge'], ['Parry', 'parry'], ['Block', 'block'], ['Glancing Blow', 'glancingBlow']] as const).map(([label, key]) => (
+            <div key={key} className="flex items-center justify-between gap-1.5 h-[22px] text-xs border-b border-rift-divider">
+              <TipLabel stat={key} stats={stats} className="text-rift-muted whitespace-nowrap">{label}</TipLabel>
+              <Val shift={shift(key, s => s[key])} fmt={v => formatStat(key, v)}>{formatStat(key, stats[key])}</Val>
             </div>
-          </div>
-          <div className="flex-1 min-w-0 flex flex-col gap-1.5">
-            <div className="rf-stcard flex-1 min-h-[54px] py-2 flex flex-col justify-around">
-              <IconRow icon={HiOutlineLightningBolt} color="var(--rift-label)" label="Initiative" shift={shift('initiative', s => s.initiative)}>{stats.initiative}</IconRow>
-              <IconRow icon={MdKeyboardDoubleArrowRight} color="var(--rift-label)" label="Movement" shift={shift('movement', s => s.movement)}>{stats.movement}</IconRow>
-            </div>
-            <div className="rf-stcard flex-1 min-h-[54px] py-2 flex flex-col justify-around">
-              <IconRow icon={ImPlus} color="var(--tone-hot)" label="Healing" shift={shift('healing', s => s.healing)}>{stats.healing}</IconRow>
-              <IconRow icon={IoMdDownload} color="var(--tone-hot)" label="Received" shift={shift('healingReceived', s => s.healingReceived)}>{stats.healingReceived}</IconRow>
-            </div>
-          </div>
-        </div>
-
-        {/* Resistances */}
-        <div role="group" aria-label="Resistances" className="rf-stcard flex-auto pt-2 pb-[9px] flex flex-col gap-[7px]">
-          <span className="rf-stcap">Resistances</span>
-          <div className="flex-1 flex items-center justify-between">
-            {RESISTANCES.map(({ el, icon: Icon }) => {
-              const stat = `${el}Resistance` as BuffableStat;
-              const res = (s: Stats) => s.elementalStats[el]?.resistance ?? 0;
-              return (
-                // The element's name on its icon, so it never stacks on the value's own tooltip
-                <div key={el} className="flex-1 min-w-0 flex flex-col items-center gap-1.5">
-                  <Hint text={capitalize(el)}><Icon aria-hidden className="w-5 h-5" style={{ color: DAMAGE_ELEMENT_COLOR[el] }} /></Hint>
-                  <span className="sr-only">{capitalize(el)}</span>
-                  <Val shift={shift(stat, res)} fmt={pct} className="text-xs leading-none">{pct(res(stats))}</Val>
-                </div>
-              );
-            })}
-          </div>
+          ))}
         </div>
       </div>
-    </section>
+
+      {/* Offense; Tempo above Healing, in one box */}
+      <div className="flex-auto flex items-stretch gap-1.5">
+        <div role="group" aria-label="Offense" className="rf-stcard flex-none flex flex-col">
+          {/* One grid (header and rows), so a wide value widens its whole column; rows spread over the box's height */}
+          <div className="flex-1 grid content-around text-xs" style={{ gridTemplateColumns: OFFENSE_GRID }}>
+            <span />
+            {OFFENSE.map(({ key, name, icon: Icon }) => (
+              <span key={key} className="flex items-center justify-end h-5 border-b border-rift-divider" style={{ color: ATTACK_CATEGORY_COLOR[key] }}>
+                <Hint text={name}><Icon aria-label={name} className="w-3 h-3" /></Hint>
+              </span>
+            ))}
+            {OFFENSE_ROWS.map(row => [
+              <span key={row} className="flex items-center h-5 text-rift-muted">{OFFENSE_ROW_LABEL[row]}</span>,
+              ...OFFENSE.map(({ key }) => {
+                const stat = `${key}${capitalize(row)}` as BuffableStat;
+                const v = stats[key][row];
+                return (
+                  <span key={`${row}-${key}`} className="flex items-center justify-end h-5 pl-1">
+                    <Val shift={shift(stat, s => s[key][row])} fmt={row === 'damage' ? undefined : v => formatStat(stat, v)} className="text-[10px]">{row === 'damage' ? `+${v}` : formatStat(stat, v)}</Val>
+                  </span>
+                );
+              }),
+            ])}
+          </div>
+        </div>
+        <div className="rf-stcard flex-1 min-w-0 py-2 flex flex-col justify-around">
+          <IconRow icon={HiOutlineLightningBolt} color="var(--rift-label)" label="Initiative" shift={shift('initiative', s => s.initiative)}>{stats.initiative}</IconRow>
+          <IconRow icon={MdKeyboardDoubleArrowRight} color="var(--rift-label)" label="Movement" shift={shift('movement', s => s.movement)}>{stats.movement}</IconRow>
+          {/* Shown for every member: Subtlety lowers it, on purpose in some builds */}
+          <IconRow icon={TbCrosshair} color="var(--rift-label)" label="Threat" neutral fmt={threatPct}
+            shift={shift('threatMultiplier', s => s.threatMultiplier)}>{threatPct(stats.threatMultiplier - 1)}</IconRow>
+          <div aria-hidden="true" className="flex-none self-center h-px w-[100%] bg-rift-divider" />
+          <IconRow icon={ImPlus} color="var(--tone-hot)" label="Healing" shift={shift('healing', s => s.healing)}>{stats.healing}</IconRow>
+          <IconRow icon={IoMdDownload} color="var(--tone-hot)" label="Heal Rcvd" shift={shift('healingReceived', s => s.healingReceived)}>{stats.healingReceived}</IconRow>
+        </div>
+      </div>
+
+      {/* Resistances */}
+      <div role="group" aria-label="Resistances" className="rf-stcard flex-none pt-1.5 pb-[7px] flex flex-col gap-[5px]">
+        <span className="rf-stcap">Resistances</span>
+        <div className="flex-1 flex items-center justify-between">
+          {RESISTANCES.map(({ el, icon: Icon }) => {
+            const stat = `${el}Resistance` as BuffableStat;
+            const res = (s: Stats) => s.elementalStats[el]?.resistance ?? 0;
+            return (
+              // The element's name on its icon, so it never stacks on the value's own tooltip
+              <div key={el} className="flex-1 min-w-0 flex flex-col items-center gap-1.5">
+                <Hint text={capitalize(el)}><Icon aria-hidden className="w-5 h-5" style={{ color: DAMAGE_ELEMENT_COLOR[el] }} /></Hint>
+                <span className="sr-only">{capitalize(el)}</span>
+                <Val shift={shift(stat, res)} fmt={pct} className="text-xs leading-none">{pct(res(stats))}</Val>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
   );
 }

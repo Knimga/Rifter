@@ -4,6 +4,7 @@ import type { ArmorProficiency, WeaponProficiency } from '../units/classes';
 import type { BuffableStat } from '../units/stats';
 import type { ModelLink } from '../../forge/core/types';
 import { damageTypeAffixes, meleeStats, rangedStats, type ImplicitDef, type OffhandKind } from './types';
+import { ARMOR_TYPE_DATA } from './armor';
 
 export interface ShieldTemplate {
   id: string;                 // stable key; the forge design for this shield names it (offhands table)
@@ -33,6 +34,13 @@ export const SHIELDS: ShieldTemplate[] = [
  */
 export const STARTER_SHIELDS: ShieldTemplate[] = SHIELDS.map((s) => ({ ...s, id: `worn-${s.id}`, name: `Worn ${s.name}`, armorMultiplier: 1.0 }));
 
+/**
+ * Affixes a shield of an armor type never rolls: its type's (ARMOR_TYPE_DATA), except for threat. No offhand takes
+ * increasedThreat, and every shield can take reducedThreat (not only the armor types that do).
+ */
+export const shieldInvalidAffixes = (armorType: ArmorProficiency): BuffableStat[] =>
+  [...ARMOR_TYPE_DATA[armorType].invalidAffixes.filter((s) => s !== 'reducedThreat'), 'increasedThreat'];
+
 export const SHIELD_IMPLICIT: ImplicitDef = {
   stat: 'block',
   baseValue: 5,
@@ -53,7 +61,7 @@ export interface OffhandTemplate {
   valueMultiplier: number;
   /** Affixes it never rolls. */
   invalidAffixes: BuffableStat[];
-  model: ModelLink;           // its forge design: how it is drawn (icon and loot); '' while it has none
+  model: ModelLink;           // its forge design: how it is drawn (icon and loot)
 }
 
 /** The proficiency each kind of offhand needs. */
@@ -66,13 +74,13 @@ export const OFFHAND_PROFICIENCIES: readonly WeaponProficiency[] = ['Shields', .
 const QUIVER_INVALID_AFFIXES: BuffableStat[] = [
   ...meleeStats,
   'magicHit', 'magicCrit',  ...damageTypeAffixes(['magic'], { only: ['Hit', 'Crit'] }),
-  'parry', 'healing', 'block', 'spellcraft', 'strength', 'healingReceived'
+  'parry', 'healing', 'block', 'spellcraft', 'strength', 'healingReceived', 'increasedThreat'
 ];
 
 const FOCUS_INVALID_AFFIXES: BuffableStat[] = [
   ...meleeStats, ...rangedStats, 'strength', 'finesse', 'toughness',
   'redoubt', 'expertise', 'parry', 'block', ...damageTypeAffixes(['physical','poison']),
-  'mp'
+  'mp', 'increasedThreat'
 ];
 
 /** Quivers that drop as loot. */
@@ -110,7 +118,7 @@ export const STARTER_FOCI: OffhandTemplate[] = [
   {
     id: 'cracked-amethyst', name: 'Cracked Amethyst', requiredLevel: 1, valueMultiplier: 1,
     implicit: { stat: 'spellcraft', baseValue: 1, growthPerLevel: 0 },
-    invalidAffixes: [],
+    invalidAffixes: FOCUS_INVALID_AFFIXES,
     model: 'offhand.keen-amethyst', // the Keen Amethyst's (starting gear borrows the model of what it is a worn version of)
   },
 ];

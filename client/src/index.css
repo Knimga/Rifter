@@ -45,6 +45,7 @@
   /* Meaning */
   --rift-hp: #a4504a;
   --rift-mp: #6f93ad;
+  --rift-mp-cost: #8fc1d9;   /* an ability's MP cost (the party window's Abilities tab) */
   --rift-hp-bar: #b4534d;    /* the party window's HP and MP bars (Stats panel) */
   --rift-mp-bar: #5d86a8;
   --rift-up: #9bbf9b;        /* raised by a buff */
@@ -62,7 +63,7 @@
   --rift-foe-edge: #3a2a28;
   --rift-debuff-edge: #6d4a46;
   --rift-loot: #d1a766;
-  --rift-loot-glow: #f2e3a4; /* the soft glow on the floor under loot the leader can pick up */
+  --rift-loot-sparkle: #f2e3a4; /* the stars twinkling over loot lying on the floor (mapParts LootSparkle) */
   --rift-gold: #d9ba5d;      /* gold: the coin icon */
   --rift-enchant: #b9a6e6;   /* enchanting: its service icon (an enchanter NPC's name tag) */
   --rift-gold-text: #e6d9a8; /* an amount of gold being traded (the vendor's prices, the party's gold there) */
@@ -445,7 +446,13 @@
   .rf-tab.is-new.is-on { border-bottom-color: color-mix(in srgb, var(--rift-levelup) 55%, transparent); }
   .rf-tab.is-on { opacity: 1; border-bottom-color: color-mix(in srgb, var(--glow) 55%, transparent); }
   .rf-tab:focus-visible { outline: 1px solid color-mix(in srgb, var(--glow) 60%, transparent); outline-offset: 4px; }
+  /* A tab that isn't available yet (the party window's Talents): faint, and it never reacts */
+  .rf-tab.is-off, .rf-tab.is-off:hover { opacity: 0.22; }
   @keyframes rf-tab-new { 50% { text-shadow: 0 0 10px color-mix(in srgb, var(--rift-levelup) 55%, transparent), 0 0 4px color-mix(in srgb, var(--rift-levelup) 50%, transparent), 0 0 1px color-mix(in srgb, var(--rift-levelup) 40%, transparent); } }
+  /* News in the quest tracker (a quest taken, a new objective, a quest done): its text flares bright quest-yellow once */
+  .rf-quest-pulse { animation: rf-quest-pulse 1800ms ease-out 1; }
+  @keyframes rf-quest-pulse { 12% { color: color-mix(in srgb, var(--rift-quest) 25%, white); text-shadow: 0 0 150px color-mix(in srgb, var(--rift-quest) 80%, transparent), 0 0 64px color-mix(in srgb, var(--rift-quest) 100%, transparent), 0 0 32px color-mix(in srgb, var(--rift-quest) 100%, transparent), 0 0 12px color-mix(in srgb, var(--rift-quest) 90%, transparent); } }
+  @media (prefers-reduced-motion: reduce) { .rf-quest-pulse { animation-duration: 1ms; } } /* not none: a finished quest leaves the list when its animation ends */
   .rf-tabsep { align-self: center; flex: none; width: 1px; height: 14px; background: var(--rift-edge); }
   @media (prefers-reduced-motion: reduce) { .rf-tab { transition: none; } .rf-tab.is-new { animation: none; } }
   /* A stat that unconfirmed level-up points change (StatsPanel's Val): yellow, softly glowing, until Confirm or Reset */
@@ -511,6 +518,17 @@
   .rf-seg.is-on { color: var(--rift-bright); background: var(--rift-raised); box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--glow) 55%, transparent); }
   .rf-bench .rf-seg.is-on { box-shadow: inset 0 -1px 0 var(--ac); }
   .rf-bench .rf-segs { border-color: color-mix(in srgb, var(--ac) 28%, var(--rift-seam)); }
+  /* The item the bench points at (in the inventory or a member's gear): a brighter border in the service's accent (--ac, set by
+     the panel) and a small diamond in its corner. It never moves, so this is all that says where it is. */
+  .rf-cell.is-filled.is-bench, .rf-cell.is-filled.has-rarity.is-bench, .rf-eqs.is-filled.is-bench, .rf-eqs.is-filled.has-rarity.is-bench {
+    border-color: color-mix(in srgb, var(--ac) 70%, var(--rift-edge));
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), inset 0 -2px 8px rgba(0, 0, 0, 0.6), 0 0 18px color-mix(in srgb, var(--ac) 38%, transparent);
+  }
+  .rf-cell.is-bench::after, .rf-eqs.is-bench::after {
+    content: ""; position: absolute; top: 4px; right: 4px; width: 6px; height: 6px; background: var(--ac); transform: rotate(45deg); box-shadow: 0 0 6px var(--ac);
+  }
+  /* A row of the enchanter's gear list: slot, item, tier total */
+  .rf-grow { display: flex; align-items: center; gap: 8px; height: 18px; font-size: 12px; }
   .rf-erow {
     display: grid; grid-template-columns: 1fr 56px 52px 118px; align-items: center; gap: 8px; height: 46px; box-sizing: border-box; padding: 0 6px 0 12px;
     background: color-mix(in srgb, color-mix(in srgb, var(--gc) 6%, var(--rift-sunk)) 66%, transparent);
@@ -600,6 +618,10 @@
   .rf-breathe { animation: rf-breathe 2.6s ease-in-out infinite; }
   @keyframes rf-spin { to { transform: rotate(360deg); } }
   @keyframes rf-breathe { 0%, 100% { opacity: 0.35; } 50% { opacity: 0.8; } }
+  /* A sparkle over loot on the floor (mapParts LootSparkle): it flares up turning, then fades; dark the rest of its cycle */
+  .rf-sparkle { opacity: 0; transform: scale(0); filter: drop-shadow(0 0 2px var(--rift-loot-sparkle)) drop-shadow(0 0 5px color-mix(in srgb, var(--rift-loot-sparkle) 70%, transparent)); animation: rf-sparkle ease-in-out infinite; }
+  @keyframes rf-sparkle { 0% { opacity: 0; transform: scale(0) rotate(0deg); } 14% { opacity: 1; transform: scale(1) rotate(45deg); } 32% { opacity: 0; transform: scale(0.2) rotate(90deg); } 100% { opacity: 0; transform: scale(0) rotate(90deg); } }
+  @media (prefers-reduced-motion: reduce) { .rf-sparkle { animation: none; opacity: 0.85; transform: scale(0.7); } }
   @media (prefers-reduced-motion: reduce) { .rf-spin, .rf-spin-r, .rf-breathe { animation: none; } .rf-krow { transition: none; } }
   /* The party window's Stats panel (StatsPanel.tsx): near-black boxes, whatever the theme (like the attribute rows) */
   .rf-stcard { position: relative; box-sizing: border-box; min-width: 0; padding: 9px 11px; background: var(--rift-void); border: 1px solid var(--rift-seam); border-radius: 2px; }
@@ -607,6 +629,16 @@
   .rf-stcap { font-size: 9px; line-height: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--rift-cap); }
   .rf-stbar { box-sizing: border-box; height: 6px; background: var(--rift-raised); border: 1px solid var(--rift-seam); border-radius: 1px; overflow: hidden; }
   .rf-stbar > span { display: block; height: 100%; }
+  /* The party window's Abilities tab (ClassKit.tsx): section labels, and cards holding a passive or an ability */
+  .rf-abscroll { overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--rift-rim) transparent; }
+  .rf-abh { margin: 0 0 5px; display: flex; align-items: baseline; gap: 8px; font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 10px; font-weight: 400; letter-spacing: 0.14em; text-transform: uppercase; color: var(--rift-muted); }
+  .rf-absub { opacity: 0.6; letter-spacing: 0.08em; text-transform: none; }
+  .rf-abrow { display: flex; align-items: center; gap: 10px; padding-top: 6px; padding-bottom: 6px; }
+  .rf-abico { flex: none; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; box-sizing: border-box; background: var(--rift-raised); border: 1px solid var(--rift-edge); border-radius: 2px; color: var(--rift-soft); }
+  .rf-abname { font-size: 12px; line-height: 1.2; color: var(--rift-ink); }
+  .rf-abdesc { margin-top: 2px; font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 10px; line-height: 1.3; color: var(--rift-muted); }
+  .rf-abcost { flex: none; font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 11px; color: var(--rift-mp-cost); }
+  .rf-abcost.is-free { color: var(--rift-muted); }
   .rf-tiplabel { color: var(--rift-muted); border-bottom: 1px dotted var(--rift-rim-hi); outline: none; }
   .rf-tiplabel:hover { color: var(--rift-soft); }
   .rf-tiplabel:focus-visible { outline: 1px solid color-mix(in srgb, var(--glow) 60%, transparent); outline-offset: 2px; }
@@ -638,6 +670,8 @@
     font-size: 17px; letter-spacing: 0.04em; white-space: nowrap;
     text-shadow: 0 0 10px color-mix(in srgb, var(--rift-levelup) 90%, transparent), 0 0 4px color-mix(in srgb, var(--rift-levelup) 80%, transparent), 0 1px 2px rgba(0, 0, 0, 0.9);
   }
+  /* Quest news and rift keys found: the display font, regular weight, a step above combat floats (14px) */
+  .rf-float-quest { font-family: 'Metamorphous', Georgia, serif; font-weight: 400; font-size: 16px; letter-spacing: 0.02em; }
   /* A pulse around the screen's edge (EdgePulse): --pc its color, --reach how far in it goes. From the edge it eases out
      (strongest at the edge, thinning fast, then tapering gently), fully clear by --reach */
   .rf-edge-pulse {

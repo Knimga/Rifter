@@ -2,16 +2,16 @@
 // face the tile it aimed at (view state), then floats, HP/MP and effect changes,
 // threat, and creatures it summons. Outcomes still waiting for the caster's turn are cancelled on a location change.
 import { useCallback, useEffect, useRef, useState, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
-import { AIM_TURN_LEAD_MS } from '../data/constants';
+import { AIM_TURN_LEAD_MS, BLINK_MS, DASH_MS_PER_TILE } from '../data/constants';
 import { applyThreatChange, changesThreat, threatKey, unitKey, type ActionOutcome, type CombatUnit, type UnitChange } from '../data/combat/abilityExecution';
 import { joinCombat, type CombatState } from '../data/combat/combat';
 import { covers, findOpenTilesNear, fits, posKey, type Pos } from '../data/world/grid';
-import { isFreeFloor, type DungeonData } from '../data/world/dungeonGen';
+import { isFreeFloor, type DungeonData } from '../data/world/gen';
 import { bodySize, isAlly, withEnemyBuffs, type EnemyInstance } from '../data/units/enemies';
 import { createSummon, summonClass, summonsOf } from '../data/units/summons';
 import type { MemberState } from '../data/units/party';
-import { addBuffs, addTicking, type Stats } from '../data/units/stats';
-import type { UnitAim, UnitFx } from '../components/ModelLayer';
+import { addBuffs, addTicking, dropDispelled, type Stats } from '../data/units/stats';
+import type { UnitAim, UnitFx, UnitMove } from '../components/ModelLayer';
 import { elementTint } from '../components/ui/AbilityCard';
 import type { SpawnFloat } from './useFloatingText';
 import { useLatest } from './useLatest';
@@ -22,9 +22,11 @@ export type ApplyOutcome = (outcome: ActionOutcome, caster: CombatUnit, aimAt?: 
 /** How far from its summoner (tiles) a summoned creature may appear, when the tiles around are taken. */
 const SUMMON_MAX_RADIUS = 3;
 
-export function useActionOutcomes({ spawnFloat, updateMembers, partyStatsRef, partyPosRef, partyLevelRef, enemiesRef, dungeonRef, currentZoneRef, setEnemies, setCombat }: {
+export function useActionOutcomes({ spawnFloat, updateMembers, placeMember, partyStatsRef, partyPosRef, partyLevelRef, enemiesRef, dungeonRef, currentZoneRef, setEnemies, setCombat }: {
   spawnFloat: SpawnFloat;
   updateMembers: (fn: (m: MemberState, i: number) => MemberState, only?: (i: number) => boolean) => void;
+  /** Put party member `idx` on a tile at once (where a movement ability lands it). */
+  placeMember: (idx: number, pos: Pos) => void;
   partyStatsRef: MutableRefObject<Stats[]>;
   partyPosRef: MutableRefObject<Pos[]>;
   /** The party's level: the level of a creature a party member summons. */
@@ -37,6 +39,9 @@ export function useActionOutcomes({ spawnFloat, updateMembers, partyStatsRef, pa
 }) {
   // Where each unit last aimed an ability (unit id → tile + sequence): its model turns to face it
   const [unitAims, setUnitAims] = useState<Record<string, UnitAim>>({});
+  // How each unit's model last moved by a movement ability (unit id → style + sequence): its next move to a new tile plays so
+  const [unitMoves, setUnitMoves] = useState<Record<string, UnitMove>>({});
+  const moveSeq = useRef(0);
   // The feedback each unit's model last showed (unit id → flash and glow, each with its sequence): a new one plays
   const [unitFx, setUnitFx] = useState<Record<string, UnitFx>>({});
   const fxSeq = useRef(0);
@@ -82,9 +87,10 @@ export function useActionOutcomes({ spawnFloat, updateMembers, partyStatsRef, pa
         return {
           hp: nextHp(m.hp, c, partyStatsRef.current[i]?.hp ?? m.hp),
           mp: nextMp(m.mp, c, partyStatsRef.current[i]?.mp ?? m.mp),
-          buffs: addBuffs(m.buffs, c.buffs),
-          hots: addTicking(m.hots, c.hots),
-          dots: addTicking(m.dots, c.dots),
+          // What a dispel takes goes first, so it never takes what the same action puts on
+          buffs: addBuffs(dropDispelled(m.buffs, c.dispelled), c.buffs),
+          hots: addTicking(dropDispelled(m.hots, c.dispelled), c.hots),
+          dots: addTicking(dropDispelled(m.dots, c.dispelled), c.dots),
         };
       }, i => partyChanges.has(i));
     }
@@ -94,13 +100,14 @@ export function useActionOutcomes({ spawnFloat, updateMembers, partyStatsRef, pa
       setEnemies(prev => prev.map(e => {
         const c = enemyChanges.get(e.id);
         if (!c) return e;
-        const next = c.buffs.length ? withEnemyBuffs(e, addBuffs(e.buffs, c.buffs)) : e;
+        const kept = dropDispelled(e.buffs, c.dispelled);
+        const next = c.buffs.length || kept !== e.buffs ? withEnemyBuffs(e, addBuffs(kept, c.buffs)) : e;
         return {
           ...next,
           currentHp: nextHp(e.currentHp, c, next.stats.hp),
           currentMp: nextMp(e.currentMp, c, next.stats.mp),
-          hots: addTicking(e.hots, c.hots),
-          dots: addTicking(e.dots, c.dots),
+          hots: addTicking(dropDispelled(e.hots, c.dispelled), c.hots),
+          dots: addTicking(dropDispelled(e.dots, c.dispelled), c.dots),
         };
       }));
     }
@@ -119,7 +126,7 @@ export function useActionOutcomes({ spawnFloat, updateMembers, partyStatsRef, pa
       });
     }
 
-    // Summoned creatures (in a dungeon fight), on their summoner's side (the caster, or a trigger's bearer): a party
+    // Summoned creatures (in a dungeon: a fight, or a party member's forever summon out of one), on their summoner's side (the caster, or a trigger's bearer): a party
     // member's or its ally's fight for the party, an enemy's against it. With the ability's max already out, the
     // oldest of them goes. Each appears on its aimed tile (or the free tile nearest its summoner) and joins the turn
     // order.
@@ -132,6 +139,8 @@ export function useActionOutcomes({ spawnFloat, updateMembers, partyStatsRef, pa
         const by = req.by ?? caster;
         const owner = unitKey(by.ref);
         const byRef = by.ref;
+        // A forever summon is a party member's only (a creature's is ignored: warnCreatureForeverSummons)
+        if (req.turns === 'forever' && byRef.side !== 'party') continue;
         const byCreature = byRef.side === 'enemy' ? enemiesRef.current.find(e => e.id === byRef.id) : undefined;
         // A party member's, or a summoned ally's; an enemy's stays hostile even if it is gone by now
         const allied = byRef.side === 'party' || (!!byCreature && isAlly(byCreature));
@@ -159,28 +168,51 @@ export function useActionOutcomes({ spawnFloat, updateMembers, partyStatsRef, pa
   const landRef = useLatest(landOutcome);
 
   /**
-   * Resolve an action. When it is aimed at another tile, the caster's model first turns to face it (view
-   * state only), and the outcome lands AIM_TURN_LEAD_MS later, once the turn is done. Returns the delay (ms)
-   * before the outcome lands, so callers can wait for it.
+   * A movement ability's move (ActionOutcome.move), for a party member or a creature alike: the unit is put on its
+   * landing tile at once (its model plays the move: dash or blink), and the delay (ms) the move takes is returned.
    */
-  const applyActionOutcome = useCallback<ApplyOutcome>((outcome, caster, aimAt) => {
-    if (!aimAt || covers(caster, aimAt)) {
+  const startMove = useCallback((move: NonNullable<ActionOutcome['move']>): number => {
+    const { ref, to, style } = move;
+    const glide = move.tiles * DASH_MS_PER_TILE;
+    const ms = style === 'blink' ? BLINK_MS : glide;
+    moveSeq.current += 1;
+    const seq = moveSeq.current;
+    setUnitMoves(prev => ({ ...prev, [unitKey(ref)]: { kind: style, ms, seq } }));
+    if (ref.side === 'party') placeMember(ref.idx, to);
+    else setEnemies(prev => prev.map(e => (e.id === ref.id ? { ...e, pos: to } : e)));
+    // A dash first turns toward where it goes, as a walk does
+    return style === 'blink' ? ms : AIM_TURN_LEAD_MS + glide;
+  }, [placeMember, setEnemies]);
+
+  /**
+   * Resolve an action. A movement ability's caster first moves (startMove). When the action is aimed at another tile,
+   * the caster's model then turns to face it (view state only), and the outcome lands AIM_TURN_LEAD_MS after, once the
+   * turn is done. Returns the delay (ms) before the outcome lands, so callers can wait for it.
+   */
+  const applyActionOutcome = useCallback<ApplyOutcome>((outcome, by, aimAt) => {
+    // A mover is where it lands from here on (its summons appear beside that, the aim is read from it)
+    const caster = outcome.move ? { ...by, pos: outcome.move.to } : by;
+    let delay = outcome.move ? startMove(outcome.move) : 0;
+    if (aimAt && !covers(caster, aimAt)) {
+      const id = unitKey(caster.ref);
+      aimSeq.current += 1;
+      const seq = aimSeq.current;
+      setUnitAims(prev => ({ ...prev, [id]: { x: aimAt.x, y: aimAt.y, seq } }));
+      delay += AIM_TURN_LEAD_MS;
+    }
+    if (delay === 0) {
       landRef.current(outcome, caster);
       return 0;
     }
-    const id = unitKey(caster.ref);
-    aimSeq.current += 1;
-    const seq = aimSeq.current;
-    setUnitAims(prev => ({ ...prev, [id]: { x: aimAt.x, y: aimAt.y, seq } }));
     const timer = setTimeout(() => {
       pending.current.delete(timer);
       landRef.current(outcome, caster);
-    }, AIM_TURN_LEAD_MS);
+    }, delay);
     pending.current.add(timer);
-    return AIM_TURN_LEAD_MS;
-  }, [landRef]);
+    return delay;
+  }, [landRef, startMove]);
   // For the enemy turn (useEnemyTurn), which reads it from a ref
   const applyOutcomeRef = useLatest(applyActionOutcome);
 
-  return { unitAims, unitFx, applyActionOutcome, applyOutcomeRef, cancelPendingOutcomes };
+  return { unitAims, unitMoves, unitFx, applyActionOutcome, applyOutcomeRef, cancelPendingOutcomes };
 }

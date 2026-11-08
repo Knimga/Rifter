@@ -78,6 +78,9 @@ const NO_WEAPON_AFFIXES: BuffableStat[] = [
   'healingReceived'
 ];
 
+/** Both threat affixes, for the two-handers that take neither (the other weapons take one: increasedThreat or reducedThreat). */
+const THREAT_AFFIXES: BuffableStat[] = ['increasedThreat', 'reducedThreat'];
+
 /** Every affix a weapon of this type never rolls: its type's own list (invalidAffixes), and those no weapon rolls. */
 export const weaponInvalidAffixes = (type: WeaponType): BuffableStat[] => [...WEAPON_TYPE_DATA[type].invalidAffixes, ...NO_WEAPON_AFFIXES];
 
@@ -96,7 +99,7 @@ export const WEAPON_TYPE_DATA: Record<WeaponType, WeaponTypeData> = {
     implicit: { stat: 'meleeCrit', baseValue: 5, growthPerLevel: 0.5 },
     invalidAffixes: [
       'healing', 'glancingBlow', 'devotion', 'redoubt',
-      ...rangedStats, ...nonWeaponAffixes, 'mp', 'hp',
+      ...rangedStats, ...nonWeaponAffixes, 'mp', 'hp', 'increasedThreat',
       ...damageTypeAffixes(['fire','ice','lightning','nature','holy'])
     ],
   },
@@ -110,8 +113,7 @@ export const WEAPON_TYPE_DATA: Record<WeaponType, WeaponTypeData> = {
     defaultDamageElement: 'physical',
     implicit: { stat: 'meleeHit', baseValue: 2, growthPerLevel: 0.3 },
     invalidAffixes: [
-       ...rangedStats, ...nonWeaponAffixes, 
-       
+       ...rangedStats, ...nonWeaponAffixes, 'increasedThreat',
     ],
   },
   '2h Swords': {
@@ -124,7 +126,7 @@ export const WEAPON_TYPE_DATA: Record<WeaponType, WeaponTypeData> = {
     defaultDamageElement: 'physical',
     implicit: { stat: 'meleeHit', baseValue: 3, growthPerLevel: 0.5 },
     invalidAffixes: [
-      'spirit', 'finesse', 'glancingBlow', 'subtlety', 'perception',
+      'spirit', 'finesse', 'glancingBlow', 'subtlety', 'perception', ...THREAT_AFFIXES,
       ...rangedStats, ...nonWeaponAffixes,
       ...damageTypeAffixes(['magic'], {only: ['Hit','Penetration']}),
       ...damageTypeAffixes(['poison','shadow','ice'])
@@ -140,7 +142,7 @@ export const WEAPON_TYPE_DATA: Record<WeaponType, WeaponTypeData> = {
     defaultDamageElement: 'physical',
     implicit: { stat: 'armor', baseValue: 4, growthPerLevel: 0.2 },
     invalidAffixes: [
-      'finesse', 'meleeCrit', 'dodge', 'initiative', 'subtlety', 'perception',
+      'finesse', 'meleeCrit', 'dodge', 'initiative', 'subtlety', 'perception', 'reducedThreat',
       ...rangedStats, ...nonWeaponAffixes,
       ...damageTypeAffixes(['shadow','ice'])
     ],
@@ -155,7 +157,7 @@ export const WEAPON_TYPE_DATA: Record<WeaponType, WeaponTypeData> = {
     defaultDamageElement: 'physical',
     implicit: { stat: 'armor', baseValue: 6, growthPerLevel: 0.4 },
     invalidAffixes: [
-      'finesse', 'mind', 'spirit',  'meleeCrit', 'initiative', 'subtlety', 'perception',
+      'finesse', 'mind', 'spirit',  'meleeCrit', 'initiative', 'subtlety', 'perception', ...THREAT_AFFIXES,
       ...rangedStats, ...nonWeaponAffixes, 'magicHit', 'magicCrit', 'mp',
       ...damageTypeAffixes(['magic'], {only: ['Hit','Penetration']}),
       ...damageTypeAffixes(['poison','shadow','ice'])
@@ -171,7 +173,7 @@ export const WEAPON_TYPE_DATA: Record<WeaponType, WeaponTypeData> = {
     defaultDamageElement: 'physical',
     implicit: { stat: 'meleeDamage', baseValue: 2, growthPerLevel: 0.4 },
     invalidAffixes: [
-      'mind', 'spirit', 'healing', 'subtlety', 'perception', 'spellcraft', 'devotion',
+      'mind', 'spirit', 'healing', 'subtlety', 'perception', 'spellcraft', 'devotion', 'increasedThreat',
       ...rangedStats, ...magicStats, ...nonWeaponAffixes, 'mp',
       ...damageTypeAffixes(['magic'], {only: ['Hit','Penetration']}),
       ...damageTypeAffixes(['shadow','ice'])
@@ -187,7 +189,7 @@ export const WEAPON_TYPE_DATA: Record<WeaponType, WeaponTypeData> = {
     defaultDamageElement: 'physical',
     implicit: { stat: 'meleeDamage', baseValue: 4, growthPerLevel: 0.7 },
     invalidAffixes: [
-      'mind', 'spirit', 'healing', 'subtlety', 'perception', 'spellcraft', 'devotion',
+      'mind', 'spirit', 'healing', 'subtlety', 'perception', 'spellcraft', 'devotion', ...THREAT_AFFIXES,
       ...rangedStats, ...magicStats, ...nonWeaponAffixes, 'mp',
       ...damageTypeAffixes(['magic'], {only: ['Hit','Penetration']}),
       ...damageTypeAffixes(['poison','shadow','ice'])
@@ -203,7 +205,7 @@ export const WEAPON_TYPE_DATA: Record<WeaponType, WeaponTypeData> = {
     defaultDamageElement: 'physical',
     implicit: { stat: 'rangedCrit', baseValue: 3, growthPerLevel: 0.4 },
     invalidAffixes: [
-      'strength', 'healing', 'parry', 'glancingBlow',
+      'strength', 'healing', 'parry', 'glancingBlow', 'increasedThreat',
       'redoubt', 'devotion', 'magicHit', 'magicCrit',
       ...meleeStats, ...nonWeaponAffixes,
       ...damageTypeAffixes(['magic'], {except: ['Damage']}),
@@ -220,7 +222,7 @@ export const WEAPON_TYPE_DATA: Record<WeaponType, WeaponTypeData> = {
     defaultDamageElement: 'physical',
     implicit: { stat: 'physicalDamage', baseValue: 2, growthPerLevel: 0.5 },
     invalidAffixes: [
-      'strength', 'healing', 'parry', 'glancingBlow',
+      'strength', 'healing', 'parry', 'glancingBlow', 'increasedThreat',
       'redoubt', 'devotion', 'magicHit', 'magicCrit',
       ...meleeStats, ...nonWeaponAffixes,
       ...damageTypeAffixes(['magic'], {except: ['Damage']}),
@@ -237,7 +239,7 @@ export const WEAPON_TYPE_DATA: Record<WeaponType, WeaponTypeData> = {
     dropElements: MAGIC_WEAPON_ELEMENTS,
     implicit: { stat: 'magicDamage', baseValue: 2, growthPerLevel: 0.5 },
     invalidAffixes: [
-      'strength', 'finesse', 'parry', 'glancingBlow', 'dodge', 
+      'strength', 'finesse', 'parry', 'glancingBlow', 'dodge', 'increasedThreat',
       'evasion', 'redoubt', 'expertise', 'subtlety',
       'armor', 'block', 'hpRegen', 'hp',
       ...meleeStats, ...rangedStats,
@@ -254,7 +256,7 @@ export const WEAPON_TYPE_DATA: Record<WeaponType, WeaponTypeData> = {
     dropElements: MAGIC_WEAPON_ELEMENTS,
     implicit: { stat: 'magicCrit', baseValue: 3, growthPerLevel: 0.4 },
     invalidAffixes: [
-      'strength', 'finesse', 'parry', 'glancingBlow', 'dodge', 
+      'strength', 'finesse', 'parry', 'glancingBlow', 'dodge', 'increasedThreat',
       'evasion', 'redoubt', 'expertise', 'subtlety',
       'armor', 'block', 'hpRegen', 'hp',
       ...meleeStats, ...rangedStats,

@@ -5,14 +5,15 @@ import { useCallback, useState } from 'react';
 import { STARTING_KEYS } from '../data/world/rifts';
 import type { DungeonKey } from '../data/world/dungeons';
 
-export function useKeyring() {
-  const [keys, setKeys] = useState<DungeonKey[]>([...STARTING_KEYS]);
+export function useKeyring(start: readonly DungeonKey[] = STARTING_KEYS) {
+  const [keys, setKeys] = useState<DungeonKey[]>([...start]);
   const [hasNew, setHasNew] = useState(false);
 
   /** Put a key on the keyring (once: a key the party has is never added again, and doesn't count as new). */
   const addKey = useCallback((key: DungeonKey) => {
     if (keys.includes(key)) return;
-    setKeys([...keys, key]);
+    // An updater, so two keys added before the next render both land
+    setKeys(prev => (prev.includes(key) ? prev : [...prev, key]));
     setHasNew(true);
   }, [keys]);
 

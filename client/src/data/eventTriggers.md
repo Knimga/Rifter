@@ -13,23 +13,27 @@ A trigger lives on a `buff` or `debuff` effect of an ability, in its `trigger` f
 
 The unit carrying the trigger is its **bearer**.
 
-### Passive triggers: always on
+### Passive effects: always on
 
-A class or a creature (enemy, boss or summon) can also have triggers it always has, with no ability to cast them: `passiveTriggers` on its entry (`ClassData` in [`units/classes.ts`](units/classes.ts), `CreatureClassData` in [`units/enemies.ts`](units/enemies.ts)). Each is a `PassiveTrigger`: a `name`, an optional `damageElement`, and the `trigger` itself.
+A creature (enemy, boss or summon) or a player class has `passiveEffects` (`CreatureClassData` in [`units/enemies.ts`](units/enemies.ts), `ClassData` in [`units/classes.ts`](units/classes.ts)): a list of `PassiveEffect`, each a `name`, an optional `damageElement` (the element of an effect with none of its own) and the `effect`. The effect is a `buff`, `debuff` (stats and/or a `trigger`), `root`, `aura`, `hot` or `dot`, written as in an ability but with no `appliesTo`, `turns` or `maxStacks`. So a trigger is a buff with a `trigger`:
 
 ```ts
-passiveTriggers: [
-  { name: 'Chitin Spines', damageElement: 'physical', trigger: {
+passiveEffects: [
+  { name: 'Chitin Spines', damageElement: 'physical', effect: { type: 'buff', trigger: {
     when: 'attacked', categories: ['melee'],
     effects: [{ type: 'damage', appliesTo: 'target', damageElement: 'physical', minDamage: 3, maxDamage: 3 }],
-  } },
+  } } },
+  { name: 'Thick Hide', effect: { type: 'buff', stats: { armor: 10 } } },
+  { name: 'Regrowth', effect: { type: 'hot', damageElement: 'nature', healPerTurn: 3 } },
 ],
 ```
 
-- **Always on:** it never runs out, can't be removed, and never shows as a status marker. Its name floats over the bearer when it fires, like a buff's.
-- **Its own:** the bearer put it on itself. Its effects on `'source'` land on the bearer, and its own bonuses count, as on a self-cast trigger buff.
+- **Always on:** it never runs out, can't be removed (a dispel leaves it) and never shows as a status marker. A trigger's name floats over the bearer when it fires, like a buff's.
+- **Its own:** the bearer put it on itself. A trigger's effects on `'source'` land on the bearer, and its own bonuses count, as on a self-cast trigger buff.
 - **Same rules otherwise:** chance, events, recipients, no chains and threat all work as for a trigger buff, and the same load warnings apply.
-- **Shown:** a class's passive triggers are listed with its passives on the character select screen, in words.
+- **How it's kept:** a unit starts with its passive effects in its buffs, HoTs and DoTs (`passiveEffectEntries` in [`units/stats.ts`](units/stats.ts)), as permanent entries (`turnsLeft` Infinity, like gear's bonuses; `isPassiveEntry` tells them from cast effects), so stats, triggers, roots, auras and turn ticks need no extra rules. A passive HoT or DoT is not scaled by the bearer's stats, and a DoT builds no threat. For plain flat stat bonuses, `passives` is still the shorter way.
+- **Party members:** a member's passive effects are decided in one place, `memberPassiveEffects` in [`units/party.ts`](units/party.ts) (its class's now; a subclass's will be added there). Their entries are stored in its `MemberState` like a creature's. When a member dies or the party leaves a location, what was cast on it ends (`withoutCastEffects`) but its passive entries stay. The party window counts them in a stat's base, not as an effect that raises or lowers it.
+- **Shown:** a class's passive effects are listed with its passives on the character select screen and the party window's Abilities tab, in words. A creature's are not shown.
 
 **Triggers never stack.** A buff or debuff with a trigger counts as `maxStacks: 1`, stats included: casting it again on the same unit, by anyone, replaces the one already there. The new one starts its full `turns` again, and its `source` is the newest caster. Setting `maxStacks` above 1 on it is warned about at load. (Without a trigger, a buff or debuff stacks without limit unless it sets `maxStacks`. At the cap, the oldest stack is replaced.)
 
@@ -60,7 +64,7 @@ passiveTriggers: [
 
 ## Effects (`TriggerEffect`)
 
-A trigger's effect can be any ability `Effect` (`damage`, `dot`, `heal`, `hot`, `buff`, `debuff`, `root`, `threat`, `summon`). It can also be:
+A trigger's effect can be any ability `Effect` (`damage`, `dot`, `heal`, `hot`, `buff`, `debuff`, `root`, `threat`, `summon`, `dispel`: on the other unit it takes buffs and HoTs if that unit attacked or was attacked, else debuffs and DoTs; on the bearer, debuffs and DoTs). It can also be:
 
 ```ts
 { type: 'weaponAttack', appliesTo: 'target' }

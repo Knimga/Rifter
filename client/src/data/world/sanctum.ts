@@ -228,5 +228,5 @@ export const SANCTUM_SHOWN: ReadonlySet<string> = new Set([...SANCTUM_FLOORS].fl
 /** Anything that isn't the Sanctum's floor is wall. */
 export const isSanctumWall = (p: Pos) => !SANCTUM_FLOORS.has(posKey(p));
 
-/** Walls block the way, and so do the Rifter's three tiles and the NPCs. */
+/** Walls block the way, and so do the Rifter's three tiles, the decorative objects that fill tiles, and the NPCs. */
 export const isSanctumWalkable = (p: Pos) => !isSanctumWall(p) && !SANCTUM_RIFTER_TILES.has(posKey(p)) && !SANCTUM_DECOR_TILES.has(posKey(p)) && !sanctumNpcAt(p);

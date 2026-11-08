@@ -1,6 +1,6 @@
 import { ENEMY_CLASSES } from '../units/enemies';
 import { BOSS_CLASSES } from '../units/bosses';
-import { buildDungeon, buildPassage, type DungeonConfig, type DungeonLook, type GenOptions, type PassageConfig } from './dungeonGen';
+import { buildDungeon, buildPassage, type DungeonConfig, type DungeonLook, type GenOptions, type PassageConfig } from './gen';
 
 const skelly = ENEMY_CLASSES.find(c => c.id === 'skeleton')!;
 const zombie = ENEMY_CLASSES.find(c => c.id === 'zombie')!;
@@ -161,6 +161,7 @@ export const DUNGEONS: Record<string, DungeonConfig> = {
         splitDepth: 3,
         corridorWidth: 2,
         layout: 'caverns',
+        containers: ['dead-adventurer'],
         obstacles: { objects: ['tree-trunk'], roomChance: 0.5, density: 0.15 },
         enemyGroups: [
           [gloomtoad, gloomtoad, rotflySwarm, rotflySwarm, rotflySwarm],

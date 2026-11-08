@@ -9,7 +9,7 @@ import { applyThreatChange, countDownTurns, healThreat, unitKey } from '../data/
 import { bodyCenter, type Pos } from '../data/world/grid';
 import { bodyOf, isAlly, type EnemyInstance } from '../data/units/enemies';
 import type { MemberState } from '../data/units/party';
-import type { Stats } from '../data/units/stats';
+import { runsDown, type Stats } from '../data/units/stats';
 import type { SpawnFloat } from './useFloatingText';
 
 export function useTurnTicks({ combatActive, round, currentCombatant, membersRef, updateMembers, partyStatsRef, partyPosRef, enemiesRef, currentZoneRef, setEnemies, setCombat, spawnFloat }: {
@@ -120,19 +120,21 @@ export function useTurnTicks({ combatActive, round, currentCombatant, membersRef
       // A member the tick leaves as it was stays the same object (see tickChangesNothing): no redraw
       const tick = ticks[i];
       const effects = [m.buffs, m.hots, m.dots];
-      if (tick ? tickChangesNothing(tick, m.hp, m.mp, effects) : effects.every(list => list.length === 0)) return m;
+      if (tick ? tickChangesNothing(tick, m.hp, m.mp, effects) : !effects.some(runsDown)) return m;
       return countDown({ ...m, hp: tick?.hp ?? m.hp, mp: tick?.mp ?? m.mp });
     });
 
     // The current zone's creatures (the others wait). Unchanged, they come back as the same array, which React
     // ignores. Summoned creatures (either side's) whose time is up vanish.
-    const { enemies: updated, events, vanished } = applyRestTick(enemiesRef.current, currentZoneRef.current);
+    const before = enemiesRef.current, zoneId = currentZoneRef.current;
+    const { enemies: updated, events, vanished } = applyRestTick(before, zoneId);
     for (const { pos, tick } of events) showTick(pos, tick);
     for (const e of vanished) {
       const at = bodyCenter(bodyOf(e));
       spawnFloat(at.x, at.y, 'Vanished', COMBAT_TEXT_COLOR.stopped);
     }
-    setEnemies(updated);
+    // Onto the creatures as they are when it lands: an update queued since the ref was read (an aura sync) isn't lost
+    if (updated !== before) setEnemies(prev => (prev === before ? updated : applyRestTick(prev, zoneId).enemies));
   }, [showTick, spawnFloat, updateMembers]); // eslint-disable-line react-hooks/exhaustive-deps -- reads stable refs
 
   useEffect(() => {

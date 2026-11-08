@@ -2,7 +2,7 @@
 // (explored, remembered per zone until a new dungeon). Updated once per move, from where the party stands.
 // No fog in the Sanctum (null).
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { DungeonData } from '../data/world/dungeonGen';
+import type { DungeonData } from '../data/world/gen';
 import { posKey, type Pos } from '../data/world/grid';
 import { visibleTiles } from '../data/world/visibility';
 

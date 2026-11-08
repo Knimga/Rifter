@@ -1,16 +1,17 @@
 // Summoned creatures (an ability's 'summon' effect, by id): the creatures only summoned (SUMMON_CLASSES), and any
 // enemy class too (e.g. a spore that also roams in packs). Configured like enemy classes (CreatureClassData:
 // attributes, armor, abilities, passives, model) and run by the same AI, on their summoner's side. Their level
-// is their summoner's.
+// is their summoner's. A summon lasts its `turns`, or (`turns: 'forever'`, a party member's only) until it is slain or
+// the party leaves the dungeon: it marches with the party between fights (isForeverSummon, movement.ts marchParty).
 import { ENEMY_CLASSES, generateEnemyInstance, type CreatureClassData, type EnemyInstance } from './enemies';
 import { BOSS_CLASSES } from './bosses';
 import type { Pos } from '../world/grid';
-import { warnIgnoredEffects, warnIgnoredTriggers } from '../combat/abilities';
+import { warnCreatureTable } from '../combat/abilities';
 
 /** A creature an action summons (executeAction's outcome; placed where the outcome lands). */
 export interface SummonRequest {
   creature: string;  // a creature class id (summonClass)
-  turns: number;
+  turns: number | 'forever';  // 'forever': the party's only (abilities.ts 'summon' effect)
   max: number;       // at most this many out from its ability at once: casting it again replaces the oldest
   ability: string;   // the ability that summons it
   at?: Pos;          // the tile it appears on (a 'tile' ability's aim); none = beside the caster
@@ -39,7 +40,7 @@ export const SUMMON_CLASSES: CreatureClassData[] = [
         target: 'enemy',
         attackCategory: 'magic',
         displayElement: 'shadow',
-        effects: [{ type: 'damage', appliesTo: 'target', damageElement: 'shadow', minDamage: 3, maxDamage: 4 }],
+        effects: [{ type: 'damage', appliesTo: 'target', damageElement: 'shadow', minDamage: 4, maxDamage: 5 }],
       },
     ],
     model: 'summon.void-wisp',
@@ -47,10 +48,7 @@ export const SUMMON_CLASSES: CreatureClassData[] = [
 ];
 
 // Effects an ability (or a passive trigger) would silently ignore: warned at load
-for (const c of SUMMON_CLASSES) {
-  warnIgnoredEffects(`summons › ${c.id}`, c.abilities);
-  warnIgnoredTriggers(`summons › ${c.id}`, c.passiveTriggers);
-}
+warnCreatureTable('summons', SUMMON_CLASSES);
 
 /** A summonable creature's class, by id: a summon-only creature, else an enemy class. */
 export const summonClass = (id: string): CreatureClassData | undefined =>

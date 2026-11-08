@@ -1,5 +1,5 @@
 // What containers on the map (treasure chests, a dead adventurer) hold: how many items, how likely each rarity is,
-// gold and affix shards. Where each stands: its zone's config (ZoneConfig.containers, data/world/dungeonGen.ts). Keyed
+// gold and affix shards. Where each stands: its zone's config (ZoneConfig.containers, data/world/gen/types.ts). Keyed
 // by the container's interactive object (INTERACTIVE_OBJECTS id, data/world/interactiveObjects.ts). Tune values here.
 import type { Item, Rarity } from './types';
 import { generateLootItem } from '.';
@@ -18,7 +18,7 @@ export interface ContainerLoot {
   /** Relative chance of each rarity per item (0 = never). */
   rarityWeights: Record<Rarity, number>;
   /**
-   * Gold in it, read like an enemy's: rolls of 5-10 x its level (data/gear/loot.ts rollGold), the whole part
+   * Gold in it, read like an enemy's: rolls of GOLD_PER_LEVEL x its level (data/gear/loot.ts rollGold), the whole part
    * guaranteed, the fraction the chance of one more, summed. None if absent. Gold takes a slot of its own.
    */
   dropsGold?: number;

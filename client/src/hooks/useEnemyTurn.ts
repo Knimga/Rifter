@@ -1,6 +1,6 @@
 import { useEffect, type MutableRefObject, type Dispatch, type SetStateAction } from 'react';
 import { bodyOf, isAlly, isArmed, isHostile, type EnemyInstance } from '../data/units/enemies';
-import type { ZoneData } from '../data/world/dungeonGen';
+import type { ZoneData } from '../data/world/gen';
 import type { Stats } from '../data/units/stats';
 import { advanceTurn, apLeft, deadPartyIndices, stunnedOutcome, type CombatState, type Combatant } from '../data/combat/combat';
 import { ENEMY_FOLLOWUP_PAUSE_MS, ENEMY_STEP_PAUSE_MS, STUNNED_PAUSE_MS } from '../data/constants';
@@ -157,14 +157,15 @@ export function useEnemyTurn(
         // A move alone: on to its next step
         if (!ability) { next(); return; }
 
-        // Its targets: the foes in the area (AoE), else the one it aims at (a foe, or the ally it heals)
+        // Its targets: the living foes in the area (AoE: a fallen member is off the map), else the one it aims at (a
+        // foe, or the ally it heals)
         const aoeTiles = isArea(ability) && action.abilityTargetPos
           ? aimedArea({ ...bodyOf(enemy), pos: finalPos }, action.abilityTargetPos, ability.area, z.sight, [...foes, ...friends])
           : null;
         const targetKeys: string[] =
           ability.target === 'ally' ? (!aoeTiles && action.targetKey !== null ? [action.targetKey] : [])
           : ability.target !== 'enemy' ? []
-          : aoeTiles ? unitsInArea(aoeTiles, foes).map(f => f.key)
+          : aoeTiles ? unitsInArea(aoeTiles, foes.filter(f => f.hp > 0)).map(f => f.key)
           : action.targetKey !== null ? [action.targetKey]
           : [];
 
@@ -195,7 +196,8 @@ export function useEnemyTurn(
               if (key === enemy.id) return [by];
               const u = [...foeUnits, ...friendUnits].find(f => unitKey(f.ref) === key);
               if (!u) return [];
-              if (u.ref.side === 'party') return [refs.partyUnit(u.ref.idx, u.pos)];
+              // A party member who has fallen since the step was planned is off the map: no longer hit
+              if (u.ref.side === 'party') return (refs.partyHp.current[u.ref.idx] ?? 0) > 0 ? [refs.partyUnit(u.ref.idx, u.pos)] : [];
               const id = u.ref.id;
               const e = refs.enemies.current.find(c => c.id === id && c.currentHp > 0);
               return e ? [creatureUnit(e)] : [];
@@ -206,7 +208,8 @@ export function useEnemyTurn(
             // Its side in the area: an area ability's 'allies' (for an ally one, the same units as its targets)
             const allies = !aoeTiles ? [] : ability.target === 'ally' ? targets : unitsInArea(aoeTiles, sideUnits());
             // The creature turns to face its target, the ability lands (a 'tile' one on its aimed tile, e.g. where a
-            // summon appears), then its next step
+            // summon appears), then its next step. NOT YET: a movement ability (Ability.move) would resolve through
+            // executeMoveAction here instead (the AI doesn't choose them yet: enemyAI.ts); landing it is ready.
             const landsIn = refs.applyOutcome.current(executeAction(by, ability, targets, action.abilityTargetPos ?? undefined, allies, refs.actionWorld()), by, aimAt);
             if (landsIn > 0) later(landsIn, next);
             else next();
@@ -223,5 +226,7 @@ export function useEnemyTurn(
       setEnemyTargetKey(null);
       showActivity(null);
     };
-  }, [combat.active, combat.currentTurnIndex, currentCombatant, refs, setCombat, setEnemies, setEnemyAoePreview, setEnemyTargetKey, showActivity]);
+    // A turn is its combatant and round, not its index in the turn order: a creature summoned mid-turn is inserted by
+    // initiative, which can shift the index; restarting then would hand the acting creature a fresh turn's AP.
+  }, [combat.active, combat.round, currentCombatant, refs, setCombat, setEnemies, setEnemyAoePreview, setEnemyTargetKey, showActivity]);
 }

@@ -34,9 +34,10 @@ export const NPCS: NpcData[] = [
   { id: 'ardas', name: 'Ardas', title: 'Sage', model: 'npc.ardas' },
   // An earth elemental, a golem of plain brown rock: no service or dialogue yet
   { id: 'gorn', name: 'Gorn', title: 'Earth Elemental', model: 'npc.gorn' },
-  // Short and stout, in leather over dark green, holding a plain mace: no service; he speaks, sending the party to Ardas (a quest)
-  // An arcanist in an open black robe trimmed in purple: no service or dialogue yet
+  // An arcanist in an open black robe trimmed in purple, the Rifter's maker: no service; she speaks, showing the party how
+  // to use it (a quest step)
   { id: 'ileena', name: 'Ileena', title: 'Arcanist', model: 'npc.ileena' },
+  // Short and stout, in leather over dark green, holding a plain mace: no service; he speaks, sending the party to Ardas (a quest)
   { id: 'rix', name: 'Rix', title: 'Mercenary', model: 'npc.rix', holds: { link: 'weapon.plain-mace', weaponType: '1h Maces' } },
 ];
 

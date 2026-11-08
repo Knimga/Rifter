@@ -2,7 +2,7 @@
 // or has line of sight to it (hasLineOfSight over ZoneData.sight, the rule aggro uses too), at any distance. Walls
 // (and obstacles) are seen when they border floor a viewer can see. Pure: the view draws the fog from these sets (viewEngine/three/fog.ts).
 import { hasLineOfSight, posKey, STEPS, type Pos } from './grid';
-import type { ZoneData } from './dungeonGen';
+import type { ZoneData } from './gen';
 
 /** Keys of every floor tile of the zone, and every wall tile next to floor, that a viewer sees now. */
 export function visibleTiles(zone: ZoneData, viewers: Pos[]): Set<string> {

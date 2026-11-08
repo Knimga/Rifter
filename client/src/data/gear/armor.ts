@@ -30,16 +30,16 @@ export const ARMOR_TYPE_DATA: Record<ArmorProficiency, ArmorTypeData> = {
     implicit: {
       stat: 'magicResistance',
       slots: {
-        chest:  { baseValue: 5, growthPerLevel: 0.40 },
-        helm:   { baseValue: 4, growthPerLevel: 0.30 },
-        boots:  { baseValue: 3, growthPerLevel: 0.30 },
-        gloves: { baseValue: 2, growthPerLevel: 0.20 },
+        chest:  { baseValue: 4, growthPerLevel: 0.40 },
+        helm:   { baseValue: 3, growthPerLevel: 0.30 },
+        boots:  { baseValue: 2, growthPerLevel: 0.30 },
+        gloves: { baseValue: 1, growthPerLevel: 0.20 },
       },
     },
     invalidAffixes: [
       'strength', 'finesse', 'block', 'parry', 'glancingBlow', 
       ...rangedStats, ...meleeStats, ...damageTypeAffixes(['physical','poison','nature']),
-      'redoubt', 'expertise',
+      'redoubt', 'expertise', 'increasedThreat',
     ],
   },
   Light: {
@@ -47,14 +47,14 @@ export const ARMOR_TYPE_DATA: Record<ArmorProficiency, ArmorTypeData> = {
     implicit: {
       stat: 'dodge',
       slots: {
-        chest:  { baseValue: 3, growthPerLevel: 0.40 },
-        boots:  { baseValue: 2, growthPerLevel: 0.30 },
+        chest:  { baseValue: 2, growthPerLevel: 0.40 },
+        boots:  { baseValue: 1, growthPerLevel: 0.30 },
         helm:   { baseValue: 2, growthPerLevel: 0.20 },
-        gloves: { baseValue: 1, growthPerLevel: 0.10 },
+        gloves: { baseValue: 1, growthPerLevel: 0.20 },
       },
     },
     invalidAffixes: [
-      'magicHit', 'magicCrit', 'block', ...damageTypeAffixes(['holy'])
+      'magicHit', 'magicCrit', 'block', 'increasedThreat', ...damageTypeAffixes(['holy'])
     ],
   },
   Medium: {
@@ -64,25 +64,25 @@ export const ARMOR_TYPE_DATA: Record<ArmorProficiency, ArmorTypeData> = {
       slots: {
         chest:  { baseValue: 3, growthPerLevel: 0.30 },
         helm:   { baseValue: 2, growthPerLevel: 0.20 },
-        boots:  { baseValue: 2, growthPerLevel: 0.20 },
+        boots:  { baseValue: 1, growthPerLevel: 0.20 },
         gloves: { baseValue: 1, growthPerLevel: 0.10 },
       },
     },
-    invalidAffixes: [...damageTypeAffixes(['holy'])],
+    invalidAffixes: ['reducedThreat', ...damageTypeAffixes(['holy'])],
   },
   Heavy: {
     baseArmor: 12,
     implicit: {
       stat: 'glancingBlow',
       slots: {
-        chest:  { baseValue: 5, growthPerLevel: 0.40 },
+        chest:  { baseValue: 4, growthPerLevel: 0.40 },
         helm:   { baseValue: 3, growthPerLevel: 0.30 },
-        boots:  { baseValue: 3, growthPerLevel: 0.30 },
-        gloves: { baseValue: 2, growthPerLevel: 0.20 },
+        boots:  { baseValue: 2, growthPerLevel: 0.30 },
+        gloves: { baseValue: 1, growthPerLevel: 0.20 },
       },
     },
     invalidAffixes: [
-      'finesse', 'evasion', 'subtlety', 'initiative', 'dodge', 
+      'finesse', 'evasion', 'subtlety', 'initiative', 'dodge', 'reducedThreat',
       ...rangedStats, ...damageTypeAffixes(['poison','shadow','ice'])
     ],
   },

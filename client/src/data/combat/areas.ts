@@ -11,6 +11,9 @@ export const isArea = (a: { area?: AreaType }): boolean => !!a.area && a.area !=
  */
 export const isSelfBurst = (a: { area?: AreaType; range: number }): boolean => isArea(a) && a.range === 0;
 
+/** How many tiles a blast spreads round its center: 1 for blast1, 2 for blast2 (an aura's reach too: data/combat/auras.ts). */
+export const blastRadius = (area: 'blast1' | 'blast2'): number => (area === 'blast1' ? 1 : 2);
+
 /**
  * The floor tiles affected by an area ability aimed at `target`: a tile, or a body (areaCenter: a large creature
  * aimed at, or a large caster's own burst). A blast spreads around the whole of it (blast1 on a 2×2: it and the
@@ -24,7 +27,7 @@ export function getAffectedTiles(
 ): Pos[] {
   const center = 'pos' in target ? target : { pos: target };
   if (area === 'blast1' || area === 'blast2') {
-    const radius = area === 'blast1' ? 1 : 2;
+    const radius = blastRadius(area);
     const size = center.size ?? 1;
     const tiles: Pos[] = [];
     for (let dx = -radius; dx < size + radius; dx++) {
@@ -71,7 +74,7 @@ export const aimedArea = (caster: Body, at: Pos, area: AreaType | undefined, flo
  * targets), helps (heals, buffs and HoTs on allies there, or on an ally ability's targets), or both ('mixed').
  */
 export function areaTone(action: Ability): 'harm' | 'help' | 'mixed' {
-  const helps = action.effects.some(e => (e.type === 'heal' || e.type === 'buff' || e.type === 'hot')
+  const helps = action.effects.some(e => (e.type === 'heal' || e.type === 'buff' || e.type === 'hot' || e.type === 'aura' || e.type === 'dispel')
     && (e.appliesTo === 'allies' || (e.appliesTo === 'target' && action.target !== 'enemy')));
   const harms = action.target === 'enemy' && action.effects.some(e => e.appliesTo === 'target');
   return helps && harms ? 'mixed' : helps ? 'help' : 'harm';

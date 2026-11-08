@@ -1,7 +1,7 @@
 import { CLASSES } from './classes';
 import { capitalize } from '../detailStrings';
 import type { ClassKey, ClassData, Passive, ScalingPassive } from './classes';
-import type { Effect, Trigger } from '../combat/abilities';
+import type { Aura, Effect, PassiveEffect, Trigger } from '../combat/abilities';
 
 export const ATTRIBUTE_KEYS = ['strength', 'toughness', 'finesse', 'mind', 'spirit', 'speed'] as const;
 export const SKILL_KEYS = ['perception', 'subtlety', 'expertise', 'spellcraft', 'evasion', 'redoubt', 'devotion'] as const;
@@ -21,7 +21,7 @@ const MISC_STATS = [
   'meleeHit', 'meleeDamage', 'meleeCrit', 'meleePenetration',
   'rangedHit', 'rangedDamage', 'rangedCrit', 'rangedPenetration',
   'magicHit', 'magicDamage', 'magicCrit', 'magicPenetration',
-  'threatMultiplier',
+  'threatMultiplier', 'increasedThreat', 'reducedThreat',
 ] as const;
 
 /** Every stat that can be raised or lowered by a buff/debuff. */
@@ -104,11 +104,31 @@ export interface ActiveBuff {
    */
   trigger?: { def: Trigger; sourceKey: string; debuff: boolean };
   /**
+   * The aura itself, on its bearer (an 'aura' effect): while it lasts, its effects land on the units inside its area
+   * (data/combat/auras.ts). Its stat change is none.
+   */
+  aura?: { def: Aura };
+  /** It is the effect of an aura, on a unit inside it: it lasts as long as the unit does (turnsLeft Infinity, no stack). */
+  fromAura?: AuraTag;
+  /**
    * Its stack (a buff or debuff effect's): `id` is one application of the effect (all its entries share it), `key`
    * the effect it is of (stackKey), `max` how many stacks of it a unit can have at once (stackCap).
    */
   stack?: { key: string; id: number; max: number };
 }
+
+/**
+ * What an effect that comes from an aura carries (ActiveBuff, ActiveHot and ActiveDot `fromAura`): `key` is the aura's
+ * effect it is of (its name and the effect's place in it: what a unit inside several copies of the aura has once),
+ * `bearer` the unitKey of the unit whose aura it comes from (syncAuraEffects).
+ */
+export interface AuraTag { key: string; bearer: string }
+
+/**
+ * Whether any effect in a list runs down (has turns left to count): an aura's effects (Infinity) don't, so a unit with
+ * only those is as quiet as one with none (a tick leaves it the same object).
+ */
+export const runsDown = (list: readonly { turnsLeft: number }[]): boolean => list.some(x => Number.isFinite(x.turnsLeft));
 
 /** Whether a root is on the unit (a condition, not a stat): in combat it can't move at all (moveBudget). */
 export const isRooted = (buffs: ActiveBuff[]) => buffs.some(b => b.roots);
@@ -147,6 +167,93 @@ export function addBuffs(buffs: ActiveBuff[], added: readonly ActiveBuff[]): Act
   return out;
 }
 
+/**
+ * Build ActiveBuff entries from a buff/debuff Effect: one per stat changed, and one for its trigger. Debuff amounts
+ * are always negative. `sourceKey`: the unitKey of who puts it on (a trigger's 'source'). The entries are one stack
+ * (ActiveBuff.stack), capped when they land (addBuffs).
+ */
+export function effectToBuffs(eff: BuffEffect, idPrefix: string, source: string, sourceKey: string): ActiveBuff[] {
+  const signed = (v: number) => eff.type === 'debuff' ? -Math.abs(v) : v;
+  const stack = { key: stackKey(source, eff), id: nextEffectSeq(), max: stackCap(eff) };
+  return ([
+    ...(Object.entries(eff.stats ?? {}) as [BuffableStat, number][]).map(([stat, amount]) => ({
+      id: `${idPrefix}-${stat}`, source, damageElement: eff.damageElement,
+      stat, amount: signed(amount), turnsLeft: eff.turns,
+    })),
+    ...(Object.entries(eff.statsPercent ?? {}) as [BuffableStat, number][]).map(([stat, pct]) => ({
+      id: `${idPrefix}-${stat}-pct`, source, damageElement: eff.damageElement,
+      stat, amount: 0, percent: signed(pct), turnsLeft: eff.turns,
+    })),
+    // A trigger changes no stat (like a root)
+    ...(eff.trigger ? [{
+      id: `${idPrefix}-trigger`, source, damageElement: eff.damageElement,
+      stat: 'movement' as const, amount: 0, turnsLeft: eff.turns,
+      trigger: { def: eff.trigger, sourceKey, debuff: eff.type === 'debuff' },
+    }] : []),
+  ] as ActiveBuff[]).map(b => ({ ...b, stack }));
+}
+
+/** A root (Effect 'root') as an ActiveBuff: no stat change, it just holds the unit in place (isRooted). */
+export const rootToBuff = (eff: Extract<Effect, { type: 'root' }>, idPrefix: string, source: string): ActiveBuff => ({
+  id: `${idPrefix}-root`, source, damageElement: eff.damageElement,
+  stat: 'movement', amount: 0, roots: true, turnsLeft: eff.turns,
+  // Never capped, but a stack of its own so a dispel can take it
+  stack: { key: `${source}:root`, id: nextEffectSeq(), max: Infinity },
+});
+
+/**
+ * An aura (Effect 'aura') as an ActiveBuff on its bearer: no stat change, it just carries the aura (ActiveBuff.aura), whose
+ * effects the units inside get (syncAuraEffects). One stack at a time: recast, it replaces the old one (addBuffs), so its
+ * time is refreshed.
+ */
+export const auraToBuff = (eff: Extract<Effect, { type: 'aura' }>, idPrefix: string, source: string): ActiveBuff => ({
+  id: `${idPrefix}-aura`, source, damageElement: eff.damageElement,
+  stat: 'movement', amount: 0, aura: { def: eff.aura }, turnsLeft: eff.turns,
+  stack: { key: `${source}:aura`, id: nextEffectSeq(), max: 1 },
+});
+
+/**
+ * Whether a buff, HoT or DoT entry is a passive effect's (or gear's): one that lasts for good (turnsLeft Infinity) and is
+ * no aura's. It shows no marker, a dispel leaves it, and a member keeps it through death and leaving a location.
+ */
+export const isPassiveEntry = (x: { turnsLeft: number; fromAura?: unknown }): boolean => !Number.isFinite(x.turnsLeft) && !x.fromAura;
+
+/**
+ * A unit's passive effects (PassiveEffect: a creature's, or a party member's from its class) as the entries it starts
+ * with in its buffs, HoTs and DoTs: the same entries the effect would make cast on it, but for good (turnsLeft Infinity,
+ * like gear's bonuses: they never count down, show no marker and a dispel leaves them) and with no stack (nothing caps or
+ * replaces them). `ownerKey`: the unit's key (a creature's id, a member's 'party-<idx>'), whose a trigger's 'source' is.
+ * A buff's stat changes reach its stats through recomputeStats, as any buff's.
+ */
+export function passiveEffectEntries(passives: readonly PassiveEffect[] | undefined, ownerKey: string): { buffs: ActiveBuff[]; hots: ActiveHot[]; dots: ActiveDot[] } {
+  const out = { buffs: [] as ActiveBuff[], hots: [] as ActiveHot[], dots: [] as ActiveDot[] };
+  for (const p of passives ?? []) {
+    const prefix = `passive-${p.name}`;
+    const damageElement = p.effect.damageElement ?? p.damageElement;
+    const eff = { ...p.effect, damageElement, appliesTo: 'target', turns: Infinity } as Extract<Effect, { type: PassiveEffect['effect']['type'] }>;
+    switch (eff.type) {
+      case 'buff':
+      case 'debuff':
+        out.buffs.push(...effectToBuffs(eff, prefix, p.name, ownerKey));
+        break;
+      case 'root':
+        out.buffs.push(rootToBuff(eff, prefix, p.name));
+        break;
+      case 'aura':
+        out.buffs.push(auraToBuff(eff, prefix, p.name));
+        break;
+      case 'hot':
+        out.hots.push({ name: p.name, damageElement, healPerTurn: eff.healPerTurn, turnsLeft: Infinity });
+        break;
+      case 'dot':
+        out.dots.push({ name: p.name, damageElement: eff.damageElement, damagePerTurn: eff.damagePerTurn, damagesMP: eff.damagesMP, turnsLeft: Infinity });
+        break;
+    }
+  }
+  out.buffs = out.buffs.map(b => ({ ...b, stack: undefined }));
+  return out;
+}
+
 /** A HoT's or DoT's stacking: what its stacks share (its ability and element: tickStack) and how many fit (maxStacks). */
 export interface TickStack { key: string; max: number }
 
@@ -182,6 +289,10 @@ export interface ActiveHot {
   turnsLeft: number;
   fresh?: boolean;
   stack?: TickStack;
+  /** It is an aura's effect (turnsLeft Infinity): it heals while its unit is inside the aura. */
+  fromAura?: AuraTag;
+  /** Its place in the order effects land (nextEffectSeq): a dispel takes the youngest first. None for an aura's effect. */
+  seq?: number;
 }
 
 export interface ActiveDot {
@@ -196,6 +307,56 @@ export interface ActiveDot {
   elementPenetration?: number; // % points reducing element resistance on each tick
   damagesMP?: boolean;        // ticks drain MP instead of HP
   stack?: TickStack;
+  /** It is an aura's effect (turnsLeft Infinity): it hurts while its unit is inside the aura. */
+  fromAura?: AuraTag;
+  /** Its place in the order effects land (nextEffectSeq): a dispel takes the youngest first. None for an aura's effect. */
+  seq?: number;
+}
+
+// ─── Dispelling ───────────────────────────────────────────────────────────────
+
+/** The last place handed out in the order effects land (nextEffectSeq). */
+let effectSeq = 0;
+
+/** The next place in the order effects land: a buff or debuff application's stack id, a HoT's or DoT's `seq`. */
+export const nextEffectSeq = () => ++effectSeq;
+
+/** Whether a buff entry hurts its bearer (a debuff, a root, a debuff's trigger): what its marker shows as a debuff. */
+export const isHarmful = (b: ActiveBuff) => b.amount < 0 || (b.percent ?? 0) < 0 || !!b.roots || !!b.trigger?.debuff;
+
+/**
+ * The effects a dispel takes (Effect 'dispel') from a unit's lists, youngest first: `harmful` ones (debuffs, roots,
+ * DoTs) or else helpful ones (buffs, auras, HoTs). Each stack of a buff or debuff counts as one, as do a HoT and a DoT.
+ * Never gear bonuses (turnsLeft Infinity) or an aura's effects on a unit inside it (they would come right back).
+ * `skip`: places already taken (by another dispel of the same action). Returns the places taken and their names.
+ */
+export function pickDispelled(
+  lists: { buffs: readonly ActiveBuff[]; hots: readonly ActiveHot[]; dots: readonly ActiveDot[] },
+  harmful: boolean,
+  count: number | 'all',
+  skip: ReadonlySet<number>,
+): { seqs: number[]; names: string[] } {
+  const found = new Map<number, string>();
+  const stacks = new Map<number, ActiveBuff[]>();
+  for (const b of lists.buffs) {
+    if (isPassiveEntry(b) || b.fromAura || b.stack === undefined) continue;
+    stacks.set(b.stack.id, [...(stacks.get(b.stack.id) ?? []), b]);
+  }
+  for (const [id, entries] of stacks) {
+    if (entries.some(isHarmful) === harmful) found.set(id, entries[0].source ?? entries[0].id);
+  }
+  for (const t of harmful ? lists.dots : lists.hots) {
+    if (!isPassiveEntry(t) && !t.fromAura && t.seq !== undefined) found.set(t.seq, t.name ?? 'Effect');
+  }
+  const picked = [...found].filter(([seq]) => !skip.has(seq)).sort((a, b) => b[0] - a[0]).slice(0, count === 'all' ? undefined : Math.max(0, count));
+  return { seqs: picked.map(([seq]) => seq), names: picked.map(([, name]) => name) };
+}
+
+/** A list of buffs, HoTs or DoTs without the effects at these places (a buff's is its stack id: pickDispelled). */
+export function dropDispelled<T extends ActiveBuff | ActiveHot | ActiveDot>(list: T[], seqs: readonly number[]): T[] {
+  if (seqs.length === 0) return list;
+  const out = list.filter(x => !seqs.includes(('stat' in x ? x.stack?.id : x.seq) ?? -1));
+  return out.length === list.length ? list : out;
 }
 
 // ─── Stat Display Helpers ─────────────────────────────────────────────────────
@@ -206,9 +367,21 @@ const PERCENT_STATS = new Set([
   'meleeHit', 'meleeCrit', 'meleePenetration',
   'rangedHit', 'rangedCrit', 'rangedPenetration',
   'magicHit', 'magicCrit', 'magicPenetration',
+  'increasedThreat', 'reducedThreat',
   // elemental: Hit/Crit/Resistance/Penetration are %; Damage is flat
   ...DAMAGE_ELEMENTS.flatMap(el => [`${el}Hit`, `${el}Crit`, `${el}Resistance`, `${el}Penetration`]),
 ]);
+
+/**
+ * Stats that are not a Stats field of their own but shift another: percentage points added to (increasedThreat) or
+ * taken from (reducedThreat) the threatMultiplier, as a flat change (applyFlatPassives, applyStatBuffs).
+ */
+export const THREAT_SHIFT_STATS = { increasedThreat: 1, reducedThreat: -1 } as const;
+type ThreatShiftStat = keyof typeof THREAT_SHIFT_STATS;
+const isThreatShift = (key: string): key is ThreatShiftStat => key in THREAT_SHIFT_STATS;
+
+/** A stat's value as players read it: reducedThreat's is a reduction, so it shows negative ('−9% Threat'). */
+export const shownStatValue = (key: string, value: number): number => (isThreatShift(key) ? value * THREAT_SHIFT_STATS[key] : value);
 
 /** Returns '%' for percent-formatted stats, '' otherwise. */
 export function statSuffix(key: string): string {
@@ -424,7 +597,7 @@ function buildRawStats(
       crit:        5 + (mnd / 3) + (spellcraft / 3) + (subtlety / 5),
       penetration: spellcraft / 3,
     },
-    threatMultiplier: 1 - (subtlety * 0.05), // floored at MIN_THREAT_MULTIPLIER (applyStatMinimums)
+    threatMultiplier: 1 - (subtlety * 0.03), // floored at MIN_THREAT_MULTIPLIER (applyStatMinimums)
     elementalStats:  {},
   };
 }
@@ -437,6 +610,8 @@ function applyFlatPassives(stats: Stats, passives: Record<string, Passive>): Sta
     const flat = passives[a.key]?.flat;
     if (flat) a.set(s, a.get(s) + (a.key === 'block' ? flat * blockScale : flat));
   }
+  // increasedThreat / reducedThreat passives move the threatMultiplier (points of percent)
+  for (const [key, sign] of Object.entries(THREAT_SHIFT_STATS)) s.threatMultiplier += (passives[key]?.flat ?? 0) * sign / 100;
   return s;
 }
 
@@ -532,6 +707,11 @@ export function applyStatBuffs(stats: Stats, buffs: ActiveBuff[]): Stats {
   const pctMap  = new Map<string, number>();
   for (const buff of buffs) {
     if (isBaseStat(buff.stat)) continue;
+    if (isThreatShift(buff.stat)) {
+      // Points of percent on the threatMultiplier; a percent change of them means nothing
+      if (buff.amount) flatMap.set('threatMultiplier', (flatMap.get('threatMultiplier') ?? 0) + buff.amount * THREAT_SHIFT_STATS[buff.stat] / 100);
+      continue;
+    }
     if (buff.amount)  flatMap.set(buff.stat, (flatMap.get(buff.stat) ?? 0) + buff.amount);
     if (buff.percent) pctMap.set(buff.stat,  (pctMap.get(buff.stat)  ?? 0) + buff.percent);
   }
@@ -568,6 +748,6 @@ export function recomputeStats(input: PlayerStatInput | EnemyStatInput, buffs: A
 // rest through STAT_ACCESSORS. A stat with neither would be silently ignored on gear, buffs and passives.
 {
   const accessorKeys = new Set(STAT_ACCESSORS.map(a => a.key));
-  const missing = BUFFABLE_STATS.filter(s => !isBaseStat(s) && !accessorKeys.has(s));
+  const missing = BUFFABLE_STATS.filter(s => !isBaseStat(s) && !isThreatShift(s) && !accessorKeys.has(s));
   if (missing.length) throw new Error(`stats.ts: buffable stats with no way to apply: ${missing.join(', ')}`);
 }

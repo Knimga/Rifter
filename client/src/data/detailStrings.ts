@@ -1,6 +1,7 @@
-import { statSuffix, type AttributeKey, type BuffableStat, type DamageElement, type SkillKey } from "./units/stats";
+import { shownStatValue, statSuffix, type AttributeKey, type BuffableStat, type DamageElement, type SkillKey } from "./units/stats";
 import { scaledRange } from "./random";
-import { isAttackTrigger, type Ability, type AreaType, type Effect, type TargetType, type Trigger, type TriggerEffect } from "./combat/abilities";
+import { isAttackTrigger, type Ability, type AreaType, type Aura, type AuraEffect, type Effect, type PassiveEffect, type TargetType, type Trigger, type TriggerEffect } from "./combat/abilities";
+import { blastRadius } from "./combat/areas";
 import type { GearSlot, WeaponType } from "./gear";
 
 export const AttributeTooltips: Record<AttributeKey, string> = {
@@ -78,12 +79,12 @@ export function capitalizeWords(s: string): string {
     return s.replace(/(^|[\s'’-])(\p{L})/gu, (_, a: string, b: string) => a + b.toUpperCase());
 }
 
-/** 'meleeCrit' → 'Melee Crit', 'hpRegen' → 'HP Regen'. */
+/** 'meleeCrit' → 'Melee Crit', 'hpRegen' → 'HP Regen'; both threat stats read 'Threat' (reducedThreat's value shows negative). */
 export function formatStatLabel(key: string): string {
     return key.replace('Bonus', '').replace(/([A-Z])/g, ' $1').trim()
         .replace(/^\w/, c => c.toUpperCase())
         .replace(/^Hp\b/, 'HP').replace(/^Mp\b/, 'MP').replace(/^Ap Max$/, 'Max AP')
-        .replace(/^Threat Multiplier$/, 'Threat');
+        .replace(/^(Threat Multiplier|Increased Threat|Reduced Threat)$/, 'Threat');
 }
 
 /**
@@ -92,14 +93,14 @@ export function formatStatLabel(key: string): string {
  */
 export function formatPassiveValue(stat: string, p: { flat?: number; percent?: number }): string {
     return [
-        p.flat ? `${formatSigned(p.flat)}${statSuffix(stat)}` : '',
+        p.flat ? `${formatSigned(shownStatValue(stat, p.flat))}${statSuffix(stat)}` : '',
         p.percent ? `${formatSigned(p.percent)}%` : '',
     ].filter(Boolean).join(' / ');
 }
 
 /** Signed stat modifier, e.g. '+5 Armor', '−4 Movement', '+10% Dodge'. */
 export function formatModifier(stat: string, value: number, percent = false): string {
-    return `${formatSigned(value)}${percent ? '%' : statSuffix(stat)} ${formatStatLabel(stat)}`;
+    return `${formatSigned(shownStatValue(stat, value))}${percent ? '%' : statSuffix(stat)} ${formatStatLabel(stat)}`;
 }
 
 /** An amount of gold as players read it, with thousands separators: 1,109. */
@@ -185,6 +186,33 @@ const amountOf = (amount: string, element: DamageElement, tone: EffectTone): Tex
 type DamageEffect = Extract<Effect, { type: 'damage' }>;
 
 /**
+ * What an aura does to those inside it, as a phrase (no capital, no full stop): 'grants +3 Armor to allies within 2
+ * tiles and itself, and inflicts −2 Speed on enemies within 2 tiles'. Status marker tooltips and passive auras use it
+ * as is; an ability's card puts it after 'radiates an aura for N turns that'.
+ */
+export function auraText(aura: Aura): Sentence {
+    const tiles = blastRadius(aura.area);
+    const reach = (eff: AuraEffect) =>
+        `${eff.appliesTo} within ${tiles} tile${tiles === 1 ? '' : 's'}${eff.appliesTo === 'allies' && aura.includesBearer ? ' and itself' : ''}`;
+    const phrases = aura.effects.map((eff): TextPart[] => {
+        switch (eff.type) {
+            case 'buff':
+            case 'debuff': {
+                const debuff = eff.type === 'debuff';
+                const stats = statChanges(eff, debuff) || (debuff ? 'a debuff' : 'a buff');
+                return [plain(debuff ? 'inflicts ' : 'grants '), hl(stats, debuff ? 'debuff' : 'buff'), plain(` ${debuff ? 'on' : 'to'} ${reach(eff)}`)];
+            }
+            case 'hot':
+                return [plain('heals '), hl(`${eff.healPerTurn} per turn`, 'hot'), plain(` to ${reach(eff)}`)];
+            case 'dot':
+                return [plain('deals '), ...amountOf(`${eff.damagePerTurn}`, eff.damageElement, eff.damagesMP ? 'mpDamage' : 'dot'),
+                    plain(`${eff.damagesMP ? ' MP' : ''} damage per turn to ${reach(eff)}`)];
+        }
+    });
+    return listParts(phrases);
+}
+
+/**
  * Damage effects landing together, as one phrase: 'deals 8–10 physical and 4–5 fire damage[ to whom]'.
  * `additional`: on top of a weapon's damage ('deals 10–12 additional physical damage').
  */
@@ -201,9 +229,10 @@ function damagePhrase(effs: DamageEffect[], whom: string | null, third: boolean,
  * What one effect does, as a phrase (no capital, no full stop), e.g. 'deals 6–9 fire damage to allies'. `whom`:
  * who gets it, or null when it goes without saying (the ability's own target). `third`: the verb in the third
  * person ('deals'; else 'deal', after '40% chance to'). `additional`: threat on top of a weapon hit's ('+15
- * additional Threat').
+ * additional Threat'). `foe`: whom it lands on is hostile to the one using it (a dispel then takes buffs and HoTs,
+ * else debuffs and DoTs).
  */
-function effectPhrase(eff: TriggerEffect, whom: string | null, third: boolean, additional = false): Sentence {
+function effectPhrase(eff: TriggerEffect, whom: string | null, third: boolean, additional = false, foe = false): Sentence {
     const v = (base: string) => (third ? `${base}s` : base);
     const to = (prep: string): TextPart[] => (whom ? [plain(` ${prep} ${whom}`)] : []);
     const obj = whom ? ` ${whom}` : '';
@@ -246,7 +275,20 @@ function effectPhrase(eff: TriggerEffect, whom: string | null, third: boolean, a
             // The creature's id, which is its name ('fungal-spore' → 'Fungal Spore'; data/units/summons.ts, not
             // imported here: it imports this module's), and how many can be out at once when more than one
             const name = capitalizeWords(eff.creature.replace(/-/g, ' '));
-            return [plain(`${v('summon')} `), hl(aOrAn(name), 'buff'), plain(` ${forTurns(eff.turns)}${(eff.max ?? 1) > 1 ? `, up to ${eff.max} at once` : ''}`)];
+            const lasts = eff.turns === 'forever' ? 'until slain or the party leaves the dungeon' : forTurns(eff.turns);
+            return [plain(`${v('summon')} `), hl(aOrAn(name), 'buff'), plain(` ${lasts}${(eff.max ?? 1) > 1 ? `, up to ${eff.max} at once` : ''}`)];
+        }
+        case 'dispel': {
+            // 'removes the newest debuff or DoT', 'removes the 2 newest buffs or HoTs', 'removes all debuffs and DoTs'
+            const [effect, tick] = foe ? ['buff', 'HoT'] : ['debuff', 'DoT'];
+            const n = eff.count === 'all' ? Infinity : Math.max(1, eff.count ?? 1);
+            const what = n === Infinity ? `all ${effect}s and ${tick}s` : n === 1 ? `the newest ${effect} or ${tick}` : `the ${n} newest ${effect}s or ${tick}s`;
+            return [plain(`${v('remove')} `), hl(what, foe ? 'debuff' : 'buff'), ...to('from')];
+        }
+        case 'aura': {
+            // On the caster it radiates the aura; on others it gives them one ('gives allies an aura')
+            const gives = whom && whom !== 'you' ? `${v('give')} ${whom} an aura` : `${v('radiate')} an aura`;
+            return [plain(`${gives} ${forTurns(eff.turns)} that `), ...auraText(eff.aura)];
         }
     }
 }
@@ -284,7 +326,8 @@ export function triggerSentence(t: Trigger, turns?: number, bearer = 'itself'): 
     const chance = t.chance !== undefined && t.chance < 100 ? t.chance : null;
     const whom = (eff: TriggerEffect) =>
         eff.appliesTo === 'caster' ? bearer : eff.appliesTo === 'source' ? (bearer === 'you' ? 'you' : 'its caster') : TRIGGER_OTHER[t.when];
-    const does = t.effects.flatMap((e, i) => [...(i ? [plain(' and ')] : []), ...effectPhrase(e, whom(e), chance === null)]);
+    // The other unit of an attack is a foe; of a heal, a friend
+    const does = t.effects.flatMap((e, i) => [...(i ? [plain(' and ')] : []), ...effectPhrase(e, whom(e), chance === null, false, e.appliesTo === 'target' && attack)]);
     return finish([
         plain(`${turns !== undefined ? `${forTurns(turns)}, ` : ''}${when}, `),
         ...(chance !== null ? [hl(`${chance}% chance`, 'buff'), plain(' to ')] : []),
@@ -294,6 +337,35 @@ export function triggerSentence(t: Trigger, turns?: number, bearer = 'itself'): 
 
 /** A trigger as plain text (status marker tooltips: the turns left show on their own). */
 export const describeTrigger = (t: Trigger): string => sentenceText(triggerSentence(t));
+
+/**
+ * What a passive effect does to its bearer, as sentences (the class kit and character select list them; `bearer` is
+ * what a trigger calls its bearer): one for its stat changes ('+3 Block': no full stop, like the flat passives beside
+ * it), one for its trigger, aura, root, HoT or DoT. A buff with both stats and a trigger gives both.
+ */
+export function passiveEffectSentences(p: PassiveEffect, bearer = 'you'): Sentence[] {
+    const e = p.effect;
+    switch (e.type) {
+        case 'buff':
+        case 'debuff': {
+            const debuff = e.type === 'debuff';
+            const stats = statChanges(e, debuff);
+            return [
+                ...(stats ? [[hl(stats, debuff ? 'debuff' : 'buff')]] : []),
+                ...(e.trigger ? [triggerSentence(e.trigger, undefined, bearer)] : []),
+            ];
+        }
+        case 'root':
+            return [finish([plain("can't move")])];
+        case 'aura':
+            return [finish([plain('radiates an aura that '), ...auraText(e.aura)])];
+        case 'hot':
+            return [finish([plain('heals '), hl(`${e.healPerTurn} per turn`, 'hot')])];
+        case 'dot':
+            return [finish([plain('takes '), ...amountOf(`${e.damagePerTurn}`, e.damageElement, e.damagesMP ? 'mpDamage' : 'dot'),
+                plain(`${e.damagesMP ? ' MP' : ''} damage per turn`)])];
+    }
+}
 
 /** Who an ability's effect lands on: the ability's own target kind, the caster ('self'), or its allies in the area. */
 type Gets = TargetType | 'allies';
@@ -320,8 +392,10 @@ const stacking = (eff: { maxStacks?: number; trigger?: unknown }) =>
  * that', its damage and threat being on top of the weapon's ('Weapon attack that deals 10–12 additional physical
  * damage.', 'Weapon attack that gains +15 additional Threat.').
  */
-export function abilitySentences(ability: Pick<Ability, 'target' | 'area' | 'useWeapon' | 'effects'>): Sentence[] {
+export function abilitySentences(ability: Pick<Ability, 'target' | 'area' | 'range' | 'move' | 'useWeapon' | 'effects'>): Sentence[] {
     const { target, effects } = ability;
+    // A movement ability says how it moves first, before what it does once there
+    const lead: Sentence[] = ability.move ? [moveSentence(ability)] : [];
     const pieces: CardPiece[] = [];
     for (let i = 0; i < effects.length; i++) {
         const eff = effects[i];
@@ -364,7 +438,7 @@ export function abilitySentences(ability: Pick<Ability, 'target' | 'area' | 'use
             pieces.push({ phrase: effectPhrase(eff, whom, true, true), gets, withWeapon: true });
             continue;
         }
-        pieces.push({ phrase: [...effectPhrase(eff, whom, true), ...(eff.type === 'dot' || eff.type === 'hot' ? stacking(eff) : [])], gets });
+        pieces.push({ phrase: [...effectPhrase(eff, whom, true, false, gets === 'enemy'), ...(eff.type === 'dot' || eff.type === 'hot' ? stacking(eff) : [])], gets });
     }
 
     // Each phrase its own sentence, unless an area's or a weapon's: those on the units hit make one
@@ -372,11 +446,24 @@ export function abilitySentences(ability: Pick<Ability, 'target' | 'area' | 'use
     const weapon = !!ability.useWeapon;
     const joins = (p: CardPiece) => 'phrase' in p && (p.gets === target || (!!area && p.gets === 'allies') || (weapon && !!p.withWeapon));
     const joined = pieces.filter(joins).map(p => (p as { phrase: Sentence }).phrase);
-    if ((!area && !weapon) || (!weapon && joined.length === 0)) return pieces.map(p => ('phrase' in p ? finish(p.phrase) : p.sentence));
+    if ((!area && !weapon) || (!weapon && joined.length === 0)) return [...lead, ...pieces.map(p => ('phrase' in p ? finish(p.phrase) : p.sentence))];
     const sentence = finish(weapon
         ? [plain('Weapon attack'), ...(joined.length ? [plain(' that '), ...listParts(joined)] : []), plain(area)]
         : [...listParts(joined), plain(area)]);
     const at = weapon ? 0 : pieces.findIndex(joins);
     const rest = pieces.map(p => (joins(p) ? null : 'phrase' in p ? finish(p.phrase) : p.sentence));
-    return [...rest.slice(0, at), sentence, ...rest.slice(at)].filter((s): s is Sentence => s !== null);
+    return [...lead, ...[...rest.slice(0, at), sentence, ...rest.slice(at)].filter((s): s is Sentence => s !== null)];
+}
+
+/**
+ * How a movement ability moves its caster (Ability.move), as a sentence: 'Teleports up to 5 tiles to a tile in sight,
+ * through enemies.', 'Charges to an enemy up to 4 tiles away.' (a single-target one runs up to the unit it is aimed at).
+ */
+function moveSentence({ target, area, range, move }: Pick<Ability, 'target' | 'area' | 'range' | 'move'>): Sentence {
+    const tiles = `${range} tile${range === 1 ? '' : 's'}`;
+    const toUnit = target !== 'tile' && (!area || area === 'single');
+    const verb = move?.style === 'blink' ? 'Teleports' : toUnit ? 'Charges' : 'Dashes';
+    const where = toUnit ? ` to ${target === 'ally' ? 'an ally' : 'an enemy'} up to ${tiles} away` : ` up to ${tiles} to a tile in sight`;
+    const through = [move?.throughEnemies && 'enemies', move?.throughObstacles && 'obstacles'].filter(Boolean).join(' and ');
+    return finish([plain(`${verb}${where}${through ? `, through ${through}` : ''}`)]);
 }

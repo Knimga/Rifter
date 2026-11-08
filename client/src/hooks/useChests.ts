@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { isEmptied, rollContainerLoot, type ContainerContents } from '../data/gear/containers';
 import { isAdjacent, type Pos } from '../data/world/grid';
-import type { DungeonData } from '../data/world/dungeonGen';
+import type { DungeonData } from '../data/world/gen';
 import type { Item } from '../data/gear';
 import { removeItem } from '../data/gear/inventory';
 import { totalShards, type ShardCounts } from '../data/gear/shards';

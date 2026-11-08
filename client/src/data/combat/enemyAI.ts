@@ -1,9 +1,9 @@
 import { bodySize, isArmed, type EnemyInstance } from '../units/enemies';
-import { mpCostAt, type Ability, type Effect } from './abilities';
+import { mpCostAt, summonsForever, type Ability, type Effect } from './abilities';
 import { aimedArea, isArea, isSelfBurst, unitsInArea } from './areas';
 import { bodyDistance, bodySight, covers, fits, footprint, footprintKeys, inRangeAndSight, posKey, reachableTiles, samePos, type Body, type Pos } from '../world/grid';
 import { shuffle } from '../random';
-import type { ZoneData } from '../world/dungeonGen';
+import type { ZoneData } from '../world/gen';
 import { moveBudget, moveCost } from './combat';
 import { isRooted, stackCap, stackCount, stackKey, type ActiveBuff } from '../units/stats';
 
@@ -66,15 +66,22 @@ export function pickFocus(foes: Foe[], threat: Record<string, number>): string |
 /** A heal: a self or ally ability that heals (or heals over time). */
 const isHeal = (a: Ability) => (a.target === 'self' || a.target === 'ally') && a.effects.some(e => e.type === 'heal' || e.type === 'hot');
 
+/** Whether an ability puts a lasting effect on its target: a buff, or an aura (a self or ally one the AI casts as a buff). */
+const isBuffing = (a: Ability) => a.effects.some(e => e.type === 'buff' || e.type === 'aura');
+
 /**
- * Whether a unit already has all the stacks of ability `a`'s buff it can use (it isn't cast on it again): its
- * maxStacks if the buff sets one, else one (recasting an uncapped buff just to stack it is no use to the AI).
+ * Whether a unit already has all of ability `a`'s lasting effects it can use (it isn't cast on it again): of its buff,
+ * its maxStacks if the buff sets one, else one stack (recasting an uncapped buff just to stack it is no use to the AI);
+ * of its aura, the aura itself, until it runs out.
  */
 const hasBuffFrom = (buffs: readonly ActiveBuff[] | undefined, a: Ability) => {
   const eff = a.effects.find((e): e is Extract<Effect, { type: 'buff' }> => e.type === 'buff');
-  if (!eff) return false;
-  const cap = stackCap(eff);
-  return stackCount(buffs ?? [], stackKey(a.name, eff)) >= (Number.isFinite(cap) ? cap : 1);
+  const hasAura = a.effects.some(e => e.type === 'aura');
+  if (!eff && !hasAura) return false;
+  const cap = eff ? stackCap(eff) : 1;
+  const buffFull = !eff || stackCount(buffs ?? [], stackKey(a.name, eff)) >= (Number.isFinite(cap) ? cap : 1);
+  const auraHeld = !hasAura || !!buffs?.some(b => b.aura && b.source === a.name);
+  return buffFull && auraHeld;
 };
 
 /**
@@ -153,6 +160,13 @@ export function computeEnemyTurn(
   focus?: string,
 ): EnemyAction {
   const { ap, paidTiles } = budget;
+  // NOT YET: movement abilities (Ability.move: a teleport, a charge, a dash) are left out, so a creature never uses
+  // one (warnCreatureMoves warns when a creature has one). Everything else they need is shared with the party's and
+  // ready: abilityMoves.ts (moveAims / planAbilityMove: where one may be aimed, rootBlocks: a rooted unit can't;
+  // executeMoveAction: resolving it), and useActionOutcomes already lands a creature's move (position, dash or
+  // blink). What's left is choosing: when to use one (to close in, to get at a foe a wall hides, to flee) and from
+  // what aim, then giving EnemyAction the move's plan for useEnemyTurn to resolve with executeMoveAction.
+  const abilities = enemy.classData.abilities.filter(a => !a.move);
   const noAction: EnemyAction = { moveTo: null, targetKey: null, abilityUsed: null, abilityTargetPos: null, apSpent: 0, tilesLeft: paidTiles };
 
   // Targets by priority: its focus → highest threat → closest if tied → random if still tied
@@ -206,15 +220,21 @@ export function computeEnemyTurn(
   // 3. Close in on the highest-priority target it can get nearer to (distance over floor, ignoring units,
   //    so enemies queue up behind each other in a corridor rather than wander off)
   //    Not when one of its attacks already reaches a target from where it stands (it only lacks the AP this
-  //    turn): a ranged enemy keeps its distance instead of walking up to the party with AP left over.
+  //    turn): a ranged enemy keeps its distance instead of walking up to the party with AP left over. With no
+  //    attack it can afford (out of MP), all its attacks count: it waits in range for its MP to come back.
+  //    Already beside a target it can't get nearer to that one, so it stays rather than turn to the next one
+  //    (which, on its next step, would leave it no longer beside the first: back and forth until its AP is out).
   const closeIn = (): EnemyAction => {
-    const inRangeNow = enemy.classData.abilities.some(a => a.target === 'enemy' && mpCostAt(a, enemy.level) <= enemy.currentMp &&
+    const allAttacks = abilities.filter(a => a.target === 'enemy');
+    const affordable = allAttacks.filter(a => mpCostAt(a, enemy.level) <= enemy.currentMp);
+    const inRangeNow = (affordable.length > 0 ? affordable : allAttacks).some(a =>
       targets.some(t => inReach(enemy.pos, t, a.range) && !atStackCap(t.buffs, a)));
     if (inRangeNow) return noAction;
     // One move's worth first; a large creature with nowhere nearer it fits on that, as far as its AP takes it
     const reaches = longMap === reachMap ? [reach] : [reach, [...longMap.values()].filter(standsAt)];
     for (const stops of reaches) {
       for (const target of targets) {
+        if (bodyDistance(me(enemy.pos), target) <= 1) return noAction;
         const toTarget = reachableTiles(target.pos, Infinity, isFloor);
         // A large body is as near as its nearest tile
         const stepsFrom = (p: Pos) => Math.min(...footprint(me(p)).map(t => toTarget.get(posKey(t))?.steps ?? Infinity));
@@ -231,7 +251,7 @@ export function computeEnemyTurn(
 
   // 0a. Heal the most hurt unit of its side below half HP that one of its heals reaches: itself (a self heal,
   //     or an ally heal where it stands), or another (an ally heal, from the nearest tile in range and sight)
-  const heals = enemy.classData.abilities.filter(a => isHeal(a) && canUse(a));
+  const heals = abilities.filter(a => isHeal(a) && canUse(a));
   if (heals.length > 0) {
     const hurt = [self, ...side.friends]
       .filter(f => f.hp > 0 && f.hp / f.maxHp < HEAL_BELOW)
@@ -264,7 +284,8 @@ export function computeEnemyTurn(
     }
     return best && act(null, a, null, best);
   };
-  const summons = shuffle(enemy.classData.abilities.filter(a => summonOf(a) && canUse(a)));
+  // (never a forever summon: the party's only, warnCreatureForeverSummons)
+  const summons = shuffle(abilities.filter(a => summonOf(a) && !summonsForever(a) && canUse(a)));
   const out = (a: Ability) => side.summonsOut[a.name] ?? 0;
 
   // 0b. Fewer out than a summon allows: summon (a summoner fills its cap before anything else)
@@ -313,15 +334,15 @@ export function computeEnemyTurn(
   };
 
   // Abilities it can use now, in this turn's (random) order of preference (heals and summons have their own rules)
-  const usable = shuffle(enemy.classData.abilities.filter(a => {
+  const usable = shuffle(abilities.filter(a => {
     if (!canUse(a) || isHeal(a) || summonOf(a)) return false;
     if (a.target === 'self') {
       // Don't re-apply a buff it already has in full (hasBuffFrom)
-      if (a.effects.some(e => e.type === 'buff')) return !hasBuffFrom(enemy.buffs, a);
+      if (isBuffing(a)) return !hasBuffFrom(enemy.buffs, a);
       return true;
     }
     // An ally buff, if someone in reach still lacks it (or a stack of it)
-    if (a.target === 'ally') return a.effects.some(e => e.type === 'buff') && allyBuffAction(a) !== null;
+    if (a.target === 'ally') return isBuffing(a) && allyBuffAction(a) !== null;
     return a.target === 'enemy';
   }));
   if (usable[0]?.target === 'self') return selfAction(usable[0]);
@@ -333,7 +354,7 @@ export function computeEnemyTurn(
   //     hits the most, then from the nearest tile. A burst from self (isSelfBurst) is aimed at the tile it
   //     stands on; other area attacks at a foe in range and sight.
   //     A unit whose abilities are all area attacks uses them on one foe too (it has nothing else).
-  const minAoeHits = enemy.classData.abilities.filter(a => a.target === 'enemy').every(isArea) ? 1 : 2;
+  const minAoeHits = abilities.filter(a => a.target === 'enemy').every(isArea) ? 1 : 2;
   let bestAoe: { pos: Pos; a: Ability; aim: Pos; hits: typeof targets } | null = null;
   for (const a of attacks.filter(isArea)) {
     for (const { pos } of reach) {

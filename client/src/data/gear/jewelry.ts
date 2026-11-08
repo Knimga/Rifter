@@ -9,6 +9,9 @@ import type { ModelLink } from '../../forge/core/types';
 import type { ImplicitDef, JewelryKind } from './types';
 import { magicStats, meleeStats, rangedStats, damageTypeAffixes } from './types';
 
+/** Affixes no ring or amulet rolls: neither threat stat (they belong to armor and weapons). */
+const NO_JEWELRY_AFFIXES: BuffableStat[] = ['increasedThreat', 'reducedThreat'];
+
 export interface JewelryTemplate {
   id: string;                 // stable key; the forge design for it names it (jewelry table)
   name: string;
@@ -32,7 +35,7 @@ export const RINGS: JewelryTemplate[] = [
     valueMultiplier: 1,
     implicit: { stat: 'toughness', baseValue: 1, growthPerLevel: 0.5 },
     invalidAffixes: [
-      ...magicStats, ...damageTypeAffixes(['magic']), 'mind', 'spirit',
+      ...NO_JEWELRY_AFFIXES, ...magicStats, ...damageTypeAffixes(['magic']), 'mind', 'spirit',
       'devotion', 'spellcraft', 'mpRegen'
     ],
     model: 'jewelry.iron-band',
@@ -44,7 +47,7 @@ export const RINGS: JewelryTemplate[] = [
     valueMultiplier: 1,
     implicit: { stat: 'speed', baseValue: 1, growthPerLevel: 0.5 },
     invalidAffixes: [
-      ...magicStats, ...damageTypeAffixes(['fire','ice','lightning','nature','holy']), 
+      ...NO_JEWELRY_AFFIXES, ...magicStats, ...damageTypeAffixes(['fire','ice','lightning','nature','holy']),
       'mind', 'spirit', 'devotion', 'spellcraft', 'mpRegen', 'block', 'glancingBlow',
       'healing', 'healingReceived'
     ],
@@ -57,7 +60,7 @@ export const RINGS: JewelryTemplate[] = [
     valueMultiplier: 1,
     implicit: { stat: 'spirit', baseValue: 1, growthPerLevel: 0.5 },
     invalidAffixes: [
-      ...meleeStats, ...rangedStats, ...damageTypeAffixes(['physical','poison']), 
+      ...NO_JEWELRY_AFFIXES, ...meleeStats, ...rangedStats, ...damageTypeAffixes(['physical','poison']), 
       'strength', 'toughness', 'speed', 'expertise', 'redoubt', 'block', 'parry',
       'glancingBlow', 'dodge'
     ],
@@ -74,7 +77,7 @@ export const AMULETS: JewelryTemplate[] = [
     valueMultiplier: 1,
     implicit: { stat: 'armor', baseValue: 5, growthPerLevel: 0.2 },
     invalidAffixes: [
-      ...magicStats, ...damageTypeAffixes(['fire','ice','lightning']), 
+      ...NO_JEWELRY_AFFIXES, ...magicStats, ...damageTypeAffixes(['fire','ice','lightning']),
       'mind', 'spirit', 'devotion', 'spellcraft', 'mpRegen'
     ],
     model: 'jewelry.carnelian-amulet'
@@ -86,7 +89,7 @@ export const AMULETS: JewelryTemplate[] = [
     valueMultiplier: 1,
     implicit: { stat: 'expertise', baseValue: 2, growthPerLevel: 0.5 },
     invalidAffixes: [
-      ...magicStats, ...damageTypeAffixes(['fire','ice','lightning','nature','holy']), 
+      ...NO_JEWELRY_AFFIXES, ...magicStats, ...damageTypeAffixes(['fire','ice','lightning','nature','holy']),
       'mind', 'spirit', 'devotion', 'spellcraft', 'mpRegen', 'block', 'glancingBlow',
     ],
     model: 'jewelry.malachite-amulet'
@@ -98,7 +101,7 @@ export const AMULETS: JewelryTemplate[] = [
     valueMultiplier: 1,
     implicit: { stat: 'magicResistance', baseValue: 4, growthPerLevel: 0.5 },
     invalidAffixes: [
-      ...meleeStats, ...rangedStats, ...damageTypeAffixes(['physical','poison']), 
+      ...NO_JEWELRY_AFFIXES, ...meleeStats, ...rangedStats, ...damageTypeAffixes(['physical','poison']), 
       'strength', 'toughness', 'speed', 'expertise', 'redoubt', 'block', 'parry',
       'glancingBlow', 'dodge'
     ],

@@ -21,11 +21,11 @@ import { floorMatrix } from '../../viewEngine/camera';
 import { TILE_SIZE } from '../../viewEngine/board';
 import DungeonPreview from './DungeonPreview';
 import SanctumPreview from './SanctumPreview';
+import { BTN, INPUT, Toggle } from './ui';
 
 /** A map the Maps view shows: the Sanctum or a dungeon. */
 type MapKey = 'sanctum' | AreaKey;
 const isMapKey = (k: string): k is MapKey => k === 'sanctum' || k in DUNGEONS || k in PASSAGES;
-import { BTN, INPUT, Toggle } from './ui';
 
 // Cell size follows the game's tile size (TILE_SIZE, the one constant the maps use), so the game view
 // always frames the same 3x3 tiles: if tiles get bigger, models and cells grow with them.

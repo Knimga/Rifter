@@ -30,7 +30,7 @@ export function loot(id: string): LootData {
   return l;
 }
 
-/** The gold one roll gives at level 1: [least, most]. A level L enemy's roll is L times as much (5L to 10L). */
+/** The gold one roll gives at level 1: [least, most]. A level L enemy's roll is L times as much (10L to 15L). */
 export const GOLD_PER_LEVEL: [number, number] = [10, 15];
 
 /**
