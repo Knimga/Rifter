@@ -39,6 +39,9 @@ export const NPCS: NpcData[] = [
   { id: 'ileena', name: 'Ileena', title: 'Arcanist', model: 'npc.ileena' },
   // Short and stout, in leather over dark green, holding a plain mace: no service; he speaks, sending the party to Ardas (a quest)
   { id: 'rix', name: 'Rix', title: 'Mercenary', model: 'npc.rix', holds: { link: 'weapon.plain-mace', weaponType: '1h Maces' } },
+  // A priestess in pale yellow and off-white robes with orange accents, her hood up, holding nothing: no service or
+  // dialogue yet
+  { id: 'serivae', name: 'Serivae', title: 'Priestess', model: 'npc.serivae' },
 ];
 
 /**

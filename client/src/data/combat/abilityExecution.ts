@@ -1,21 +1,20 @@
 import type { Ability, Effect, Trigger, TriggerOutcome } from './abilities';
-import { mpCostAt } from './abilities';
+import { atLevel, levelScale, mpCostAt } from './abilities';
 import { MIN_THREAT_MULTIPLIER, auraToBuff, effectToBuffs, nextEffectSeq, pickDispelled, rootToBuff, tickStack, type ActiveBuff, type ActiveDot, type ActiveHot, type Stats } from '../units/stats';
 import type { AttackCategory, DamageElement, WeaponItem } from '../gear';
 import { WEAPON_TYPE_DATA } from '../gear/weapons';
 import { COMBAT_TEXT_COLOR, DAMAGE_ELEMENT_COLOR } from '../constants';
-import { applyDR, CRIT_MULTIPLIER, getOffense, rollCrit, rollDamage, rollHit, type HitOutcome, type Offense } from './attackResolution';
+import { applyDR, CRIT_MULTIPLIER, damageFactor, getOffense, rollCrit, rollDamage, rollHit, type HitOutcome, type Offense } from './attackResolution';
 import { randInt, rollScaled } from '../random';
 import { bodyCenter, bodyDistance, bodySight, type Pos } from '../world/grid';
 import { basicAttack, bodySize, creatureName, isAlly, type EnemyInstance } from '../units/enemies';
 import type { SummonRequest } from '../units/summons';
+import { actionEvent, record } from '../../devtools/runRecorder'; // TEMP (testing only)
 
 // ─── Shared resolution for every ability used by a party member OR an enemy ──────
 //
 // executeAction is pure: it rolls everything and returns an ActionOutcome describing what
 // happened. The caller (hooks/useActionOutcomes: landOutcome) writes it into party/enemy state.
-
-type BuffEffect = Extract<Effect, { type: 'buff' | 'debuff' }>;
 
 export type UnitRef = { side: 'party'; idx: number } | { side: 'enemy'; id: string };
 
@@ -28,8 +27,12 @@ export interface CombatUnit {
   size?: number;
   /** A creature summoned by the party (ref side 'enemy', fighting on the party's side): it builds threat. */
   allied?: boolean;
+  /** A summoned creature's summoner (its unitKey): what a 'summonsOnly' ability checks. */
+  owner?: string;
   /** Its HP now (none: taken as alive): a unit this action has brought down sets off no triggers. */
   hp?: number;
+  /** Its MP now (none: not known; only the run recorder reads it: devtools/runRecorder.ts). */
+  mp?: number;
   /** Its active buffs: the triggers on it (ActiveBuff.trigger), and what a dispel can take. */
   buffs?: ActiveBuff[];
   /** Its HoTs and DoTs now: what a dispel can take. */
@@ -51,12 +54,12 @@ export const threatKey = (u: Pick<CombatUnit, 'ref' | 'allied'>): string | undef
  * effects among them) and held weapon now, for triggers (none: it sets off none of its own).
  */
 export const memberUnit = (idx: number, name: string | undefined, stats: Stats, pos: Pos,
-  live?: { hp: number; buffs: ActiveBuff[]; hots?: ActiveHot[]; dots?: ActiveDot[]; weapon: WeaponItem | null }): CombatUnit => {
+  live?: { hp: number; mp?: number; buffs: ActiveBuff[]; hots?: ActiveHot[]; dots?: ActiveDot[]; weapon: WeaponItem | null }): CombatUnit => {
   const weaponAttack = live?.weapon ? toAction('weapon-attack', live.weapon) : null;
   const ref: UnitRef = { side: 'party', idx };
   return {
     ref, name: name || `Party[${idx}]`, stats, pos,
-    ...(live ? { hp: live.hp, buffs: live.buffs, hots: live.hots ?? [], dots: live.dots ?? [] } : {}),
+    ...(live ? { hp: live.hp, mp: live.mp, buffs: live.buffs, hots: live.hots ?? [], dots: live.dots ?? [] } : {}),
     ...(weaponAttack ? { weaponAttack } : {}),
   };
 };
@@ -71,12 +74,14 @@ export const creatureUnit = (e: EnemyInstance): CombatUnit => {
     pos: e.pos,
     ...(e.classData.large ? { size: bodySize(e.classData) } : {}),
     hp: e.currentHp,
+    mp: e.currentMp,
     // Its buffs: its kind's passive triggers (always on) are among them
     buffs: e.buffs,
     hots: e.hots,
     dots: e.dots,
     ...(weaponAttack ? { weaponAttack } : {}),
     ...(isAlly(e) ? { allied: true } : {}),
+    ...(e.summon ? { owner: e.summon.owner } : {}),
   };
 };
 
@@ -113,6 +118,11 @@ export interface ActionOutcome {
   changes: UnitChange[];
   floats: FloatEvent[];
   /**
+   * Glows its models pulse with no floating text (unitKey, in the `element`'s color): a magic attack's debuff landing
+   * on a party member (a melee or ranged one shows nothing).
+   */
+  glows?: { unit: string; element?: DamageElement }[];
+  /**
    * Threat changes, the caster's first, then any trigger bearer's that acted (applied by applyThreatChange, for
    * party-side units only: threatKey).
    */
@@ -121,9 +131,10 @@ export interface ActionOutcome {
   summons?: ActionSummon[];
   /**
    * A movement ability moved its caster (abilityMoves.ts executeMoveAction): to where, how many tiles it passed, and how
-   * it is drawn. The rest of the outcome is already worked out from there; whoever lands it places the unit.
+   * it is drawn, and the ability's element (the color a blink's glow shows in once it lands). The rest of the outcome is
+   * already worked out from there; whoever lands it places the unit.
    */
-  move?: { ref: UnitRef; to: Pos; tiles: number; style: 'dash' | 'blink' };
+  move?: { ref: UnitRef; to: Pos; tiles: number; style: 'dash' | 'blink'; element?: DamageElement };
 }
 
 /** A summon of the outcome; `by`: its summoner, when not the action's caster (a trigger's bearer). */
@@ -154,30 +165,30 @@ export function countDownTurns<T extends { turnsLeft: number; fresh?: boolean }>
   return list.map(x => (x.fresh ? { ...x, fresh: undefined } : { ...x, turnsLeft: x.turnsLeft - 1 })).filter(x => x.turnsLeft > 0);
 }
 
-/** Threat a root, a trigger or an aura generates when it lands (like a debuff's, which is its total stat change). */
-const ROOT_THREAT = 5;
-const TRIGGER_THREAT = 5;
-const AURA_THREAT = 5;
-/** Threat each effect a dispel removes generates. */
-const DISPEL_THREAT = 5;
+/**
+ * Threat a buff, debuff, root or aura generates when it lands, and each effect a dispel removes, at level 1: a damage
+ * hit's worth. It grows with the actor's level as damage does (effectThreat), so it keeps its weight against the
+ * threat damage builds.
+ */
+const EFFECT_THREAT = 15;
+
+/** The threat one buff, debuff, root, aura or dispelled effect generates, for an actor of `level`. */
+export const effectThreat = (level: number) => atLevel(EFFECT_THREAT, level);
 
 /**
- * A DoT `actor` puts on someone with `eff`: half its damage bonus (`off`, as of the attack or scaled trigger result
- * that lands it; none: flat) added per turn, its penetration kept for the ticks.
+ * A DoT `actor` puts on someone with `eff`: its damage per turn at the actor's level, with half the actor's damage %
+ * (`off`, as of the attack that lands it; none: no bonus, as a trigger's or a support effect's), its penetration kept
+ * for the ticks. Its ticks build threat for `actor` only when it is on a foe (`hostile`): damage to one's own side,
+ * like a sacrifice, builds none.
  */
-const newDot = (name: string, eff: Extract<Effect, { type: 'dot' }>, actor: CombatUnit, off?: Offense): ActiveDot => ({
-  name, damageElement: eff.damageElement, damagePerTurn: Math.floor(eff.damagePerTurn + (off?.damage ?? 0) / 2),
-  turnsLeft: eff.turns, sourceKey: threatKey(actor),
+const newDot = (name: string, eff: Extract<Effect, { type: 'dot' }>, actor: CombatUnit, off?: Offense, hostile = true): ActiveDot => ({
+  name, damageElement: eff.damageElement,
+  damagePerTurn: Math.round(eff.damagePerTurn * damageFactor(actor.stats.level, off?.damage ?? 0, 0.5)),
+  turnsLeft: eff.turns, sourceKey: hostile ? threatKey(actor) : undefined,
   penetration: off?.penetration, elementPenetration: off?.elementPenetration, damagesMP: eff.damagesMP,
   seq: nextEffectSeq(),
   ...tickStack(name, eff),
 });
-
-/** Total absolute stat change of a buff/debuff (and TRIGGER_THREAT for a trigger): used as its threat value. */
-export function buffMagnitude(eff: BuffEffect): number {
-  return [...Object.values(eff.stats ?? {}), ...Object.values(eff.statsPercent ?? {})]
-    .reduce((sum: number, v) => sum + Math.abs(v ?? 0), eff.trigger ? TRIGGER_THREAT : 0);
-}
 
 /** One event a trigger can react to (Trigger.when), from the bearer's side; attacks carry how the roll went. */
 interface TriggerEvent {
@@ -240,10 +251,19 @@ export function tickDots(dots: ActiveDot[], target: Stats): { damage: number; mp
 }
 
 /**
- * HoT heal for one turn on a unit. Caster healing is baked into healPerTurn when the HoT is created; half the
- * unit's own healingReceived (rounded down, as it stands now) is added to each tick.
+ * HoT healing for one turn on a unit, split into HP and MP (the HoTs that restoresMP). The caster's level and healing %
+ * are baked into healPerTurn when the HoT is created; half the unit's own healingReceived % (as it stands now) is
+ * added to each tick.
  */
-export const tickHots = (hots: ActiveHot[], target: Stats) => hots.reduce((sum, h) => sum + h.healPerTurn + Math.floor(target.healingReceived / 2), 0);
+export function tickHots(hots: ActiveHot[], target: Stats): { heal: number; mpHeal: number } {
+  let heal = 0, mpHeal = 0;
+  for (const h of hots) {
+    const amount = Math.round(h.healPerTurn * Math.max(0, 1 + target.healingReceived / 200));
+    if (h.restoresMP) mpHeal += amount;
+    else heal += amount;
+  }
+  return { heal, mpHeal };
+}
 
 // ─── Action normalisation ─────────────────────────────────────────────────────
 
@@ -301,6 +321,7 @@ export interface ActionWorld {
 export function executeAction(caster: CombatUnit, action: Ability, targets: CombatUnit[], aimAt?: Pos, allies: CombatUnit[] = [], world: ActionWorld = {}): ActionOutcome {
   const changes = new Map<string, UnitChange>();
   const floats: FloatEvent[] = [];
+  const glows: NonNullable<ActionOutcome['glows']> = [];
   const summons: ActionSummon[] = [];
   const threats = new Map<string, UnitThreat>();
 
@@ -321,7 +342,11 @@ export function executeAction(caster: CombatUnit, action: Ability, targets: Comb
   const float = (u: CombatUnit, text: string, color: string, fx?: 'hit' | 'glow', element?: DamageElement) =>
     floats.push({ pos: bodyCenter(u), text, color, ...(fx && { fx: { unit: unitKey(u.ref), kind: fx, ...(element && { element }) } }) });
   // Every roll, to the browser console, in dev builds only (for balancing; players never see it)
-  const log = (by: CombatUnit, target: CombatUnit, msg: string) => { if (COMBAT_LOG) console.log(`[Combat] ${by.name} → ${target.name}: ${msg}`); };
+  const rolls: string[] = []; // for the run recorder (devtools/runRecorder.ts)
+  const log = (by: CombatUnit, target: CombatUnit, msg: string) => {
+    rolls.push(`${by.name} → ${target.name}: ${msg}`);
+    if (COMBAT_LOG) console.log(`[Combat] ${by.name} → ${target.name}: ${msg}`);
+  };
   /** Still standing, after what this action has done to it so far. */
   const alive = (u: CombatUnit) => {
     const c = changes.get(unitKey(u.ref));
@@ -334,22 +359,23 @@ export function executeAction(caster: CombatUnit, action: Ability, targets: Comb
   /**
    * Heal / HoT / DoT / buff / debuff / damage / threat / summon / root from `actor` on a unit that gets it
    * without a hit roll: a friendly unit or the caster, or anyone, for a trigger's results (`flat`: damage reduced
-   * by the recipient's defenses, no crit, and they set off no triggers; amounts flat, unless `scaleAs`: the actor's
-   * own bonuses count, damage's as an attack of that category would have them, as on a buff it cast on itself).
+   * by the recipient's defenses, no crit, and they set off no triggers; amounts exactly as the data reads, whoever
+   * the bearer is: none of the actor's bonuses count).
    */
-  const applySupport = (actor: CombatUnit, recipient: CombatUnit, eff: Effect, o: { ability: string; healMultiplier?: number; flat?: boolean; scaleAs?: AttackCategory }) => {
+  const applySupport = (actor: CombatUnit, recipient: CombatUnit, eff: Effect, o: { ability: string; healMultiplier?: number; flat?: boolean }) => {
     const c = changeFor(recipient);
     const threat = threatOf(actor);
     const onOther = unitKey(recipient.ref) !== unitKey(actor.ref);
+    // Damage builds threat only against a foe: what hits the actor's own side (itself or an ally) builds none
+    const hostile = onSide(actor) !== onSide(recipient);
     const prefix = `${o.ability}-${unitKey(recipient.ref)}`;
-    // Whether the actor's stats add to its amounts (they do, except on a flat trigger result)
-    const bonuses = !o.flat || o.scaleAs !== undefined;
-    // A scaled trigger result's offense: its damage bonus and penetration
-    const off = o.flat && o.scaleAs && 'damageElement' in eff && eff.damageElement ? getOffense(actor.stats, o.scaleAs, eff.damageElement) : undefined;
+    // Whether the actor's stats add to its amounts (they do, except on a flat trigger result). Its level always does
+    const bonuses = !o.flat;
+    const level = actor.stats.level;
     switch (eff.type) {
       case 'damage': {
-        const rolled = rollScaled(eff.minDamage, eff.maxDamage, off?.damage ?? 0);
-        const amount = o.flat ? applyDR(rolled, eff.damageElement, recipient.stats, off?.penetration, off?.elementPenetration) : rolled;
+        const rolled = rollScaled(eff.minDamage, eff.maxDamage, levelScale(level));
+        const amount = o.flat ? applyDR(rolled, eff.damageElement, recipient.stats) : rolled;
         if (eff.damagesMP) {
           c.mpSpent += amount;
           float(recipient, `-${amount} MP`, COMBAT_TEXT_COLOR.mpDamage, 'hit');
@@ -358,15 +384,16 @@ export function executeAction(caster: CombatUnit, action: Ability, targets: Comb
           float(recipient, `-${amount}`, o.flat ? DAMAGE_ELEMENT_COLOR[eff.damageElement] : COMBAT_TEXT_COLOR.damage, 'hit');
         }
         if (o.flat) log(actor, recipient, `TRIGGERED ${amount}${eff.damagesMP ? ' MP' : ''} (${eff.damageElement})`);
-        if (onOther) threat.gain += damageThreat(amount, eff.damagesMP);
+        if (hostile) threat.gain += damageThreat(amount, eff.damagesMP);
         break;
       }
       case 'heal': {
         // Heals crit like magic damage of their element: magic crit% + that element's crit% (HoTs and flat
-        // heals never crit). The recipient's healingReceived is added once, after the crit and multiplier.
+        // heals never crit). The recipient's healingReceived % applies once, after the crit and multiplier.
         const crit = !o.flat && rollCrit(getOffense(actor.stats, 'magic', eff.damageElement));
-        const base = rollScaled(eff.minHeal, eff.maxHeal, bonuses ? actor.stats.healing : 0);
-        const amount = Math.max(0, base) * (crit ? CRIT_MULTIPLIER : 1) * (o.healMultiplier ?? 1) + recipient.stats.healingReceived;
+        const base = rollScaled(eff.minHeal, eff.maxHeal, damageFactor(level, bonuses ? actor.stats.healing : 0));
+        const received = o.flat ? 1 : Math.max(0, 1 + recipient.stats.healingReceived / 100);
+        const amount = Math.round(base * (crit ? CRIT_MULTIPLIER : 1) * (o.healMultiplier ?? 1) * received);
         if (eff.restoresMP) c.mpRestored += amount;
         else c.heal += amount;
         log(actor, recipient, `HEAL${crit ? ' CRIT' : ''} ${amount}${eff.restoresMP ? ' MP' : ''} (${eff.damageElement})`);
@@ -381,29 +408,28 @@ export function executeAction(caster: CombatUnit, action: Ability, targets: Comb
       case 'hot':
         c.hots.push({
           name: o.ability, damageElement: eff.damageElement,
-          healPerTurn: bonuses ? Math.floor(eff.healPerTurn + actor.stats.healing / 2) : eff.healPerTurn, turnsLeft: eff.turns,
+          healPerTurn: Math.round(eff.healPerTurn * damageFactor(level, bonuses ? actor.stats.healing : 0, 0.5)), restoresMP: eff.restoresMP, turnsLeft: eff.turns,
           seq: nextEffectSeq(),
           ...tickStack(o.ability, eff),
         });
         float(recipient, '+HoT', COMBAT_TEXT_COLOR.heal, 'glow', eff.damageElement);
         break;
       case 'dot': {
-        // Off an attack, a DoT scales with the attacker's offense (resolveAttack); here it is flat, unless a
-        // scaled trigger result (the same way as off an attack)
-        const dot = newDot(o.ability, eff, actor, off);
+        // Off an attack, a DoT scales with the attacker's offense (resolveAttack); here it is flat
+        const dot = newDot(o.ability, eff, actor, undefined, hostile);
         c.dots.push(dot);
         float(recipient, `${o.ability}!`, COMBAT_TEXT_COLOR.dot, 'glow', eff.damageElement);
-        if (onOther) threat.gain += damageThreat(dot.damagePerTurn, eff.damagesMP);
+        if (hostile) threat.gain += damageThreat(dot.damagePerTurn, eff.damagesMP);
         break;
       }
       case 'buff':
       case 'debuff':
         c.buffs.push(...effectToBuffs(eff, prefix, o.ability, unitKey(actor.ref)));
         float(recipient, `${o.ability}!`, eff.type === 'debuff' && onOther ? COMBAT_TEXT_COLOR.dot : COMBAT_TEXT_COLOR.heal, 'glow', eff.damageElement);
-        threat.gain += buffMagnitude(eff);
+        threat.gain += effectThreat(level);
         break;
       case 'threat': {
-        const amount = eff.amount ?? 0;
+        const amount = Math.sign(eff.amount ?? 0) * atLevel(Math.abs(eff.amount ?? 0), level);
         if (amount > 0) threat.gain += amount;
         else threat.loss = (threat.loss ?? 0) - amount;
         threat.percent = (threat.percent ?? 0) + (eff.percent ?? 0);
@@ -413,19 +439,19 @@ export function executeAction(caster: CombatUnit, action: Ability, targets: Comb
       }
       case 'summon':
         summons.push({
-          creature: eff.creature, turns: eff.turns, max: eff.max ?? 1, ability: o.ability,
+          creature: eff.creature, turns: eff.turns, max: eff.max ?? 1, ability: o.ability, ...(eff.damageElement && { element: eff.damageElement }),
           ...(actor !== caster ? { by: actor } : action.target === 'tile' && aimAt ? { at: { ...aimAt } } : {}),
         });
         break;
       case 'root':
         c.buffs.push(rootToBuff(eff, prefix, o.ability));
         float(recipient, 'Rooted!', COMBAT_TEXT_COLOR.dot, 'glow', eff.damageElement);
-        threat.gain += ROOT_THREAT;
+        threat.gain += effectThreat(level);
         break;
       case 'aura':
         c.buffs.push(auraToBuff(eff, prefix, o.ability));
         float(recipient, `${o.ability}!`, COMBAT_TEXT_COLOR.heal, 'glow', eff.damageElement);
-        threat.gain += AURA_THREAT;
+        threat.gain += effectThreat(level);
         break;
       case 'dispel': {
         // On a friendly unit it takes what hurts it, on a hostile one what helps it. It reads the unit as it was when
@@ -438,7 +464,7 @@ export function executeAction(caster: CombatUnit, action: Ability, targets: Comb
         c.dispelled.push(...seqs);
         float(recipient, seqs.length === 1 ? `Dispelled ${names[0]}!` : `Dispelled ×${seqs.length}!`,
           friendly ? COMBAT_TEXT_COLOR.heal : COMBAT_TEXT_COLOR.dot, 'glow', eff.damageElement);
-        threat.gain += seqs.length * DISPEL_THREAT;
+        threat.gain += seqs.length * effectThreat(level);
         break;
       }
     }
@@ -472,9 +498,7 @@ export function executeAction(caster: CombatUnit, action: Ability, targets: Comb
           : eff.appliesTo === 'caster' ? bearer
           : eff.appliesTo === 'source' ? sourceUnit(t.sourceKey)
           : undefined;
-        // On a buff the bearer cast on itself, its own bonuses count (damage's as of the attack that set it off)
-        const own = t.sourceKey === unitKey(bearer.ref);
-        if (recipient) applySupport(bearer, recipient, eff, { ability: name, flat: true, scaleAs: own ? ev.category ?? 'magic' : undefined });
+        if (recipient) applySupport(bearer, recipient, eff, { ability: name, flat: true });
       }
     }
   }
@@ -549,7 +573,9 @@ export function executeAction(caster: CombatUnit, action: Ability, targets: Comb
     if (dotEffects.length > 0 && damageEffects.length === 0) float(target, 'Hit!', COMBAT_TEXT_COLOR.dot, 'hit');
     for (const debuffEffect of debuffEffects) {
       c.buffs.push(...effectToBuffs(debuffEffect, `${act.name}-${unitKey(target.ref)}`, act.name, unitKey(attacker.ref)));
-      threat.gain += buffMagnitude(debuffEffect);
+      threat.gain += effectThreat(attacker.stats.level);
+      // A foe's magic debuff on a party member pulses its model's glow, in the debuff's element
+      if (category === 'magic' && onSide(attacker) === 'enemy' && target.ref.side === 'party') glows.push({ unit: unitKey(target.ref), element: debuffEffect.damageElement });
     }
     for (const rootEffect of rootEffects) applySupport(attacker, target, rootEffect, { ability: act.name });
     for (const dispelEffect of dispelEffects) applySupport(attacker, target, dispelEffect, { ability: act.name });
@@ -597,9 +623,12 @@ export function executeAction(caster: CombatUnit, action: Ability, targets: Comb
   const own = changes.get(unitKey(caster.ref));
   if (own) for (const list of [own.buffs, own.hots, own.dots]) for (const x of list) x.fresh = true;
 
-  return {
+  const outcome: ActionOutcome = {
     changes: [...changes.values()], floats,
     threat: [...threats.values()],
+    ...(glows.length ? { glows } : {}),
     ...(summons.length ? { summons } : {}),
   };
+  record('action', () => actionEvent(caster, action, targets, [caster, ...targets, ...allies], rolls, outcome));
+  return outcome;
 }

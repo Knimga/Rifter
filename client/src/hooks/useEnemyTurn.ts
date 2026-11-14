@@ -8,6 +8,7 @@ import { computeEnemyTurn, pickFocus, type Foe, type Friend } from '../data/comb
 import type { Ability } from '../data/combat/abilities';
 import { aimedArea, areaTone, isArea, unitsInArea } from '../data/combat/areas';
 import { bodyCenter, type Pos } from '../data/world/grid';
+import { executeMoveAction } from '../data/combat/abilityMoves';
 import { creatureUnit, executeAction, unitKey, type ActionOutcome, type ActionWorld, type CombatUnit } from '../data/combat/abilityExecution';
 import { isOnMap } from '../data/units/party';
 
@@ -184,10 +185,10 @@ export function useEnemyTurn(
             // The caster where it now stands, as it is now (its stats, HP and buffs)
             const by = caster(finalPos, latest);
             // Its own side in the area (itself where it now stands, and the rest as they are now): its 'allies'
-            // effects, and an ally area ability's targets. An enemy's side is the other enemies; an ally's, the party
-            // and its fellow allies.
+            // effects, and an ally area ability's targets. An enemy's side is the other enemies in the fight (aggroed,
+            // as its friends were when it planned the step); an ally's, the party and its fellow allies.
             const sideUnits = (): CombatUnit[] => {
-              const creatures = refs.enemies.current.filter(c => c.zoneId === z.id && c.currentHp > 0 && c.id !== enemy.id && isHostile(c) === isHostile(enemy));
+              const creatures = refs.enemies.current.filter(c => c.zoneId === z.id && c.currentHp > 0 && c.id !== enemy.id && isAlly(c) === ally && (ally || c.aggroed));
               const party = ally ? partyUnits.filter(u => u.hp > 0) : [];
               return [by, ...party, ...creatures.map(creatureUnit)];
             };
@@ -208,9 +209,12 @@ export function useEnemyTurn(
             // Its side in the area: an area ability's 'allies' (for an ally one, the same units as its targets)
             const allies = !aoeTiles ? [] : ability.target === 'ally' ? targets : unitsInArea(aoeTiles, sideUnits());
             // The creature turns to face its target, the ability lands (a 'tile' one on its aimed tile, e.g. where a
-            // summon appears), then its next step. NOT YET: a movement ability (Ability.move) would resolve through
-            // executeMoveAction here instead (the AI doesn't choose them yet: enemyAI.ts); landing it is ready.
-            const landsIn = refs.applyOutcome.current(executeAction(by, ability, targets, action.abilityTargetPos ?? undefined, allies, refs.actionWorld()), by, aimAt);
+            // summon appears; a movement ability first moves it along its plan), then its next step.
+            const aimed = action.abilityTargetPos ?? undefined;
+            const outcome = action.move
+              ? executeMoveAction(by, ability, action.move, targets, aimed, allies, refs.actionWorld())
+              : executeAction(by, ability, targets, aimed, allies, refs.actionWorld());
+            const landsIn = refs.applyOutcome.current(outcome, by, aimAt);
             if (landsIn > 0) later(landsIn, next);
             else next();
           });

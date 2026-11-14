@@ -3,7 +3,7 @@
 // proficiencies, and abilities.
 import { lazy, Suspense, useMemo, useRef, useState, type MouseEvent } from 'react';
 import { CLASSES, ROLE_ICONS, type ClassKey, type ArmorProficiency, type Role } from '../data/units/classes';
-import { capitalizeWords, formatPassiveValue, formatStatLabel, passiveEffectSentences } from '../data/detailStrings';
+import { capitalizeWords, formatPassiveValue, formatStatLabel, passiveEffectSentence } from '../data/detailStrings';
 import { heldWeapon } from '../data/gear';
 import { HERO_NAMES, startingGear } from '../data/units/party';
 import { pick } from '../data/random';
@@ -193,17 +193,16 @@ export default function CharacterSelectScreen({ onStart, onSkipToSanctum, onBack
                   <div>
                     <PanelTitle className="mb-3">Passives</PanelTitle>
                     {Object.entries(focus.passives).map(([stat, p]) => (
-                      <p key={stat} className="m-0 mb-2 text-[13px] leading-[1.4]">
-                        <span className="font-medium text-rift-ink">{formatPassiveValue(stat, p)}</span>{' '}
-                        <span className="text-rift-muted">{formatStatLabel(stat)}</span>
-                        <span className="block text-[11px] text-rift-label">{p.name}</span>
+                      <p key={stat} className="m-0 mb-2 leading-[1.4]">
+                        <span className="block text-[13px] font-medium text-rift-ink">{p.name}</span>
+                        <span className="block text-[11px] text-rift-muted">{formatPassiveValue(stat, p)} {formatStatLabel(stat)}</span>
                       </p>
                     ))}
-                    {/* Its passive effects: what each does, in words, and its name */}
+                    {/* Its passive effects: its name, then what it does in words */}
                     {focus.passiveEffects?.map((p) => (
-                      <div key={p.name} className="mb-2 text-[13px] leading-[1.4] text-rift-muted">
-                        {passiveEffectSentences(p).map((s, i) => <EffectSentence key={i} parts={s} />)}
-                        <span className="block text-[11px] text-rift-label">{p.name}</span>
+                      <div key={p.name} className="mb-2 leading-[1.4]">
+                        <span className="block text-[13px] font-medium text-rift-ink">{p.name}</span>
+                        <div className="text-[11px] text-rift-muted"><EffectSentence parts={passiveEffectSentence(p)} /></div>
                       </div>
                     ))}
                   </div>

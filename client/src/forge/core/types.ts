@@ -142,6 +142,11 @@ export interface Halo {
   t?: Tone;
   /** Where a fading part (PartFade) starts this halo's color, sRGB 0..1 (none: it doesn't fade). */
   from?: [number, number, number];
+  /**
+   * Stretched on screen (Mesh.flare): its width and height as fractions of `r`, so it is an oval, always upright on
+   * screen whatever the model's facing (a thin one is a streak: diffraction spikes). None: round.
+   */
+  s?: [number, number];
   /** Index into partNames: the part it moves with. */
   part: number;
 }

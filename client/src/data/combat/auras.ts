@@ -6,7 +6,8 @@
 // An aura's effects are written on the units inside it, as entries tagged `fromAura` that never count down
 // (turnsLeft Infinity): so stats, turn ticks (a HoT or DoT ticks at the start of its unit's turn, as any), triggers and
 // status markers work on them with no more rules. A buff or debuff takes effect at once.
-import type { Aura, AuraEffect } from './abilities';
+import { atLevel, type Aura, type AuraEffect } from './abilities';
+import { damageFactor } from './attackResolution';
 import { blastRadius } from './areas';
 import { effectToBuffs, type ActiveBuff, type ActiveDot, type ActiveHot, type AuraTag, type DamageElement } from '../units/stats';
 import { bodyDistance, type Body } from '../world/grid';
@@ -33,7 +34,9 @@ export interface AuraUnit {
   body: Body;
   /** The zone it is in: auras reach only within one. */
   zone: number;
-  /** Its healing, which its HoTs' amounts take half of (as a HoT cast by it). */
+  /** Its level, which its HoTs' and DoTs' amounts grow with (as a HoT or DoT cast by it: levelScale). */
+  level: number;
+  /** Its healing %, which its HoTs' amounts take half of (as a HoT cast by it). */
   healing: number;
   /** Where the threat of its DoTs' ticks goes (threatKey): none for a hostile creature. */
   threatKey?: string;
@@ -107,13 +110,14 @@ function entriesOf(want: AuraWant): EffectLists {
     }
     case 'hot':
       return { ...none, hots: [{
-        name, damageElement: effect.damageElement, healPerTurn: Math.floor(effect.healPerTurn + bearer.healing / 2),
-        turnsLeft: Infinity, fromAura,
+        name, damageElement: effect.damageElement, healPerTurn: Math.round(effect.healPerTurn * damageFactor(bearer.level, bearer.healing, 0.5)),
+        restoresMP: effect.restoresMP, turnsLeft: Infinity, fromAura,
       }] };
     case 'dot':
       return { ...none, dots: [{
-        name, damageElement: effect.damageElement, damagePerTurn: effect.damagePerTurn, turnsLeft: Infinity,
-        sourceKey: bearer.threatKey, damagesMP: effect.damagesMP, fromAura,
+        name, damageElement: effect.damageElement, damagePerTurn: atLevel(effect.damagePerTurn, bearer.level), turnsLeft: Infinity,
+        // Only a DoT on foes builds its bearer threat (one on the bearer's own side, a sacrifice, builds none)
+        sourceKey: effect.appliesTo === 'enemies' ? bearer.threatKey : undefined, damagesMP: effect.damagesMP, fromAura,
       }] };
   }
 }

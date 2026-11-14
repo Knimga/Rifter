@@ -5,7 +5,8 @@
 //
 // Rift keys (keystones, one per dungeon: DungeonConfig.keyName): the party keeps them on its keyring, apart from
 // the inventory, and never loses them (using one to open a rift doesn't use it up). It starts with none (the Crypt's
-// is found in the Dark Tunnel: STARTING_KEYS); every boss drops one the party doesn't have yet (none once it has them all).
+// is found in the Dark Tunnel: STARTING_KEYS); a boss drops the next key the party doesn't have yet, tier by tier
+// (bossKeyDrop: DungeonConfig.tier and stronghold).
 import type { ModelLink } from '../../forge/core/types';
 import type { RGB } from '../../forge/core/vec';
 import { DUNGEONS, type DungeonKey } from './dungeons';
@@ -60,13 +61,31 @@ export const RIFTER_READY_START: { quests: QuestLog; keys: readonly DungeonKey[]
 };
 
 /**
- * The key a boss drops: one of a dungeon the party has no key to yet (`owned`), and that isn't already lying
- * somewhere waiting to be picked up (`lying`), chosen at random; null when there is none left.
+ * The key the boss of dungeon `from` drops, from the keys the party has no key to yet (`owned`) and that aren't already
+ * lying somewhere waiting to be picked up (`lying`). A boss drops a key of its own tier (a stronghold's boss, of the
+ * next tier): one of the tier's other dungeons, at random; once the party has all of those (owned, not just dropped),
+ * the tier's stronghold. Null when there is none left in that tier (a boss of an earlier tier never drops a later
+ * tier's key: the stronghold's boss opens the next tier).
  */
-export function bossKeyDrop(owned: readonly DungeonKey[], lying: readonly DungeonKey[] = []): DungeonKey | null {
-  const left = Object.keys(DUNGEONS).filter((k) => !owned.includes(k) && !lying.includes(k));
-  return left.length ? pick(left) : null;
+export function bossKeyDrop(from: DungeonKey, owned: readonly DungeonKey[], lying: readonly DungeonKey[] = []): DungeonKey | null {
+  const tier = DUNGEONS[from].tier + (DUNGEONS[from].stronghold ? 1 : 0);
+  const inTier = Object.keys(DUNGEONS).filter((k) => DUNGEONS[k].tier === tier);
+  const others = inTier.filter((k) => !DUNGEONS[k].stronghold);
+  const left = others.filter((k) => !owned.includes(k) && !lying.includes(k));
+  if (left.length) return pick(left);
+  if (!others.every((k) => owned.includes(k))) return null;
+  return inTier.find((k) => DUNGEONS[k].stronghold && !owned.includes(k) && !lying.includes(k)) ?? null;
+}
+
+// A tier has one stronghold at most (bossKeyDrop drops the first): warned at load
+for (const tier of new Set(Object.values(DUNGEONS).map((d) => d.tier))) {
+  const holds = Object.keys(DUNGEONS).filter((k) => DUNGEONS[k].tier === tier && DUNGEONS[k].stronghold);
+  if (holds.length > 1) console.warn(`dungeons › tier ${tier}: more than one stronghold (${holds.join(', ')}); only the first drops`);
 }
 
 /** A rift color as CSS (a usable rift's tile glow). */
 export const riftGlowCss = ([r, g, b]: RGB): string => `rgb(${r} ${g} ${b})`;
+
+/** What announces a rift key put on the keyring ("Necrotic Key Received"), in its rift's color. */
+export const keyReceived = (key: DungeonKey): { text: string; color: string } =>
+  ({ text: `${DUNGEONS[key].keyName} Received`, color: riftGlowCss(DUNGEONS[key].riftColor) });

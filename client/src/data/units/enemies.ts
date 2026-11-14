@@ -45,7 +45,7 @@ export interface CreatureClassData {
   passives?: Record<string, Passive>;
   scalingPassives?: ScalingPassive[];
   // Lasting effects it has for good (on it from the start, never run out: PassiveEffect, see passiveEffectEntries): a
-  // trigger (striking back when parried), an aura (a shaman's ward on the creatures round it), a buff, debuff, root, HoT or DoT
+  // trigger (striking back when parried) or an aura (a shaman's ward on the creatures round it). Stat bonuses are `passives`
   passiveEffects?: PassiveEffect[];
 
   // Forge design this creature renders as; each instance gets its own look (seeded from its id)
@@ -54,6 +54,14 @@ export interface CreatureClassData {
   // A large creature fills 2×2 tiles (its `pos` the top-left one): it squeezes through narrow ways but stops only
   // where it fits, and is reached, seen and hit as a whole (world/grid.ts bodies). Its design is built for 2 tiles.
   large?: boolean;
+
+  // It carries a shield (its model shows one): without one a creature never blocks, whatever gives it block (stats.ts
+  // applyShieldRule). Set it with the model's shield, as a member has one equipped
+  shield?: boolean;
+
+  // It never moves (a totem): the AI keeps it on its tile, whatever its movement, and a forever summon of the party's
+  // stays where it was called up rather than marching with it (followsParty). It still acts: abilities, auras.
+  immobile?: boolean;
 
   // Hostile creatures only (EnemyClassData); a summon drops nothing and is worth no XP
   dropChance?: number;   // items dropped on death: its whole part guaranteed, its fraction the chance of one more (1.2: one, and 20% for a second)
@@ -80,6 +88,7 @@ export interface SummonInfo {
   ability: string;    // the ability that summoned it (casting it again with its max out replaces the oldest)
   turnsLeft: number | 'forever'; // its own turns left: it vanishes when this runs out (counted down at the end of each, creatureTurnEnd); 'forever' never does
   allied: boolean;    // on the party's side (summoned by a party member or one of its allies); else the enemies'
+  element?: DamageElement; // its summoning ability's element: the color its model's glow pulses in as it vanishes (none: physical's)
 }
 
 /**
@@ -173,15 +182,15 @@ export function generateEnemyInstance(
   const pointsSpent = generateEnemyAttributePoints(level, classData.highAttributes, classData.lowAttributes);
   const passive = passiveEffectEntries(classData.passiveEffects, id);
   const input = { mode: 'enemy', classData, pointsSpent, level } as const;
-  const stats = passive.buffs.length ? recomputeStats(input, passive.buffs) : calculateStats(input);
+  const stats = passive.length ? recomputeStats(input, passive) : calculateStats(input);
 
   return {
     id,
     classData,
     level,
     pointsSpent,
-    buffs: passive.buffs,
-    hots: passive.hots,
+    buffs: passive,
+    hots: [],
     stats,
     pos,
     currentHp: stats.hp,
@@ -189,7 +198,7 @@ export function generateEnemyInstance(
     aggroed: false,
     zoneId,
     groupId,
-    dots: passive.dots,
+    dots: [],
   };
 }
 
@@ -214,10 +223,17 @@ export const isHostile = (e: EnemyInstance) => !e.summon?.allied;
 export const isAlly = (e: EnemyInstance): e is EnemyInstance & { summon: SummonInfo } => !!e.summon?.allied;
 
 /**
- * One of the party's forever summons (abilities.ts 'summon' effect, `turns: 'forever'`): it outlasts fights, marches
- * with the party (movement.ts marchParty), goes through doors with it and joins every fight it starts.
+ * One of the party's forever summons (abilities.ts 'summon' effect, `turns: 'forever'`): it outlasts fights and joins
+ * every fight in its zone. It marches with the party (movement.ts marchParty) and goes through doors with it, unless
+ * it is immobile (followsParty).
  */
 export const isForeverSummon = (e: EnemyInstance) => isAlly(e) && e.summon.turnsLeft === 'forever';
+
+/** A creature that never moves (CreatureClassData.immobile). */
+export const isImmobile = (e: Pick<EnemyInstance, 'classData'>) => !!e.classData.immobile;
+
+/** A forever summon that travels with the party (marches, goes through doors): all but the immobile ones, which stay where they were called up. */
+export const followsParty = (e: EnemyInstance) => isForeverSummon(e) && !isImmobile(e);
 
 /**
  * A creature's basic attack (its "weapon", for a trigger's weaponAttack): its first enemy-target ability with no
@@ -248,21 +264,19 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
     attributes: { toughness: 2, strength: 2 },
     highAttributes: ['strength', 'finesse'],
     lowAttributes: ['mind', 'spirit'],
-    baseHp: 15,
+    baseHp: 25,
     baseArmor: 15,
     resistances: { shadow: 20 },
     passives: {
-      glancingBlow: { name: 'Boney', flat: 10 }
+      glancingBlow: { flat: 5 }
     },
     abilities: [
       {
         name: 'Rusted Sword',
-        mpCost: 0,
-        apCost: 1,
-        range: 1,
+        mpCost: 0, apCost: 1, range: 1,
         target: 'enemy',
         attackCategory: 'melee',
-        effects: [{ type: 'damage', appliesTo: 'target', damageElement: 'physical', minDamage: 4, maxDamage: 6 }],
+        effects: [{ type: 'damage', appliesTo: 'target', damageElement: 'physical', minDamage: 12, maxDamage: 18 }],
       },
     ],
     dropChance: 0.4,
@@ -276,32 +290,28 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
     attributes: { strength: 4, toughness: 4 },
     highAttributes: ['toughness', 'strength'],
     lowAttributes: ['finesse', 'mind'],
-    baseHp: 20,
+    baseHp: 40,
     baseArmor: 12,
     passives: {
-      hpRegen: { name: 'Regeneration', flat: 1 }
+      hpRegen: { flat: 1 }
     },
     abilities: [
       {
         name: 'Bite',
-        mpCost: 0,
-        apCost: 1,
-        range: 1,
+        mpCost: 0, apCost: 1, range: 1,
         target: 'enemy',
         attackCategory: 'melee',
-        effects: [{ type: 'damage', appliesTo: 'target', damageElement: 'physical', minDamage: 5, maxDamage: 7 }],
+        effects: [{ type: 'damage', appliesTo: 'target', damageElement: 'physical', minDamage: 16, maxDamage: 23 }],
       },
       {
         name: 'Fetid Breath',
-        mpCost: 6,
-        apCost: 2,
-        range: 1,
+        mpCost: 18, apCost: 2, range: 1,
         target: 'enemy',
         attackCategory: 'melee',
         displayElement: 'poison',
         effects: [
-          {type: 'damage', appliesTo: 'target', damageElement: 'poison', minDamage: 4, maxDamage: 5 },
-          {type: 'dot', appliesTo: 'target', damageElement: 'poison', damagePerTurn: 5, turns: 3}
+          {type: 'damage', appliesTo: 'target', damageElement: 'poison', minDamage: 14, maxDamage: 18 },
+          {type: 'dot', appliesTo: 'target', damageElement: 'poison', damagePerTurn: 15, turns: 3}
         ]
       }
     ],
@@ -316,38 +326,34 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
     attributes: { mind: 3, spirit: 3 },
     highAttributes: ['mind', 'spirit'],
     lowAttributes: ['strength', 'toughness'],
-    baseHp: 20,
+    baseHp: 40,
     baseArmor: 10,
     resistances: { shadow: 20, ice: 20 },
     passives: {
-      dodge: { name: 'Ethereal', flat: 10 },
-      magicHit: { name: 'Vengeful', flat: 5 }
+      dodge: { flat: 10 },
+      magicHit: { flat: 5 }
     },
     abilities: [
       {
         name: 'Black Bite',
-        mpCost: 3,
-        apCost: 1,
-        range: 5,
+        mpCost: 9, apCost: 1, range: 5,
         target: 'enemy',
         displayElement: 'ice',
         attackCategory: 'magic',
         effects: [
-          { type: 'damage', appliesTo: 'target', damageElement: 'shadow', minDamage: 1, maxDamage: 1 },
-          { type: 'damage', appliesTo: 'target', damageElement: 'ice', minDamage: 1, maxDamage: 1 }
+          { type: 'damage', appliesTo: 'target', damageElement: 'shadow', minDamage: 5, maxDamage: 5 },
+          { type: 'damage', appliesTo: 'target', damageElement: 'ice', minDamage: 5, maxDamage: 5 }
         ]
       },
       {
         name: 'Gravechill',
-        mpCost: 8,
-        apCost: 2,
-        range: 5,
+        mpCost: 24, apCost: 2, range: 5,
         target: 'enemy',
         area: 'blast1',
         displayElement: 'ice',
         attackCategory: 'magic',
         effects: [
-          { type: 'damage', appliesTo: 'target', damageElement: 'shadow', minDamage: 4, maxDamage: 7 },
+          { type: 'damage', appliesTo: 'target', damageElement: 'shadow', minDamage: 14, maxDamage: 24 },
           { type: 'debuff', appliesTo: 'target', damageElement: 'ice', stats: { dodge: -10 }, turns: 1 }
         ]
       }
@@ -363,45 +369,42 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
     attributes: { mind: 3, strength: 3, toughness: 3 },
     highAttributes: ['mind', 'strength'],
     lowAttributes: ['spirit', 'finesse'],
-    baseHp: 30,
+    skills: { expertise: 4 },
+    baseHp: 70,
     baseArmor: 25,
     resistances: { shadow: 20, ice: 20 },
     passives: {
-      glancingBlow: { name: 'Armored', flat: 10 },
-      parry: { name: 'Ancient Warrior', flat: 5 },
-      meleeHit: { name: 'Ancient Warrior', flat: 5 }
+      glancingBlow: { flat: 10 },
+      parry: { flat: 5 },
+      meleeHit: { flat: 5 }
     },
     passiveEffects: [
-      { name: 'Chill', damageElement: 'ice', effect: { type: 'buff', trigger: {
+      { name: 'Chill', damageElement: 'ice', trigger: {
         when: 'attacking', on: 'hit', categories: ['melee'], chance: 100,
         effects: [
-          {type: 'damage', appliesTo: 'target', damageElement: 'ice', minDamage: 1, maxDamage: 1 }]
-      }}}
+          {type: 'damage', appliesTo: 'target', damageElement: 'ice', minDamage: 4, maxDamage: 6 }]
+      }}
     ],
     abilities: [
       {
         name: 'Ancient Claymore',
-        apCost: 2,
-        mpCost: 0,
-        range: 1,
+        mpCost: 0, apCost: 2, range: 1,
         target: 'enemy',
         displayElement: 'physical',
         attackCategory: 'melee',
         effects: [
-          {type: 'damage', appliesTo: 'target', damageElement: 'physical', minDamage: 5, maxDamage: 7 }
+          {type: 'damage', appliesTo: 'target', damageElement: 'physical', minDamage: 15, maxDamage: 21 }
         ]
       },
       {
         name: 'Frozen Grasp',
-        apCost: 1,
-        mpCost: 8,
-        range: 3,
+        mpCost: 24, apCost: 1, range: 3,
         target: 'enemy',
         displayElement: 'ice',
         attackCategory: 'magic',
         effects: [
           { type: 'root', appliesTo: 'target', damageElement: 'ice', turns: 3 },
-          {type: 'damage', appliesTo: 'target', damageElement: 'ice', minDamage: 3, maxDamage: 4 }
+          {type: 'damage', appliesTo: 'target', damageElement: 'ice', minDamage: 12, maxDamage: 14 }
         ]
       }
     ],
@@ -415,36 +418,32 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
     attributes: { toughness: 2, mind: 4 },
     highAttributes: ['toughness', 'mind'],
     lowAttributes: ['finesse', 'speed'],
-    baseHp: 15,
+    baseHp: 25,
     baseArmor: 1,
     resistances: { fire: 30, physical: 20 },
     passives: {
-      magicHit: { name: 'Fireborn', flat: 5 }
+      magicHit: { flat: 5 }
     },
     abilities: [
       {
         name: 'Lava Lick',
-        mpCost: 0,
-        apCost: 1,
-        range: 1,
+        mpCost: 0, apCost: 1, range: 1,
         target: 'enemy',
         attackCategory: 'melee',
         effects: [
-          { type: 'damage', appliesTo: 'target', damageElement: 'fire', minDamage: 4, maxDamage: 7 }
+          { type: 'damage', appliesTo: 'target', damageElement: 'fire', minDamage: 12, maxDamage: 21 }
         ],
       },
       {
         name: 'Flame Belch',
-        mpCost: 8,
-        apCost: 2,
-        range: 0,
+        mpCost: 24, apCost: 2, range: 0,
         area: 'blast1',
         target: 'enemy',
         attackCategory: 'magic',
         displayElement: 'fire',
         effects: [
-          { type: 'dot', appliesTo: 'target', damageElement: 'fire', damagePerTurn: 5, turns: 3 },
-          { type: 'debuff', appliesTo: 'target', stats: { fireResistance: -20 }, turns: 1}
+          { type: 'dot', appliesTo: 'target', damageElement: 'fire', damagePerTurn: 20, turns: 3, maxStacks: 3 },
+          { type: 'debuff', appliesTo: 'target', stats: { fireResistance: -20 }, turns: 3, maxStacks: 3 }
         ]
       }
     ],
@@ -459,23 +458,21 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
     attributes: { strength: 3, speed: 3, toughness: 3 },
     highAttributes: ['strength', 'speed'],
     lowAttributes: ['spirit', 'finesse'],
-    baseHp: 20,
-    baseArmor: 14,
+    baseHp: 40,
+    baseArmor: 15,
     resistances: { fire: 30 },
     passives: {
-      glancingBlow: { name: 'Tough Hide', flat: 10 }
+      glancingBlow: { flat: 5 }
     },
     abilities: [
       {
         name: 'Burning Bite',
-        mpCost: 0,
-        apCost: 1,
-        range: 1,
+        mpCost: 0, apCost: 1, range: 1,
         target: 'enemy',
         attackCategory: 'melee',
         effects: [
-          { type: 'damage', appliesTo: 'target', damageElement: 'physical', minDamage: 1, maxDamage: 1 },
-          { type: 'damage', appliesTo: 'target', damageElement: 'fire', minDamage: 2, maxDamage: 2 }
+          { type: 'damage', appliesTo: 'target', damageElement: 'physical', minDamage: 8, maxDamage: 8 },
+          { type: 'damage', appliesTo: 'target', damageElement: 'fire', minDamage: 8, maxDamage: 8 }
         ]
       }
     ],
@@ -490,24 +487,22 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
     attributes: { strength: 4, toughness: 6 },
     highAttributes: ['strength', 'toughness'],
     lowAttributes: ['mind', 'finesse'],
-    baseHp: 40,
-    baseArmor: 17,
+    baseHp: 100,
+    baseArmor: 18,
     resistances: { fire: 30 },
     passives: {
-      meleeHit: { name: 'Clumsy', flat: -10 },
-      movement: { name: 'Shambler', flat: -1 }
+      meleeHit: { flat: -10 },
+      movement: { flat: -1 }
     },
     abilities: [
       {
         name: 'Slam',
-        mpCost: 0,
-        apCost: 2,
-        range: 1,
+        mpCost: 0, apCost: 2, range: 1,
         target: 'enemy',
         attackCategory: 'melee',
         effects: [
-          { type: 'damage', appliesTo: 'target', damageElement: 'physical', minDamage: 8, maxDamage: 10 },
-          { type: 'damage', appliesTo: 'target', damageElement: 'fire', minDamage: 4, maxDamage: 5 },
+          { type: 'damage', appliesTo: 'target', damageElement: 'physical', minDamage: 24, maxDamage: 30 },
+          { type: 'damage', appliesTo: 'target', damageElement: 'fire', minDamage: 12, maxDamage: 15 },
         ]
       }
     ],
@@ -523,49 +518,44 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
     attributes: { mind: 4, spirit: 4 },
     highAttributes: ['mind', 'spirit'],
     lowAttributes: ['toughness', 'strength'],
-    baseHp: 40,
-    baseArmor: 11,
+    baseHp: 100,
+    baseArmor: 10,
     resistances: { fire: 50, physical: 20 },
     passives: {
-      dodge: { name: 'Ethereal', flat: 10 },
-      magicCrit: { name: 'Incendiary', flat: 5 }
+      dodge: { flat: 10 },
+      magicCrit: { flat: 5 }
     },
     abilities: [
       {
         name: 'Fireball',
-        mpCost: 9,
-        apCost: 2,
-        range: 5,
-        target: 'enemy',
+        mpCost: 27, apCost: 2, range: 5,
+        target: 'enemy', 
         displayElement: 'fire',
         attackCategory: 'magic',
+        area: 'blast1',
         effects: [
-          { type: 'damage', appliesTo: 'target', damageElement: 'fire', minDamage: 8, maxDamage: 10 },
+          { type: 'damage', appliesTo: 'target', damageElement: 'fire', minDamage: 24, maxDamage: 30 },
         ]
       },
       {
         name: 'Scorch',
-        mpCost: 6,
-        apCost: 1,
-        range: 5,
+        mpCost: 18, apCost: 1, range: 5,
         target: 'enemy',
         displayElement: 'fire',
         attackCategory: 'magic',
         effects: [
-          { type: 'damage', appliesTo: 'target', damageElement: 'fire', minDamage: 3, maxDamage: 5 },
+          { type: 'damage', appliesTo: 'target', damageElement: 'fire', minDamage: 12, maxDamage: 17 },
           { type: 'debuff', appliesTo: 'target', stats: { fireResistance: -20 }, turns: 1 }
         ]
       },
       {
         name: 'Flaming Claws',
-        mpCost: 0,
-        apCost: 1,
-        range: 1,
+        mpCost: 0, apCost: 1, range: 1,
         target: 'enemy',
         displayElement: 'fire',
         attackCategory: 'magic',
         effects: [
-          { type: 'damage', appliesTo: 'target', damageElement: 'fire', minDamage: 2, maxDamage: 2 },
+          { type: 'damage', appliesTo: 'target', damageElement: 'fire', minDamage: 6, maxDamage: 6 },
         ]
       }
     ],
@@ -584,21 +574,19 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
     baseArmor: 5,
     resistances: { nature: 30 },
     passives: {
-      natureHit: { name: 'Potent', flat: 15 },
-      naturePenetration: { name: 'Potent', flat: 10 }
+      natureHit: { flat: 15 },
+      naturePenetration: { flat: 10 }
     },
     abilities: [
       {
         name: 'Sporeburst',
-        mpCost: 0,
-        apCost: 1,
-        range: 0,
+        mpCost: 0, apCost: 1, range: 0,
         target: 'enemy',
         area: 'blast1',
         attackCategory: 'magic',
         selfDestruct: true,
         effects: [
-          { type: 'damage', appliesTo: 'target', damageElement: 'nature', minDamage: 10, maxDamage: 10 }
+          { type: 'damage', appliesTo: 'target', damageElement: 'nature', minDamage: 30, maxDamage: 30 }
         ]
       }
     ],
@@ -612,19 +600,17 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
     attributes: { spirit: 4, mind: 2, finesse: 2 },
     highAttributes: ['spirit','mind'],
     lowAttributes: ['speed', 'strength'],
-    baseHp: 30,
+    baseHp: 70,
     baseArmor: 15,
     resistances: { nature: 30, poison: 30 },
     passives: {
-      mpRegen: { name: 'Renewal', flat: 1 },
-      dodge: { name: 'Evasive', flat: 10 }
+      mpRegen: { flat: 1 },
+      dodge: { flat: 10 }
     },
     abilities: [
       {
         name: 'Summon Spore',
-        mpCost: 10,
-        apCost: 2,
-        range: 1,
+        mpCost: 30, apCost: 2, range: 1,
         target: 'tile',        
         effects: [
           { type: 'summon', appliesTo: 'caster', creature: 'fungal-spore', turns: 3, max: 2 }
@@ -632,22 +618,18 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
       },
       {
         name: 'Mycobloom',
-        mpCost: 6,
-        apCost: 2,
-        range: 5,
+        mpCost: 18, apCost: 2, range: 5,
         target: 'ally',
         effects: [
-          { type: 'heal', appliesTo: 'target', damageElement: 'nature', minHeal: 5, maxHeal: 8 }
+          { type: 'heal', appliesTo: 'target', damageElement: 'nature', minHeal: 15, maxHeal: 24 }
         ]
       },
       {
         name: 'Rot-thorn',
-        mpCost: 3,
-        apCost: 1,
-        range: 4,
-        target: 'enemy',
+        mpCost: 9, apCost: 1, range: 4,
+        target: 'enemy', attackCategory: 'magic',
         effects: [
-          { type: 'damage', appliesTo: 'target', damageElement: 'nature', minDamage: 3, maxDamage: 5 }
+          { type: 'damage', appliesTo: 'target', damageElement: 'nature', minDamage: 9, maxDamage: 15 }
         ]
       }
     ],
@@ -662,35 +644,33 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
     attributes: { toughness: 6, strength: 4 },
     highAttributes: ['toughness','strength'],
     lowAttributes: ['speed', 'finesse'],
-    baseHp: 40,
+    baseHp: 100,
     baseArmor: 16,
     resistances: { nature: 30 },
     passives: {
-      meleeHit: { name: 'Clumsy', flat: -5 },
-      movement: { name: 'Shambler', flat: -1 }
+      meleeHit: { flat: -5 },
+      movement: { flat: -1 }
     },
     passiveEffects: [
       { 
         name: 'Acrid Stench', damageElement: 'poison',
-        effect: { type: 'aura', aura: {
+        aura: {
           area: 'blast1', effects: [
             { type: 'debuff', appliesTo: 'enemies', stats: { meleeHit: -5 } },
-            { type: 'dot', appliesTo: 'enemies', damageElement: 'nature', damagePerTurn: 3 }
+            { type: 'dot', appliesTo: 'enemies', damageElement: 'nature', damagePerTurn: 9 }
           ]
-        } }
+        }
       }
     ],
     abilities: [
       {
         name: 'Slam',
-        mpCost: 0,
-        apCost: 2,
-        range: 1,
+        mpCost: 0, apCost: 2, range: 1,
         target: 'enemy',
         attackCategory: 'melee',
         effects: [
-          { type: 'damage', appliesTo: 'target', damageElement: 'physical', minDamage: 8, maxDamage: 10 },
-          { type: 'damage', appliesTo: 'target', damageElement: 'nature', minDamage: 4, maxDamage: 5 },
+          { type: 'damage', appliesTo: 'target', damageElement: 'physical', minDamage: 24, maxDamage: 30 },
+          { type: 'damage', appliesTo: 'target', damageElement: 'nature', minDamage: 12, maxDamage: 15 },
         ]
       }
     ],
@@ -706,36 +686,32 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
     attributes: { finesse: 4, speed: 2 },
     highAttributes: ['speed', 'finesse'],
     lowAttributes: ['toughness', 'strength'],
-    baseHp: 15,
+    baseHp: 25,
     baseArmor: 0,
     resistances: { nature: 30, physical: 10 },
     passives: {
-      dodge: { name: 'Swarm', flat: 20 }
+      dodge: { flat: 20 }
     },
     abilities: [
       {
         name: 'Venom Bite',
-        mpCost: 0,
-        range: 1,
-        apCost: 1,
+        mpCost: 0, apCost: 1, range: 1,
         target: 'enemy',
         attackCategory: 'melee',
         displayElement: 'poison',
         effects: [
-          { type: 'damage', appliesTo: 'target', damageElement: 'poison', minDamage: 4, maxDamage: 6 },
+          { type: 'damage', appliesTo: 'target', damageElement: 'poison', minDamage: 12, maxDamage: 18 },
         ]
       },
       {
         name: 'Drink Blood',
-        mpCost: 5,
-        range: 1,
-        apCost: 2,
+        mpCost: 15, apCost: 2, range: 1,
         target: 'enemy',
         attackCategory: 'melee',
         displayElement: 'poison',
         effects: [
-          { type: 'damage', appliesTo: 'target', damageElement: 'poison', minDamage: 6, maxDamage: 6 },
-          { type: 'heal', appliesTo: 'caster', damageElement: 'poison', minHeal: 9, maxHeal: 9 }
+          { type: 'damage', appliesTo: 'target', damageElement: 'poison', minDamage: 18, maxDamage: 18 },
+          { type: 'heal', appliesTo: 'caster', damageElement: 'poison', minHeal: 27, maxHeal: 27 }
         ]
       }
     ],
@@ -749,37 +725,33 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
     attributes: { toughness: 4, spirit: 2, mind: 2 },
     highAttributes: ['mind', 'spirit'],
     lowAttributes: ['finesse', 'speed'],
-    baseHp: 35,
+    baseHp: 85,
     baseArmor: 10,
     resistances: { nature: 30, poison: 30 },
     passives: {
-      hpRegen: { name: 'Amphibian Regen', flat: 1 }
+      hpRegen: { flat: 1 }
     },
     abilities: [
       {
         name: 'Lick',
-        mpCost: 0,
-        range: 1,
-        apCost: 1,
+        mpCost: 0, apCost: 1, range: 1,
         target: 'enemy',
         attackCategory: 'melee',
         displayElement: 'poison',
         effects: [
-          { type: 'damage', appliesTo: 'target', damageElement: 'poison', minDamage: 6, maxDamage: 10 },
+          { type: 'damage', appliesTo: 'target', damageElement: 'poison', minDamage: 18, maxDamage: 30 },
         ]
       },
       {
         name: 'Toxin Glob',
-        mpCost: 7,
-        range: 4,
-        apCost: 2,
+        mpCost: 21, apCost: 2, range: 4,
         target: 'enemy',
         area: 'blast1',
         attackCategory: 'magic',
         displayElement: 'poison',
         effects: [
-          { type: 'damage', appliesTo: 'target', damageElement: 'poison', minDamage: 5, maxDamage: 7 },
-          { type: 'dot', appliesTo: 'target', damageElement: 'poison', damagePerTurn: 4, turns: 3 }
+          { type: 'damage', appliesTo: 'target', damageElement: 'poison', minDamage: 15, maxDamage: 21 },
+          { type: 'dot', appliesTo: 'target', damageElement: 'poison', damagePerTurn: 12, turns: 3 }
         ]
       }
     ],
@@ -794,41 +766,36 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
     attributes: { toughness: 2, strength: 4 },
     highAttributes: ['speed', 'strength'],
     lowAttributes: ['mind', 'spirit'],
-    baseHp: 15,
+    baseHp: 25,
     baseArmor: 20,
+    shield: true,
     passives: {
-      initiative: { name: 'Quick-witted', flat: 5 },
-      block: { name: 'Goblin Buckler', flat: 5 },
-      glancingBlow: { name: 'Rough n Tough', flat: 5 }
+      initiative: { flat: 5 },
+      block: { flat: 5 },
+      glancingBlow: { flat: 5 }
     },
     abilities: [
       {
         name: 'Shortsword',
-        mpCost: 0,
-        apCost: 1,
-        range: 1,
+        mpCost: 0, apCost: 1, range: 1,
         useWeapon: true,
         target: 'enemy',
         attackCategory: 'melee',
         displayElement: 'physical',
-        effects: [{ type: 'damage', appliesTo: 'target', damageElement: 'physical', minDamage: 4, maxDamage: 6 }],
+        effects: [{ type: 'damage', appliesTo: 'target', damageElement: 'physical', minDamage: 12, maxDamage: 18 }],
       },
       {
         name: 'Battlechant',
-        mpCost: 8,
-        apCost: 2,
-        range: 0,
+        mpCost: 24, apCost: 2, range: 0,
         target: 'ally',
         area: 'blast2',
         effects: [
-          { type: 'buff', appliesTo: 'allies', stats: { meleeDamage: 1, armor: 5 }, turns: 3 }
+          { type: 'buff', appliesTo: 'allies', stats: { meleeDamage: 5 }, statsPercent: { armor: 10 }, turns: 3 }
         ]
       },
       {
         name: 'Shield Bash',
-        mpCost: 5,
-        apCost: 1,
-        range: 1,
+        mpCost: 15, apCost: 1, range: 1,
         target: 'enemy',
         attackCategory: 'melee',
         displayElement: 'physical',
@@ -848,38 +815,34 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
     attributes: { toughness: 2, finesse: 4 },
     highAttributes: ['speed', 'finesse'],
     lowAttributes: ['mind', 'spirit'],
-    baseHp: 15,
+    baseHp: 25,
     baseArmor: 13,
     passives: {
-      initiative: { name: 'Quick-witted', flat: 5 },
-      dodge: { name: 'Shifty', flat: 5 }
+      initiative: { flat: 5 },
+      dodge: { flat: 5 }
     },
     abilities: [
       {
         name: 'Shortbow',
-        mpCost: 0,
-        apCost: 1,
-        range: 4,
+        mpCost: 0, apCost: 1, range: 4,
         useWeapon: true,
         target: 'enemy',
         attackCategory: 'ranged',
         displayElement: 'physical',
         effects: [
-          { type: 'damage', appliesTo: 'target', damageElement: 'physical', minDamage: 3, maxDamage: 4 }
+          { type: 'damage', appliesTo: 'target', damageElement: 'physical', minDamage: 9, maxDamage: 12 }
         ],
       },
       {
         name: 'Barbed Arrow',
-        mpCost: 8,
-        apCost: 2,
-        range: 4,
+        mpCost: 24, apCost: 2, range: 4,
         useWeapon: true,
         target: 'enemy',
         attackCategory: 'ranged',
         displayElement: 'physical',
         effects: [
-          { type: 'damage', appliesTo: 'target', damageElement: 'physical', minDamage: 2, maxDamage: 3 },
-          { type: 'dot', appliesTo: 'target', damageElement: 'physical', damagePerTurn: 4, turns: 3, maxStacks: 3 }
+          { type: 'damage', appliesTo: 'target', damageElement: 'physical', minDamage: 6, maxDamage: 9 },
+          { type: 'dot', appliesTo: 'target', damageElement: 'physical', damagePerTurn: 12, turns: 3, maxStacks: 3 }
         ]
       }
     ],
@@ -894,43 +857,37 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
     attributes: { toughness: 2, spirit: 4 },
     highAttributes: ['spirit', 'finesse'],
     lowAttributes: ['mind', 'strength'],
-    baseHp: 20,
+    baseHp: 40,
     baseArmor: 10,
     resistances: { nature: 20, shadow: 20 },
     passives: {
-      initiative: { name: 'Quick-witted', flat: 5 },
-      shadowDamage: { name: 'Voodoo', flat: 3 },
-      magicResistance: { name: 'Strong-willed', flat: 10 }
+      initiative: { flat: 5 },
+      shadowDamage: { flat: 10 },
+      magicResistance: { percent: 15 }
     },
     abilities: [
       {
         name: 'Hex',
-        mpCost: 5,
-        apCost: 1,
-        range: 4,
+        mpCost: 15, apCost: 1, range: 4,
         target: 'enemy',
         attackCategory: 'magic',
         displayElement: 'shadow',
         effects: [
-          { type: 'dot', appliesTo: 'target', damageElement: 'shadow', damagePerTurn: 3, turns: 3 }
+          { type: 'dot', appliesTo: 'target', damageElement: 'shadow', damagePerTurn: 9, turns: 3 }
         ],
       },
       {
         name: 'Restore',
-        mpCost: 7,
-        apCost: 2,
-        range: 4,
+        mpCost: 21, apCost: 2, range: 4,
         target: 'ally',
         displayElement: 'nature',
         effects: [
-          { type: 'heal', appliesTo: 'target', damageElement: 'nature', minHeal: 5, maxHeal: 7 },
+          { type: 'heal', appliesTo: 'target', damageElement: 'nature', minHeal: 15, maxHeal: 21 },
         ]
       },
       {
         name: 'Cursed Weapon',
-        mpCost: 5,
-        apCost: 1,
-        range: 4,
+        mpCost: 15, apCost: 1, range: 4,
         target: 'ally',
         displayElement: 'shadow',
         effects: [
@@ -940,7 +897,7 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
               categories: ['melee','ranged'], 
               weaponOnly: true,
               chance: 100,
-              effects: [{type: 'damage', appliesTo: 'target', damageElement: 'shadow', minDamage: 3, maxDamage: 3}]
+              effects: [{type: 'damage', appliesTo: 'target', damageElement: 'shadow', minDamage: 9, maxDamage: 9}]
             }}
         ]
       }
@@ -956,43 +913,37 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
     attributes: { toughness: 4, strength: 4 },
     highAttributes: ['toughness', 'strength'],
     lowAttributes: ['mind', 'spirit'],
-    baseHp: 30,
+    baseHp: 70,
     baseArmor: 14,
     passives: {
-      hpRegen: { name: 'Regeneration', flat: 1 }
+      hpRegen: { flat: 1 }
     },
     abilities: [
       {
         name: 'Club',
-        mpCost: 0,
-        apCost: 2,
-        range: 1,
-        target: 'enemy',
+        mpCost: 0, apCost: 2, range: 1,
+        target: 'enemy', attackCategory: 'melee',
         useWeapon: true,
         effects: [
-          { type: 'damage', appliesTo: 'target', damageElement: 'physical', minDamage: 8, maxDamage: 12 }
+          { type: 'damage', appliesTo: 'target', damageElement: 'physical', minDamage: 24, maxDamage: 36 }
         ]
       },
       {
         name: 'Punt',
-        mpCost: 0,
-        apCost: 1,
-        range: 1,
-        target: 'enemy',
+        mpCost: 0, apCost: 1, range: 1,
+        target: 'enemy', attackCategory: 'melee',
         effects: [
-          { type: 'damage', appliesTo: 'target', damageElement: 'physical', minDamage: 4, maxDamage: 7 }
+          { type: 'damage', appliesTo: 'target', damageElement: 'physical', minDamage: 12, maxDamage: 21 }
         ]
       },
       {
         name: 'Cleave',
-        mpCost: 8,
-        apCost: 3,
-        range: 0,
-        target: 'enemy',
+        mpCost: 24, apCost: 3, range: 0,
+        target: 'enemy', attackCategory: 'melee',
         useWeapon: true,
         area: 'blast1',
         effects: [
-          { type: 'damage', appliesTo: 'target', damageElement: 'physical', minDamage: 6, maxDamage: 8 }
+          { type: 'damage', appliesTo: 'target', damageElement: 'physical', minDamage: 18, maxDamage: 24 }
         ]
       }
     ],
@@ -1007,38 +958,34 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
     attributes: { finesse: 4, speed: 4 },
     highAttributes: ['finesse', 'speed'],
     lowAttributes: ['toughness', 'strength'],
-    baseHp: 15,
+    baseHp: 25,
     baseArmor: 4,
     resistances: { physical: 20 },
     passives: {
-      dodge: { name: 'Swarm', flat: 20 },
-      meleeHit: { name: 'Swarm', flat: 10 }
+      dodge: { flat: 20 },
+      meleeHit: { flat: 10 }
     },
     abilities: [
       {
         name: 'Drink Blood',
-        mpCost: 0,
-        range: 1,
-        apCost: 2,
+        mpCost: 0, apCost: 2, range: 1,
         target: 'enemy',
         attackCategory: 'melee',
         displayElement: 'physical',
         effects: [
-          { type: 'damage', appliesTo: 'target', damageElement: 'physical', minDamage: 4, maxDamage: 5 },
-          { type: 'heal', appliesTo: 'caster', damageElement: 'physical', minHeal: 9, maxHeal: 9 }
+          { type: 'damage', appliesTo: 'target', damageElement: 'physical', minDamage: 12, maxDamage: 15 },
+          { type: 'heal', appliesTo: 'caster', damageElement: 'physical', minHeal: 27, maxHeal: 27 }
         ]
       },
       {
         name: 'Screech',
-        mpCost: 5,
-        range: 0, 
-        apCost: 2,
+        mpCost: 15, apCost: 2, range: 0,
         target: 'enemy',
         area: 'blast2',
         attackCategory: 'melee',
         displayElement: 'physical',
         effects: [
-          { type: 'debuff', appliesTo: 'target', damageElement: 'physical', stats: { magicHit: -10, mpRegen: -3 }, turns: 3, maxStacks: 1 }
+          { type: 'debuff', appliesTo: 'target', damageElement: 'physical', stats: { magicHit: -10, mpRegen: -2 }, turns: 3, maxStacks: 1 }
         ]
       }
     ],
@@ -1054,38 +1001,34 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
     attributes: { toughness: 6, strength: 4 },
     highAttributes: ['toughness', 'strength'],
     lowAttributes: ['spirit', 'speed'],
-    baseHp: 60,
+    baseHp: 160,
     baseArmor: 41,
     resistances: { poison: 30 },
     passives: {
-      meleeHit: { name: 'Hunter', flat: 10 },
-      dodge: { name: 'Large', flat: -5 },
-      magicResistance: { name: 'Voidblood', flat: 15 }
+      meleeHit: { flat: 10 },
+      dodge: { flat: -5 },
+      magicResistance: { percent: 20 }
     },
     abilities: [
       {
         name: 'Crushing Jaws',
-        mpCost: 0,
-        apCost: 2,
-        range: 1,
+        mpCost: 0, apCost: 2, range: 1,
         target: 'enemy',
         attackCategory: 'melee',
         displayElement: 'physical',
         effects: [
-          { type: 'damage', appliesTo: 'target', damageElement: 'physical', minDamage: 11, maxDamage: 15 }
+          { type: 'damage', appliesTo: 'target', damageElement: 'physical', minDamage: 33, maxDamage: 45 }
         ]
       },
 
       {
         name: 'Caustic Venom',
-        mpCost: 8,
-        apCost: 2,
-        range: 1,
+        mpCost: 24, apCost: 2, range: 1,
         target: 'enemy',
         attackCategory: 'melee',
         displayElement: 'poison',
         effects: [
-          { type: 'dot', appliesTo: 'target', damageElement: 'poison', damagePerTurn: 10, turns: 3 }
+          { type: 'dot', appliesTo: 'target', damageElement: 'poison', damagePerTurn: 30, turns: 3 }
         ]
       }
     ],
@@ -1101,37 +1044,33 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
     attributes: { finesse: 2, mind: 4, speed: 2 },
     highAttributes: ['mind', 'speed'],
     lowAttributes: ['spirit', 'strength'],
-    baseHp: 30,
+    baseHp: 70,
     baseArmor: 23,
     resistances: { poison: 30 },
     passives: {
-      movement: { name: 'Skitterer', flat: 1 }
+      movement: { flat: 1 }
     },
     passiveEffects: [
-      { name: 'Venomous', damageElement: 'poison', effect: { type: 'buff', trigger: {
+      { name: 'Venomous', damageElement: 'poison', trigger: {
         when: 'attacking', on: 'hit', categories: ['melee'], chance: 60,
         effects: [
-          {type: 'dot', appliesTo: 'target', damageElement: 'poison', damagePerTurn: 5, turns: 3, maxStacks: 3 }]
-      }}}
+          {type: 'dot', appliesTo: 'target', damageElement: 'poison', damagePerTurn: 15, turns: 3, maxStacks: 3 }]
+      }}
     ],
     abilities: [
       {
         name: 'Bite',
-        apCost: 1,
-        mpCost: 0,
-        range: 1,
+        mpCost: 0, apCost: 1, range: 1,
         attackCategory: 'melee',
         displayElement: 'physical',
         target: 'enemy',
         effects: [
-          { type: 'damage', appliesTo: 'target', damageElement: 'physical', minDamage: 4, maxDamage: 5 }
+          { type: 'damage', appliesTo: 'target', damageElement: 'physical', minDamage: 12, maxDamage: 15 }
         ]
       },
       {
         name: 'Spin Web',
-        apCost: 2,
-        mpCost: 6,
-        range: 4,
+        mpCost: 18, apCost: 2, range: 4,
         attackCategory: 'ranged',
         displayElement: 'physical',
         target: 'enemy',
@@ -1151,44 +1090,40 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
     attributes: { toughness: 2, mind: 4 },
     highAttributes: ['mind', 'toughness'],
     lowAttributes: ['spirit', 'strength'],
-    baseHp: 30,
+    baseHp: 70,
     baseArmor: 19,
     resistances: { shadow: 20 },
     passives: {
-      dodge: { name: 'Wily', flat: 5 },
-      magicResistance: { name: 'Voidblood', flat: 20 }
+      dodge: { flat: 5 },
+      magicResistance: { percent: 30 }
     },
     passiveEffects: [
-      { name: 'Spelleater', damageElement: 'shadow', effect: { type: 'buff', trigger: {
+      { name: 'Spelleater', damageElement: 'shadow', trigger: {
         when: 'attacked', on: 'hit', categories: ['magic'], chance: 100,
         effects: [
-          {type: 'buff', appliesTo: 'caster', damageElement: 'shadow', stats: { shadowDamage: 3, armor: 5 }, turns: 3 }]
-      }}}
+          {type: 'buff', appliesTo: 'caster', damageElement: 'shadow', stats: { shadowDamage: 15 }, statsPercent: { armor: 10 }, turns: 3 }]
+      }}
     ],
     abilities: [
       {
         name: 'Mindrot',
-        mpCost: 8,
-        apCost: 2,
-        range: 5,
+        mpCost: 24, apCost: 2, range: 5,
         target: 'enemy',
         attackCategory: 'magic',
         displayElement: 'shadow',
         effects: [
-          { type: 'damage', damagesMP: true, appliesTo: 'target', damageElement: 'shadow', minDamage: 4, maxDamage: 4 },
-          { type: 'damage', appliesTo: 'target', damageElement: 'shadow', minDamage: 4, maxDamage: 4 },
+          { type: 'damage', damagesMP: true, appliesTo: 'target', damageElement: 'shadow', minDamage: 12, maxDamage: 12 },
+          { type: 'damage', appliesTo: 'target', damageElement: 'shadow', minDamage: 12, maxDamage: 12 },
         ]
       },
       {
         name: 'Black Claw',
-        mpCost: 0,
-        apCost: 1,
-        range: 1,
+        mpCost: 0, apCost: 1, range: 1,
         target: 'enemy',
         attackCategory: 'melee',
         displayElement: 'shadow',
         effects: [
-          { type: 'damage', appliesTo: 'target', damageElement: 'shadow', minDamage: 3, maxDamage: 4 },
+          { type: 'damage', appliesTo: 'target', damageElement: 'shadow', minDamage: 9, maxDamage: 12 },
         ]
       },
     ],
@@ -1204,27 +1139,23 @@ export const ENEMY_CLASSES: EnemyClassData[] = [
     attributes: { finesse: 2, mind: 2, spirit: 2 },
     highAttributes: ['mind', 'finesse'],
     lowAttributes: ['toughness', 'strength'],
-    baseHp: 15,
+    baseHp: 25,
     baseArmor: 10,
     resistances: { shadow: 20 },
     abilities: [
       {
-        name: 'Umbral Claws',
-        mpCost: 0,
-        apCost: 1,
-        range: 1,
+        name: 'Tentacles',
+        mpCost: 0, apCost: 1, range: 1,
         target: 'enemy',
         attackCategory: 'melee',
         displayElement: 'shadow',
         effects: [
-          { type: 'damage', appliesTo: 'target', damageElement: 'shadow', minDamage: 3, maxDamage: 5 }
+          { type: 'damage', appliesTo: 'target', damageElement: 'shadow', minDamage: 12, maxDamage: 18 }
         ]
       },
       {
         name: 'Sap Will',
-        mpCost: 7,
-        apCost: 1,
-        range: 2,
+        mpCost: 21, apCost: 1, range: 2,
         target: 'enemy',
         attackCategory: 'magic',
         displayElement: 'shadow',

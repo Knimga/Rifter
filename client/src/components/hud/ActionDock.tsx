@@ -5,7 +5,7 @@
 import { createElement, useEffect, useRef, useState, type CSSProperties, type MouseEvent } from 'react';
 import { CLASSES } from '../../data/units/classes';
 import { mpCostAt, type Ability } from '../../data/combat/abilities';
-import type { PartyMemberConfig } from '../../data/units/party';
+import { memberAbilities, type PartyMemberConfig } from '../../data/units/party';
 import type { ActiveBuff, Stats } from '../../data/units/stats';
 import { heldWeapon } from '../../data/gear';
 import { toAction } from '../../data/combat/abilityExecution';
@@ -50,7 +50,7 @@ export default function ActionDock({ member, stats, mp, buffs, slots, onSlotsCha
   const [menuSlot, setMenuSlot] = useState<number | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const weapon = heldWeapon(member.gear);
-  const abilities = CLASSES[member.selectedClass].abilities;
+  const abilities = memberAbilities(member);
 
   // The menu closes on a click outside it
   useEffect(() => {

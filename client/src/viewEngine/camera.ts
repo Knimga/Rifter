@@ -1,6 +1,7 @@
 // How the game is viewed: the one camera setting the whole display follows, and its projection.
 // Pure TS (no three.js, no React). The game's maps, its 3D model layer and the forge all read from here;
-// viewEngine imports from neither the game data nor the forge. Game logic never depends on it.
+// this file imports neither the game data nor the forge (viewEngine never imports game data). Game logic never
+// depends on it.
 
 export type Vec3 = [number, number, number];
 

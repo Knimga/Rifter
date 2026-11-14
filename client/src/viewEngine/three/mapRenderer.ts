@@ -61,6 +61,8 @@ export interface MapUnit {
   size?: number | readonly [number, number];
   /** A hit's flash: when it changes, the model flashes white for FLASH_MS (one already set when the unit appears doesn't). */
   flash?: number;
+  /** Its model is subtly lit (a hovered door): washed a little toward white while set. */
+  highlighted?: boolean;
   /** It fades in as it appears (over FADE_IN_MS), instead of being there at once (a party member stepping out of a portal). */
   fadeIn?: boolean;
   /**
@@ -97,6 +99,8 @@ interface Entry {
   /** Its last flash (MapUnit.flash), and how much of a flash in progress is left (ms). */
   flashSeq?: number;
   flashMs: number;
+  /** See MapUnit.highlighted (shown again once a flash ends). */
+  highlighted?: boolean;
   /** It lies flat on the floor (FLAT_HEIGHT): drawn with the terrain's floor (groundCanvas), under the tile overlays. */
   flat: boolean;
   /** How far into fading in it is (ms), while it does (MapUnit.fadeIn). */
@@ -274,7 +278,8 @@ export class MapModelRenderer {
         // Same unit, rebuilt model (e.g. new gear, or a design update in dev): swap the mesh, keep its state
         this.removeObject(e);
         disposeObject(e.obj);
-        e = { ...e, model: u.model, obj: makeObject(u, this.fog), flat: isFlat(u) };
+        // (Its highlight is applied to the new object below)
+        e = { ...e, model: u.model, obj: makeObject(u, this.fog), flat: isFlat(u), highlighted: undefined };
         this.addObject(e);
         this.entries.set(u.id, e);
         // The new object where the unit is drawn now, facing its way (a fresh object starts at the origin)
@@ -323,8 +328,14 @@ export class MapModelRenderer {
       // A new hit: the model flashes (starting over if it already is)
       if (u.flash !== undefined && u.flash !== e.flashSeq) {
         e.flashSeq = u.flash;
-        if (!e.flashMs) this.fog.flash(e.obj, true);
+        if (!e.flashMs) this.fog.wash(e.obj, 'flash');
         e.flashMs = FLASH_MS;
+        changed = true;
+      }
+      // Highlighted (a hovered door) or no longer: a flash in progress keeps showing until it ends
+      if (!!u.highlighted !== !!e.highlighted) {
+        e.highlighted = !!u.highlighted;
+        if (!e.flashMs) this.fog.wash(e.obj, e.highlighted ? 'highlight' : null);
         changed = true;
       }
       // A newly called-for animation plays from now (a new unit has already taken its state, as done)
@@ -434,7 +445,7 @@ export class MapModelRenderer {
       }
       if (e.flashMs > 0) {
         e.flashMs = Math.max(0, e.flashMs - dt);
-        if (!e.flashMs) this.fog.flash(e.obj, false);
+        if (!e.flashMs) this.fog.wash(e.obj, e.highlighted ? 'highlight' : null);
         animating = true;
       }
     }

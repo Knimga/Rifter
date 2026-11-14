@@ -96,12 +96,14 @@ function raster(W: number, H: number) {
   /**
    * A halo (MeshData.halos), like the game's halo shader: a round glow of radius `R` px around (x, y) at depth `z`
    * (brought forward by its radius), hidden where a nearer surface is, faded from its center (0.5, 0.16 at 40%, 0 at
-   * the edge) and added on. `c`: its color, 0..1.
+   * the edge) and added on. `c`: its color, 0..1. `s`: stretched on screen (Halo.s), an oval `R * s[0]` wide and
+   * `R * s[1]` tall.
    */
-  const addHalo = (hx: number, hy: number, z: number, R: number, c: readonly number[]) => {
-    for (let y = Math.max(0, Math.floor(hy - R)); y <= Math.min(H - 1, Math.ceil(hy + R)); y++)
-      for (let x = Math.max(0, Math.floor(hx - R)); x <= Math.min(W - 1, Math.ceil(hx + R)); x++) {
-        const d = Math.hypot(x + 0.5 - hx, y + 0.5 - hy) / R, i = y * W + x;
+  const addHalo = (hx: number, hy: number, z: number, R: number, c: readonly number[], s: readonly number[] = [1, 1]) => {
+    const Rx = R * s[0], Ry = R * s[1];
+    for (let y = Math.max(0, Math.floor(hy - Ry)); y <= Math.min(H - 1, Math.ceil(hy + Ry)); y++)
+      for (let x = Math.max(0, Math.floor(hx - Rx)); x <= Math.min(W - 1, Math.ceil(hx + Rx)); x++) {
+        const d = Math.hypot((x + 0.5 - hx) / Rx, (y + 0.5 - hy) / Ry), i = y * W + x;
         if (d > 1 || zbuf[i] > z) continue;
         const a = d < 0.4 ? 0.5 + (0.16 - 0.5) * (d / 0.4) : 0.16 * (1 - (d - 0.4) / 0.6);
         for (let ch = 0; ch < 3; ch++) color[i * 3 + ch] = Math.min(255, color[i * 3 + ch] + c[ch] * 255 * a);
@@ -221,7 +223,7 @@ function renderCell(model: Model, design: Design, yaw: number): Uint8Array {
   // Its halos (MeshData.halos)
   for (const h of anim ? posedHalos(model, { [anim]: 1 }) : model.mesh.halos) {
     const [hx, hy, hz] = toScreen(view(rot([h.p[0], h.p[1], h.p[2]])));
-    addHalo(hx, hy, hz + h.r, h.r * k, h.c);
+    addHalo(hx, hy, hz + h.r, h.r * k, h.c, h.s);
   }
 
   return downsample(color, CELL, CELL);
@@ -286,7 +288,7 @@ if (terrainKey) {
   const drawHalos = (model: Model, place: (p: number[]) => number[] = (p) => p) => {
     for (const h of model.mesh.halos) {
       const [hx, hy, hz] = toScreen(view(place([h.p[0], h.p[1], h.p[2]])));
-      addHalo(hx, hy, hz + h.r, h.r * T, h.c);
+      addHalo(hx, hy, hz + h.r, h.r * T, h.c, h.s);
     }
   };
   const placeObject = (o: (typeof objects)[number]) => (q: number[]) => { const r = rotY([q[0], q[1], q[2]], o.yaw); return [r[0] + o.center[0], r[1], r[2] + o.center[1]]; };

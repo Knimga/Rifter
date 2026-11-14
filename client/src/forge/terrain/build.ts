@@ -5,15 +5,16 @@
 // the game's camera (looking north-east) a wall with a floor tile north, east or north-east of it stands between
 // the camera and that floor, so it is cut down to a stub (STUB_HEIGHT): the near (south and west) walls of a room,
 // walls between two rooms, islands. The others rise to their full height (WALL_HEIGHTS). A door tile is an opening in its wall: the door
-// model stands in it (it brings its own frame), with a lintel above it in a full wall. Only faces that border a
-// lower neighbour are built, and every surface's shape comes from world-position noise, so neighbouring tiles join
-// without seams.
+// model stands in it (it brings its own frame), with jambs behind its face and a lintel above it in a full wall. A
+// doorway the camera faces opens up toward the floor (Doorways): its sides splay out and its lintel's underside rises,
+// so the walls around it never hide the door. Only faces that border a lower neighbour are built, and every surface's
+// shape comes from world-position noise, so neighbouring tiles join without seams.
 import { Mesh, bake, type FaceOpts } from '../core/mesh';
-import { box } from '../core/primitives';
 import { mulberry32 } from '../core/rng';
 import { mixC, mulC, type RGB, type Vec3 } from '../core/vec';
 import type { Model } from '../core/types';
 import type { Terrain, TerrainInput } from './types';
+import { GAME_CAMERA, rad } from '../../viewEngine/camera';
 
 /**
  * A full wall's height (tiles) for each TerrainStyle walls.height: low, above the doors' frames (1.4) and the units;
@@ -25,7 +26,8 @@ export const WALL_HEIGHTS = { low: 1.5, high: 2.25 } as const;
 export const STUB_HEIGHT = 0.2;
 /**
  * Where a doorway's lintel starts: just above the door's own frame. Every door's frame is flat-topped at 1.4 tiles and
- * about 0.92 wide (an arched door arches inside it: warded-stone-door), so the jambs and lintel close around any door.
+ * about 0.92 wide (an arched door arches inside it: warded-stone-door), and no deeper than DOOR_FRONT in front of its
+ * tile's middle, so the jambs and lintel close around any door.
  */
 const LINTEL_Y = 1.38;
 /**
@@ -33,8 +35,21 @@ const LINTEL_Y = 1.38;
  * running into the dark (bright tops drew a grid of outlines around every room). Veins never run over it.
  */
 const WALL_TOP_SHADE = 0.16;
-/** A doorway's jambs: thin pillars at its sides, closing the gap between the door's frame and the walls. */
+/** A doorway's jambs: pillars at its sides behind the door's face, closing the gap between the door's frame and the walls. */
 const JAMB = 0.07;
+/**
+ * How far in front of its tile's middle a door's frame reaches (tiles; the heavy door's ~0.11, the warded door's
+ * keystone 0.15): the doorway's jambs end there, and its lintel's underside starts rising from there.
+ */
+const DOOR_FRONT = 0.16;
+/** How far a doorway's jambs and lintel reach into the walls beside it, so the walls' bulges never open a slit. */
+const DOOR_TUCK = 0.1;
+/** The widest a doorway's sides splay (tiles, each side, at the wall's face), and the margin over what the camera needs. */
+const SPLAY_MAX = 0.5, SPLAY_MARGIN = 0.06;
+/** How much steeper than the camera's line of sight a lintel's underside rises (so it never hides the door's top). */
+const LINTEL_SLOPE_MARGIN = 1.1;
+/** A rough wall's bulge right at a doorway (share of it), and the distances (tiles, from the doorway's mouth) over which it returns in full. */
+const DOOR_CALM = 0.2, DOOR_CALM_R0 = 0.6, DOOR_CALM_R1 = 1.4;
 
 /** Masonry: course height, block length and the mortar joint between blocks (tiles). */
 const COURSE = 0.25, BLOCK = 0.5, SEAM = 0.022;
@@ -157,6 +172,70 @@ const sidesOf = (x: number, y: number): { d: [number, number]; side: Side }[] =>
   { d: [-1, 0], side: { a: [x, 0, y], t: [0, 0, 1], n: [-1, 0, 0], line: x * 2 + 1 } },
 ];
 
+// ─── Doorways ─────────────────────────────────────────────────────────────────
+
+/**
+ * A door tile as an opening: its middle `c` (x, z), `n` toward the floor it opens onto, `t` along its wall, and how
+ * its mouth opens up so the camera sees the whole door. `splay`: how far its sides lean out (each side, at the wall's
+ * face, from none at the tile's back), so the near side never hides the door; `slope`: how steeply its lintel's
+ * underside rises from the door's frame toward the floor, so the lintel never hides the door's top. Both come from the
+ * game camera (GAME_CAMERA); a door seen from behind (in a cut wall) doesn't splay.
+ */
+interface Doorway { c: [number, number]; n: [number, number]; t: [number, number]; splay: number; slope: number }
+
+function doorwayAt(x: number, y: number, isFloor: (x: number, y: number) => boolean): Doorway {
+  const dir = ([[0, 1], [-1, 0], [0, -1], [1, 0]] as const).find(([dx, dy]) => isFloor(x + dx, y + dy)) ?? [0, 1];
+  const n: [number, number] = [dir[0], dir[1]], t: [number, number] = [-dir[1], dir[0]];
+  // The camera's line of sight along the ground (viewProject's "ahead"), and its angle to the door's facing
+  const e = rad(GAME_CAMERA.elevationDeg), yaw = rad(GAME_CAMERA.yawDeg);
+  const ahead = [Math.sin(yaw), -Math.cos(yaw)];
+  const cosA = -(n[0] * ahead[0] + n[1] * ahead[1]), sinA = Math.abs(t[0] * ahead[0] + t[1] * ahead[1]);
+  const facing = cosA > 0.3;
+  return {
+    c: [x + 0.5, y + 0.5], n, t,
+    splay: facing ? Math.min(SPLAY_MAX, (sinA / cosA) * (0.5 - DOOR_FRONT) + SPLAY_MARGIN) : 0,
+    slope: (Math.tan(e) / Math.max(cosA, 0.3)) * LINTEL_SLOPE_MARGIN,
+  };
+}
+
+/** A point in a doorway's own frame: across it (`l`, its middle 0, its sides ±0.5) and out of the wall (`d`, the tile's back -0.5, the wall's face 0.5). */
+const doorFrame = (dw: Doorway, p: Vec3) => {
+  const rx = p[0] - dw.c[0], rz = p[2] - dw.c[1];
+  return { l: rx * dw.t[0] + rz * dw.t[1], d: rx * dw.n[0] + rz * dw.n[1] };
+};
+
+/**
+ * A wall point, moved so each doorway's mouth splays: the walls beside it are drawn aside, most at the wall's face
+ * (from none at the tile's back, and back to none a tile out), the sides of the opening leaning out and the walls'
+ * faces beside it narrowing to meet them. It moves along the wall only, so faces stay flat, and depends on the point
+ * alone, so neighbouring faces still meet.
+ */
+function splayed(doorways: readonly Doorway[], p: Vec3): Vec3 {
+  let q = p;
+  for (const dw of doorways) {
+    if (!dw.splay) continue;
+    const { l, d } = doorFrame(dw, q), al = Math.abs(l);
+    if (al > 1.5 || d < -0.5 || d > 1.5) continue;
+    const f = d <= 0.5 ? d + 0.5 : 1.5 - d;
+    const nl = al <= 0.5 ? l * (1 + 2 * dw.splay * f) : Math.sign(l) * (al + dw.splay * f * (1.5 - al));
+    q = [q[0] + dw.t[0] * (nl - l), q[1], q[2] + dw.t[1] * (nl - l)];
+  }
+  return q;
+}
+
+/** How much of a rough wall's bulge a point keeps: little at a doorway's mouth (DOOR_CALM), so the rock frames it cleanly. */
+function doorCalm(doorways: readonly Doorway[], p: Vec3): number {
+  let k = 1;
+  for (const dw of doorways) {
+    const { l, d } = doorFrame(dw, p);
+    const r = Math.hypot(l, d - 0.5);
+    if (r >= DOOR_CALM_R1) continue;
+    const s = Math.max(0, (r - DOOR_CALM_R0) / (DOOR_CALM_R1 - DOOR_CALM_R0));
+    k = Math.min(k, DOOR_CALM + (1 - DOOR_CALM) * smooth(s));
+  }
+  return k;
+}
+
 /** Build a zone's floor and walls (see the file comment). */
 export function buildTerrain({ cols, rows, floors, doors, style, seed }: TerrainInput): Terrain {
   const R = mulberry32(seed);
@@ -191,6 +270,7 @@ export function buildTerrain({ cols, rows, floors, doors, style, seed }: Terrain
     return false;
   };
   const isCut = (x: number, y: number) => isCutWall(isFloor, x, y);
+  const doorways = doors.map((d) => doorwayAt(d.x, d.y, isFloor));
   const rough = style.walls.finish === 'rough';
   const fullHeight = WALL_HEIGHTS[style.walls.height];
   /**
@@ -361,6 +441,21 @@ export function buildTerrain({ cols, rows, floors, doors, style, seed }: Terrain
         floorTile(x, y);
         haloOne(floor, x, y, 0);
       }
+  // Under the walls beside a splayed doorway, and a wall jutting out in front of one: its mouth draws them aside,
+  // uncovering some of their tiles (no halos: mostly under rock)
+  const underSplay = new Set<string>();
+  for (const dw of doorways) {
+    if (!dw.splay) continue;
+    for (const s of [-1, 1])
+      for (const out of [0, 1]) {
+        const x = dw.c[0] - 0.5 + dw.t[0] * s + dw.n[0] * out, y = dw.c[1] - 0.5 + dw.t[1] * s + dw.n[1] * out;
+        if (inGrid(x, y) && !isFloor(x, y) && !isDoor(x, y) && !underSplay.has(key(x, y))) {
+          underSplay.add(key(x, y));
+          floorTile(x, y);
+        }
+      }
+  }
+  lit = [];
 
   // ── Walls ──
   const walls = new Mesh(mulberry32(seedOf()));
@@ -368,9 +463,12 @@ export function buildTerrain({ cols, rows, floors, doors, style, seed }: Terrain
   const mortar = mulC(ws.color, 0.45);
   const top = mulC(ws.color, WALL_TOP_SHADE);
 
-  /** A rough wall's point: pushed about by noise (none at the floor, so it meets the floor cleanly). */
+  /**
+   * A rough wall's point: pushed about by noise (none at the floor, so it meets the floor cleanly; little at a
+   * doorway's mouth: doorCalm).
+   */
   const bulge = (p: Vec3): Vec3 => {
-    const amp = 0.34 * ws.bumpiness * Math.min(1, p[1] / 0.3);
+    const amp = 0.34 * ws.bumpiness * Math.min(1, p[1] / 0.3) * (doorways.length ? doorCalm(doorways, p) : 1);
     if (!amp) return p;
     return [
       p[0] + (noiseAt(S.bulge, p, 1.7) - 0.5) * amp,
@@ -391,9 +489,11 @@ export function buildTerrain({ cols, rows, floors, doors, style, seed }: Terrain
     else walls.tri(p, q, r, mulC(base, 0.8 + 0.35 * noiseAt(S.shade, m, 0.9)), ctr, { j: 0.12 });
   };
 
+  /** A wall point, its doorways' mouths splayed (splayed). */
+  const wallPt = (p: Vec3): Vec3 => (doorways.length ? splayed(doorways, p) : p);
   /** A point on a wall face: `s` (0..1) along it, `h` up, `out` off it. */
   const onSide = (f: Side, s: number, h: number, out = 0): Vec3 =>
-    [f.a[0] + f.t[0] * s + f.n[0] * out, h, f.a[2] + f.t[2] * s + f.n[2] * out];
+    wallPt([f.a[0] + f.t[0] * s + f.n[0] * out, h, f.a[2] + f.t[2] * s + f.n[2] * out]);
 
   /** A cyclopean wall face (its wall line's stones: cycStones), the stones swelling out of it. */
   const cyclopean = (f: Side, u0: number, y0: number, y1: number, ctr: Vec3) => {
@@ -472,10 +572,10 @@ export function buildTerrain({ cols, rows, floors, doors, style, seed }: Terrain
   const cap = (x: number, y: number, h: number) => {
     const ctr: Vec3 = [x + 0.5, h - 0.5, y + 0.5];
     if (!rough) {
-      walls.quad([x, h, y], [x + 1, h, y], [x + 1, h, y + 1], [x, h, y + 1], mulC(top, 0.92 + walls.R() * 0.12), ctr, { j: 0.04 });
+      walls.quad(wallPt([x, h, y]), wallPt([x + 1, h, y]), wallPt([x + 1, h, y + 1]), wallPt([x, h, y + 1]), mulC(top, 0.92 + walls.R() * 0.12), ctr, { j: 0.04 });
       return;
     }
-    const at = (i: number, j: number) => bulge([x + i / ROUGH_SEGS, h, y + j / ROUGH_SEGS]);
+    const at = (i: number, j: number) => bulge(wallPt([x + i / ROUGH_SEGS, h, y + j / ROUGH_SEGS]));
     for (let i = 0; i < ROUGH_SEGS; i++)
       for (let j = 0; j < ROUGH_SEGS; j++) {
         const a = at(i, j), b = at(i + 1, j), c = at(i + 1, j + 1), d = at(i, j + 1);
@@ -495,19 +595,47 @@ export function buildTerrain({ cols, rows, floors, doors, style, seed }: Terrain
       }
     }
 
-  // Doorways: jambs at the sides of the opening (along its wall), and a lintel above the door in a full wall
-  for (const { x, y } of doors) {
+  // Doorways: jambs at the sides of the opening behind the door's face, and a lintel above the door in a full wall,
+  // its underside rising toward the floor; both reach into the (splayed) walls beside the opening (DOOR_TUCK)
+  doors.forEach(({ x, y }, i) => {
+    const dw = doorways[i];
     const h = isCut(x, y) ? STUB_HEIGHT : fullHeight;
-    const alongX = isFloor(x, y - 1) || isFloor(x, y + 1); // the wall runs east-west
     const col = rough ? mulC(ws.color, 0.9) : ws.color;
-    for (const e of [JAMB / 2, 1 - JAMB / 2]) {
-      box(walls, alongX ? [x + e, h / 2, y + 0.5] : [x + 0.5, h / 2, y + e], alongX ? [JAMB, h, 1] : [1, h, JAMB], col, 0, { j: 0.06 });
+    /** A point in the doorway: `l` across it, `d` out of the wall (doorFrame), `yy` up; `edge` points are splayed with the walls. */
+    const at = (l: number, d: number, yy: number, edge = true): Vec3 => {
+      const p: Vec3 = [dw.c[0] + dw.t[0] * l + dw.n[0] * d, yy, dw.c[1] + dw.t[1] * l + dw.n[1] * d];
+      return edge ? wallPt(p) : p;
+    };
+    /** A solid in the doorway: its outline in (l, d) (in order around it; `edge`: splayed), from y0 to y1, its top in the tops' color. */
+    const solid = (outline: { l: number; d: number; edge: boolean }[], y0: number, y1: number) => {
+      const ctr = at(outline.reduce((s, o) => s + o.l, 0) / outline.length, outline.reduce((s, o) => s + o.d, 0) / outline.length, (y0 + y1) / 2, false);
+      const pt = (o: (typeof outline)[number], yy: number) => at(o.l, o.d, yy, o.edge);
+      outline.forEach((o, k) => {
+        const p = outline[(k + 1) % outline.length];
+        walls.quad(pt(o, y0), pt(p, y0), pt(p, y1), pt(o, y1), col, ctr, { j: 0.06 });
+      });
+      for (let k = 1; k < outline.length - 1; k++) walls.tri(pt(outline[0], y1), pt(outline[k], y1), pt(outline[k + 1], y1), top, ctr, { j: 0.04 });
+    };
+    for (const s of [-1, 1]) {
+      const inner = s * (0.5 - JAMB), outer = s * (0.5 + DOOR_TUCK);
+      solid([{ l: inner, d: -0.5, edge: false }, { l: outer, d: -0.5, edge: true }, { l: outer, d: DOOR_FRONT, edge: true }, { l: inner, d: DOOR_FRONT, edge: false }], 0, h);
     }
-    if (h > LINTEL_Y) {
-      box(walls, [x + 0.5, (LINTEL_Y + h) / 2, y + 0.5], [1, h - LINTEL_Y, 1], col, 0, { j: 0.06 });
-      walls.quad([x, h + 0.002, y], [x + 1, h + 0.002, y], [x + 1, h + 0.002, y + 1], [x, h + 0.002, y + 1], top, [x + 0.5, 0, y + 0.5], { j: 0.04 });
-    }
-  }
+    if (h <= LINTEL_Y) return;
+    // The lintel's side profile (d, y): flat over the door's frame, then its underside rising at the doorway's slope
+    // to the wall's face (or to its top first, in a low wall: the mouth is then open above)
+    const rise = LINTEL_Y + dw.slope * (0.5 - DOOR_FRONT);
+    const profile: [number, number][] = rise < h
+      ? [[-0.5, LINTEL_Y], [DOOR_FRONT, LINTEL_Y], [0.5, rise], [0.5, h], [-0.5, h]]
+      : [[-0.5, LINTEL_Y], [DOOR_FRONT, LINTEL_Y], [DOOR_FRONT + (h - LINTEL_Y) / dw.slope, h], [-0.5, h]];
+    const L = 0.5 + DOOR_TUCK;
+    const ctr = at(0, 0, (LINTEL_Y + h) / 2, false);
+    profile.forEach(([d0, y0], k) => {
+      const [d1, y1] = profile[(k + 1) % profile.length];
+      walls.quad(at(-L, d0, y0), at(L, d0, y0), at(L, d1, y1), at(-L, d1, y1), y0 === h && y1 === h ? top : col, ctr, { j: 0.06 });
+    });
+    for (const l of [-L, L])
+      for (let k = 1; k < profile.length - 1; k++) walls.tri(at(l, ...profile[0]), at(l, ...profile[k]), at(l, ...profile[k + 1]), col, ctr, { j: 0.06 });
+  });
 
   const model = (name: string, m: Mesh): Model => ({ designId: 'terrain', seed, name, mesh: bake(m) });
   return { floor: model('Floor', floor), walls: model('Walls', walls) };

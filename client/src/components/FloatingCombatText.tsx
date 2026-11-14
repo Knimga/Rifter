@@ -5,18 +5,6 @@ import { TILE_SIZE } from '../viewEngine/board';
 /** An icon a float can show before its text: 'gold', the coin (gold picked up). */
 export type FloatIcon = 'gold';
 
-/**
- * A float's special look: 'levelUp', larger, brighter and glowing (the party leveling up); 'quest', in the display
- * font, regular weight and a little larger (a quest's news, a rift key found).
- */
-export type FloatLook = 'levelUp' | 'quest';
-
-const LOOK_CLASS: Record<FloatLook | 'combat', string> = {
-  combat: 'font-bold text-sm',
-  levelUp: 'font-bold rf-float-levelup',
-  quest: 'rf-float-quest',
-};
-
 export interface FloatingText {
   id: number;
   gridX: number;
@@ -24,7 +12,6 @@ export interface FloatingText {
   text: string;
   color: string;
   icon?: FloatIcon;
-  look?: FloatLook;
 }
 
 const DURATION_MS = 1500;
@@ -52,7 +39,7 @@ export default function FloatingCombatText({ ft, at, onComplete, hidden = false 
     >
       {/* As wide as its text, up to a few words' worth before it wraps (not the tile's narrow width), centered on it */}
       <span
-        className={`shrink-0 w-max max-w-[240px] text-center drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)] ${LOOK_CLASS[ft.look ?? 'combat']} ${ft.icon ? 'inline-flex items-center gap-1 whitespace-nowrap' : ''}`}
+        className={`shrink-0 w-max max-w-[240px] text-center drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)] font-bold text-sm ${ft.icon ? 'inline-flex items-center gap-1 whitespace-nowrap' : ''}`}
         style={{ color: ft.color, animation: `floatUp ${DURATION_MS}ms ease-out forwards` }}
       >
         {ft.icon === 'gold' && <FaCoins aria-hidden="true" className="w-3 h-3 shrink-0" style={{ color: 'var(--rift-gold)' }} />}

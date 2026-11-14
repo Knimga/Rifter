@@ -3,7 +3,7 @@
 import type { IconType } from 'react-icons';
 import type { ComponentType } from 'react';
 import type { AttackCategory, DamageElement } from '../gear';
-import type { BuffableStat } from '../units/stats';
+import type { BuffableStat, ThreatShiftStat } from '../units/stats';
 import type { HitOutcome } from './attackResolution';
 
 /**
@@ -25,6 +25,8 @@ export type AreaType = 'single' | 'blast1' | 'blast2' | 'line';
 export type EffectTarget = 'target' | 'caster' | 'allies' | 'source';
 
 type StatChanges = Partial<Record<BuffableStat, number>>;
+/** Percent changes: never on a threat shift (points of the threatMultiplier: flat only). */
+type StatPercentChanges = Partial<Record<Exclude<BuffableStat, ThreatShiftStat>, number>>;
 
 export type Effect =
   // damagesMP: the damage goes to the target's MP instead of HP (scaled and reduced exactly like HP
@@ -35,12 +37,13 @@ export type Effect =
   | { type: 'dot';     appliesTo: EffectTarget; damageElement: DamageElement; damagePerTurn: number; turns: number; damagesMP?: boolean; maxStacks?: number }
   // restoresMP: it restores MP instead of HP (worked out exactly like an HP heal)
   | { type: 'heal';    appliesTo: EffectTarget; damageElement: DamageElement; minHeal: number; maxHeal: number; restoresMP?: boolean }
-  | { type: 'hot';     appliesTo: EffectTarget; damageElement: DamageElement; healPerTurn: number; turns: number; maxStacks?: number }
+  // restoresMP: each tick restores MP instead of HP (as a heal's restoresMP; the amount is worked out like an HP tick)
+  | { type: 'hot';     appliesTo: EffectTarget; damageElement: DamageElement; healPerTurn: number; turns: number; maxStacks?: number; restoresMP?: boolean }
   // A buff or debuff changes stats, and/or sets a trigger on the unit for its turns (Trigger). Each cast is a
   // stack: a unit can have at most `maxStacks` of it at once (default: no limit; one if it has a trigger), from
   // any caster; one more replaces the oldest (addBuffs in units/stats.ts).
-  | { type: 'buff';    appliesTo: EffectTarget; damageElement?: DamageElement; stats?: StatChanges; statsPercent?: StatChanges; trigger?: Trigger; turns: number; maxStacks?: number }
-  | { type: 'debuff';  appliesTo: EffectTarget; damageElement?: DamageElement; stats?: StatChanges; statsPercent?: StatChanges; trigger?: Trigger; turns: number; maxStacks?: number }
+  | { type: 'buff';    appliesTo: EffectTarget; damageElement?: DamageElement; stats?: StatChanges; statsPercent?: StatPercentChanges; trigger?: Trigger; turns: number; maxStacks?: number }
+  | { type: 'debuff';  appliesTo: EffectTarget; damageElement?: DamageElement; stats?: StatChanges; statsPercent?: StatPercentChanges; trigger?: Trigger; turns: number; maxStacks?: number }
   // The caster's threat: `amount` flat, `percent` of their current threat; negative reduces it (to 0 at
   // least). Gains are scaled by the caster's threatMultiplier, reductions aren't (see applyThreatChange).
   | { type: 'threat'; appliesTo: EffectTarget; damageElement?: DamageElement; amount?: number; percent?: number }
@@ -90,20 +93,18 @@ export interface Aura {
 }
 
 /**
- * A lasting effect a creature or a party member has for good (`passiveEffects` on CreatureClassData and ClassData): a
- * buff or debuff (stats, and/or a trigger), a root, an aura, a HoT or a DoT, written like an ability's effect of that
- * kind but with no `appliesTo` (it is on its bearer), `turns` (it never runs out) or `maxStacks` (it is one). It is on
- * the unit from the start (stats.ts passiveEffectEntries), shows no marker and cannot be dispelled; a trigger's bearer
- * put it on itself, so its effects on 'source' land on the bearer and its own bonuses count (as on a self-cast trigger
- * buff). Amounts are as written: a HoT or DoT is not scaled by the bearer's stats, and a DoT builds no threat. `name` is
- * what its effects show as on those inside an aura, and floats when its trigger fires.
+ * A behavior a creature or a party member has for good (`passiveEffects` on CreatureClassData and ClassData): a
+ * `trigger` or an `aura`, exactly one. Only what flat passives can't say goes here: stat bonuses are `passives` (and a
+ * creature's `resistances`), regeneration is the hpRegen / mpRegen stats. It is on the unit from the start
+ * (stats.ts passiveEffectEntries), shows no marker and cannot be dispelled; a trigger's bearer put it on itself, so its
+ * effects on 'source' land on the bearer. `name` is what an
+ * aura's effects show as on those inside it, and floats when a trigger fires.
  */
-export interface PassiveEffect {
+export type PassiveEffect = {
   name: string;
-  /** Its element, for an effect with none of its own (a buff's damageElement): the color it is shown in. */
+  /** Its element: the color it is shown in. */
   damageElement?: DamageElement;
-  effect: DistributiveOmit<Extract<Effect, { type: 'buff' | 'debuff' | 'root' | 'aura' | 'hot' | 'dot' }>, 'appliesTo' | 'turns' | 'maxStacks'>;
-}
+} & ({ trigger: Trigger; aura?: never } | { aura: Aura; trigger?: never });
 
 /** An attack's outcome a trigger reacts to: one of rollHit's, or 'stopped' (any of miss, dodge, parry, block). */
 export type TriggerOutcome = HitOutcome | 'stopped';
@@ -125,11 +126,10 @@ export type TriggerEffect = Effect | { type: 'weaponAttack'; appliesTo: 'target'
  *   never sets it off) narrow which.
  * - 'healing' / 'healed': a heal effect landing, from the bearer / on it (a self-heal is both). HoT ticks aren't.
  * It fires at `chance`% (default 100), if the bearer is still alive. Its effects land without a hit roll or crit;
- * damage and DoTs are flat, reduced by the recipient's armor/MR and resistance, heals flat (plus the recipient's
- * healingReceived). On a buff the bearer cast on itself, the bearer's own bonuses count too: its damage bonus and
- * penetration for the element (as an attack of the triggering attack's category, else magic; half the bonus on a
- * DoT), its healing on heals (half on a HoT). A trigger's results set off no triggers, except that a triggered weapon attack's hit roll is
- * an attack event like any other (it never sets off another weapon attack).
+ * damage and DoTs are flat, reduced by the recipient's armor/MR and resistance, heals flat (not even the recipient's
+ * healingReceived counts). No bonus of the bearer or of whoever cast the trigger ever counts: a triggered effect does
+ * exactly what its data reads at the bearer's level (levelScale). A trigger's results set off no triggers, except that
+ * a triggered weapon attack's hit roll is an attack event like any other (it never sets off another weapon attack).
  */
 export interface Trigger {
   when: 'attacking' | 'attacked' | 'healing' | 'healed';
@@ -169,6 +169,11 @@ export interface Ability {
   apCost: number;                  // action points it takes on the turn (moving and abilities share them)
   range: number;
   target: TargetType;
+  /**
+   * An 'ally' ability that can target only its caster's own summons (not the party, nor another's summons): aimed at
+   * one, or an area that takes in none of them, it can't be used. Creatures' AI never casts one (enemyAI.ts).
+   */
+  summonsOnly?: boolean;
   displayElement?: DamageElement;
   area?: AreaType;                  // defaults to 'single'
   attackCategory?: AttackCategory;  // how the hit roll is resolved
@@ -183,15 +188,59 @@ export interface Ability {
 }
 
 /**
- * How much an ability's MP cost grows per caster level above 1: a quarter of its base cost a level. MP pools grow with
- * level (Mind × level), so a fixed cost would soon hardly touch them; this keeps spells a real drain, while a bigger
- * pool (Mind, +MP gear) still buys more casts.
+ * How much an ability's MP cost grows per caster level above 1: a tenth of its base cost a level. MP pools grow with
+ * level (a level term, and Mind), so a fixed cost would soon hardly touch them; this keeps spells a real drain, while a
+ * bigger pool (Mind, +MP gear) still buys more casts.
  */
-export const MP_COST_PER_LEVEL = 0.25;
+export const MP_COST_PER_LEVEL = 0.1;
 
 /** What an ability costs in MP for a caster of `level` (party member or creature alike): its mpCost, grown with level. */
 export const mpCostAt = (ability: Pick<Ability, 'mpCost'>, level: number): number =>
   Math.round(ability.mpCost * (1 + MP_COST_PER_LEVEL * Math.max(0, level - 1)));
+
+/**
+ * How much the amounts effects deal or give grow per level above 1 of whoever uses them: damage, heals, HoTs, DoTs and
+ * threat amounts, the same for party members and creatures (levelScale). HP grows linearly with level too (stats.ts),
+ * so a fight keeps its length; what a unit adds itself (its damage %, healing %) is its growth.
+ */
+export const DAMAGE_PER_LEVEL = 0.025;
+
+/** What an effect's data amounts are multiplied by for a unit of `level` (1 at level 1). */
+export const levelScale = (level: number): number => 1 + DAMAGE_PER_LEVEL * Math.max(0, level - 1);
+
+/** A data amount (damage, heal, HoT or DoT per turn, threat) at a unit's level: rounded, never below 0. */
+export const atLevel = (amount: number, level: number): number => Math.max(0, Math.round(amount * levelScale(level)));
+
+/** An effect's amounts at a unit's level (atLevel), for showing it (ability cards); a trigger's or aura's effects too. */
+export function effectAtLevel<E extends TriggerEffect | AuraEffect>(eff: E, level: number): E {
+  const n = (v: number) => atLevel(v, level);
+  switch (eff.type) {
+    case 'damage': return { ...eff, minDamage: n(eff.minDamage), maxDamage: n(eff.maxDamage) };
+    case 'heal': return { ...eff, minHeal: n(eff.minHeal), maxHeal: n(eff.maxHeal) };
+    case 'hot': return { ...eff, healPerTurn: n(eff.healPerTurn) };
+    case 'dot': return { ...eff, damagePerTurn: n(eff.damagePerTurn) };
+    case 'threat': return eff.amount ? { ...eff, amount: Math.sign(eff.amount) * n(Math.abs(eff.amount)) } : eff;
+    case 'buff':
+    case 'debuff':
+      return 'trigger' in eff && eff.trigger ? { ...eff, trigger: triggerAtLevel(eff.trigger, level) } : eff;
+    case 'aura': return { ...eff, aura: auraAtLevel(eff.aura, level) };
+    default: return eff;
+  }
+}
+
+/** A trigger's effects at a unit's level (effectAtLevel). */
+export const triggerAtLevel = (t: Trigger, level: number): Trigger => ({ ...t, effects: t.effects.map(e => effectAtLevel(e, level)) });
+
+/** An aura's effects at a unit's level (effectAtLevel). */
+export const auraAtLevel = (a: Aura, level: number): Aura => ({ ...a, effects: a.effects.map(e => effectAtLevel(e, level)) });
+
+/** An ability as it reads for a caster of `level`: its effects' amounts at that level (effectAtLevel). */
+export const abilityAtLevel = <A extends Pick<Ability, 'effects'>>(ability: A, level: number): A =>
+  level <= 1 ? ability : { ...ability, effects: ability.effects.map(e => effectAtLevel(e, level)) };
+
+/** A passive effect as it reads for a unit of `level`: its trigger's or aura's amounts at that level. */
+export const passiveEffectAtLevel = (p: PassiveEffect, level: number): PassiveEffect =>
+  p.trigger ? { ...p, trigger: triggerAtLevel(p.trigger, level) } : { ...p, aura: auraAtLevel(p.aura, level) };
 
 /** Effect types an enemy-target ability applies to its targets (executeAction); any other there does nothing. */
 const ENEMY_TARGET_EFFECTS: ReadonlySet<Effect['type']> = new Set(['damage', 'dot', 'debuff', 'root', 'dispel']);
@@ -216,22 +265,19 @@ function warnAura(a: Aura, warn: (msg: string) => void): void {
 export function warnIgnoredPassives(owner: string, passives: readonly PassiveEffect[] = []): void {
   for (const p of passives) {
     const warn = (msg: string) => console.warn(`${owner} › ${p.name} (passive): ${msg}`);
-    const e = p.effect;
-    if (e.type === 'buff' || e.type === 'debuff') {
-      if (e.trigger) warnTrigger(e.trigger, warn);
-      else if (!Object.keys(e.stats ?? {}).length && !Object.keys(e.statsPercent ?? {}).length) warn(`its ${e.type} changes no stat and has no trigger`);
-    }
-    if (e.type === 'aura') warnAura(e.aura, warn);
+    if (p.trigger) warnTrigger(p.trigger, warn);
+    else warnAura(p.aura, warn);
   }
 }
 
 /**
- * Warn (once, at load) about movement abilities (Ability.move) in a creature's or summon's table: the enemy AI doesn't
- * choose them yet (enemyAI.ts), so they would never be used. Resolution is shared with the party's (abilityMoves.ts),
- * so only the AI's choosing is missing.
+ * Warn (once, at load) about movement abilities (Ability.move) in a creature's or summon's table that the enemy AI
+ * never uses (enemyAI.ts): it uses an enemy-target one as an attack and a 'tile' one to close in, nothing else.
  */
 export function warnCreatureMoves(owner: string, abilities: readonly Ability[]): void {
-  for (const a of abilities) if (a.move) console.warn(`${owner} › ${a.name}: creatures don't use movement abilities yet (enemyAI.ts skips them)`);
+  for (const a of abilities) {
+    if (a.move && a.target !== 'enemy' && a.target !== 'tile') console.warn(`${owner} › ${a.name}: creatures use only enemy-target (attack) and 'tile' (close in) movement abilities (enemyAI.ts skips this one)`);
+  }
 }
 
 /** Whether an ability calls up a forever summon (a 'summon' effect with `turns: 'forever'`). */
@@ -258,6 +304,7 @@ export function warnCreatureCleanses(owner: string, abilities: readonly Ability[
     if ((a.target === 'self' || a.target === 'ally') && a.effects.some(e => e.type === 'dispel')) {
       console.warn(`${owner} › ${a.name}: creatures don't choose cleansing abilities yet (enemyAI.ts)`);
     }
+    if (a.summonsOnly) console.warn(`${owner} › ${a.name}: summonsOnly is the party's only (enemyAI.ts skips it)`);
   }
 }
 
@@ -271,6 +318,7 @@ export function warnIgnoredEffects(owner: string, abilities: readonly Ability[])
   for (const a of abilities) {
     const warn = (msg: string) => console.warn(`${owner} › ${a.name}: ${msg}`);
     if (a.move && a.target === 'self') warn("its move does nothing on a 'self' ability (there is no square to aim at)");
+    if (a.summonsOnly && a.target !== 'ally') warn(`its summonsOnly does nothing on a '${a.target}' ability (only 'ally' ones aim at units of the party's side)`);
     for (const e of a.effects) {
       if (e.appliesTo === 'source') warn(`its '${e.type}' effect on 'source' does nothing outside a trigger`);
       if ((e.type === 'buff' || e.type === 'debuff') && e.trigger) {

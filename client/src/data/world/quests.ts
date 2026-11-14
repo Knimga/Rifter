@@ -49,6 +49,13 @@ export const QUESTS: QuestData[] = [
       { id: 'return-ardas', objective: 'Return to Ardas' },
     ],
   },
+  // Ardas gives it on completing "Use the Rifter": the party keeps exploring rifts (its one step has no way to finish yet)
+  {
+    id: 'explore-the-rifts', name: 'Explore the Rifts',
+    steps: [
+      { id: 'keep-exploring', objective: 'Keep exploring rifts' },
+    ],
+  },
 ];
 
 /** A quest by id. */

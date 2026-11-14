@@ -1,8 +1,9 @@
 // Model for Lynn (data/world/npcs.ts › lynn), the Sanctum's enchanter. The class characters' body (buildBody) in
 // its female figure (narrower shoulders, thinner arms, a softer jaw), standing as Denisel does, holding nothing: both
 // arms hang loosely at her sides. A near-black blouse with a waist and a bosom, trimmed in ice blue at the neck and cuffs, a
-// dark teal skirt to her ankles with an ice blue band along its hem, and small black boots (a female figure's, as are
-// her thinner legs). Fair skin. Very dark brown hair pulled back in a ponytail, held by a large ice blue cuff.
+// slim dark teal skirt to her ankles (a gentle A-line, not flaring at the hips) with an ice blue band along its hem, and
+// small black boots (a female figure's, as are her thinner legs). Fair skin. Very dark brown hair pulled back in a
+// ponytail, held by a large ice blue cuff.
 // One person, so one look: everything here is fixed.
 import type { Design } from '../../core/types';
 import type { RGB } from '../../core/vec';
@@ -29,7 +30,7 @@ const design: Design = {
     // Under the skirt: the body's trousers are her skin
     buildBody(m, { skin: SKIN, pants: SKIN, boots: BOOTS, sleeves: SHIRT, gloves: SKIN }, build);
     blouse(m, SHIRT, build, ICE);
-    skirt(m, { cloth: SKIRT, trim: ICE });
+    skirt(m, { cloth: SKIRT, trim: ICE, slim: true });
     ponytailHair(m, HAIR, ICE, 1.6); // a large cuff, so it shows from the game's view
     return 'Lynn';
   },

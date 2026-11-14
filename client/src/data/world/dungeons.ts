@@ -48,6 +48,7 @@ export const DUNGEONS: Record<string, DungeonConfig> = {
     doorObject: 'heavy-door',
     riftColor: [178, 236, 192], // pale, ghostly necrotic green, washed toward white-grey
     keyName: 'Necrotic Key',
+    tier: 1,
     zones: [
       {
         minRoomSize: 4,
@@ -98,6 +99,7 @@ export const DUNGEONS: Record<string, DungeonConfig> = {
     doorObject: 'heavy-door',
     riftColor: [255, 168, 72],  // fiery orange, deepening to ember red
     keyName: 'Fiery Key',
+    tier: 1,
     zones: [
       {
         minRoomSize: 5,
@@ -123,9 +125,9 @@ export const DUNGEONS: Record<string, DungeonConfig> = {
         containers: ['dead-adventurer'],
         obstacles: { objects: ['lava-plume'], roomChance: 0.5, density: 0.04 },
         enemyGroups: [
-          [fireElemental, lavaSlime, lavaSlime],
-          [hellhound, hellhound, flameGolem],
-          [hellhound, hellhound, fireElemental]
+          [fireElemental, fireElemental, lavaSlime, lavaSlime],
+          [hellhound, hellhound, hellhound, flameGolem],
+          [hellhound, hellhound, fireElemental, fireElemental]
         ],
       }
     ],
@@ -154,6 +156,7 @@ export const DUNGEONS: Record<string, DungeonConfig> = {
     doorObject: 'heavy-door',
     riftColor: [218, 230, 124], // sickly spore yellow-green, deepening to moss
     keyName: 'Fetid Key',
+    tier: 1,
     zones: [
       {
         minRoomSize: 6,
@@ -208,6 +211,7 @@ export const DUNGEONS: Record<string, DungeonConfig> = {
     doorObject: 'heavy-door',
     riftColor: [32, 107, 35], // rich green (#206b23)
     keyName: 'Gnawed Key',
+    tier: 1,
     zones: [
       {
         // Many small square-cut rooms (about 12 a zone) joined by 1-tile hallways
@@ -262,6 +266,7 @@ export const DUNGEONS: Record<string, DungeonConfig> = {
     doorObject: 'heavy-door',
     riftColor: [30, 30, 70],
     keyName: 'Lightless Key',
+    tier: 1,
     zones: [
       {
         minRoomSize: 4,
@@ -298,7 +303,31 @@ export const DUNGEONS: Record<string, DungeonConfig> = {
       bossGroup: [PaleBroodmother],
       containers: ['solid-treasure-chest'],
     }
-  }
+  },
+  // Tier 1's stronghold: a dark citadel of Voth's followers and spawn (cultists, voidbeasts, mutated creatures). Its key
+  // drops once the party has the other tier-1 keys; its boss drops the first tier-2 key (bossKeyDrop).
+  // PLACEHOLDER: only enough to be valid and enterable (an empty boss room). Its name, key, color, look, zones and
+  // boss are still to be written.
+  citadel: {
+    name: 'The Citadel',
+    width: 40,
+    height: 34,
+    terrain: {
+      floor: { color: [36, 32, 44], seam: [18, 16, 24], pattern: 'flagstones', bumpiness: 0.3 },
+      walls: { color: [36, 32, 44], finish: 'masonry', height: 'high', bumpiness: 0.3 },
+    },
+    doorObject: 'heavy-door',
+    riftColor: [104, 44, 200],
+    keyName: 'Citadel Key',
+    tier: 1,
+    stronghold: true,
+    zones: [],
+    bossZone: {
+      roomSize: 12,
+      corridorWidth: 2,
+      bossGroup: [],
+    },
+  },
 } satisfies Record<string, DungeonConfig>;
 
 /** A dungeon, by its DUNGEONS key. */

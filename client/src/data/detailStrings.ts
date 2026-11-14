@@ -84,7 +84,7 @@ export function formatStatLabel(key: string): string {
     return key.replace('Bonus', '').replace(/([A-Z])/g, ' $1').trim()
         .replace(/^\w/, c => c.toUpperCase())
         .replace(/^Hp\b/, 'HP').replace(/^Mp\b/, 'MP').replace(/^Ap Max$/, 'Max AP')
-        .replace(/^(Threat Multiplier|Increased Threat|Reduced Threat)$/, 'Threat');
+        .replace(/^(Increased Threat|Reduced Threat)$/, 'Threat');
 }
 
 /**
@@ -138,12 +138,12 @@ export interface EffectLine {
 }
 
 /**
- * A weapon's damage as item tooltip lines: its base damage, and with a non-zero `damageBonus` (the wielder's
- * offense damage for its element) the scaled damage under it.
+ * A weapon's damage as item tooltip lines: its base damage, and with a `factor` other than 1 (its wielder's level
+ * scale and damage % for its element: Offense.factor) the damage it deals under it.
  */
-export function weaponDamageLines(eff: Extract<Effect, { type: 'damage' }>, damageBonus = 0): EffectLine[] {
+export function weaponDamageLines(eff: Extract<Effect, { type: 'damage' }>, factor = 1): EffectLine[] {
     const lines: EffectLine[] = [{ label: 'Base Damage', value: `${eff.minDamage}–${eff.maxDamage}`, element: eff.damageElement, tone: 'base' }];
-    if (damageBonus) lines.push({ label: 'Damage', value: span(...scaledRange(eff.minDamage, eff.maxDamage, damageBonus)), element: eff.damageElement, tone: 'damage' });
+    if (factor !== 1) lines.push({ label: 'Damage', value: span(...scaledRange(eff.minDamage, eff.maxDamage, factor)), element: eff.damageElement, tone: 'damage' });
     return lines;
 }
 
@@ -203,7 +203,9 @@ export function auraText(aura: Aura): Sentence {
                 return [plain(debuff ? 'inflicts ' : 'grants '), hl(stats, debuff ? 'debuff' : 'buff'), plain(` ${debuff ? 'on' : 'to'} ${reach(eff)}`)];
             }
             case 'hot':
-                return [plain('heals '), hl(`${eff.healPerTurn} per turn`, 'hot'), plain(` to ${reach(eff)}`)];
+                return eff.restoresMP
+                    ? [plain('restores '), hl(`${eff.healPerTurn} MP`, 'mpRestore'), plain(` per turn to ${reach(eff)}`)]
+                    : [plain('heals '), hl(`${eff.healPerTurn} per turn`, 'hot'), plain(` to ${reach(eff)}`)];
             case 'dot':
                 return [plain('deals '), ...amountOf(`${eff.damagePerTurn}`, eff.damageElement, eff.damagesMP ? 'mpDamage' : 'dot'),
                     plain(`${eff.damagesMP ? ' MP' : ''} damage per turn to ${reach(eff)}`)];
@@ -251,7 +253,9 @@ function effectPhrase(eff: TriggerEffect, whom: string | null, third: boolean, a
                 ? [plain(`${v('restore')} `), hl(`${span(eff.minHeal, eff.maxHeal)} MP`, 'mpRestore'), ...to('to')]
                 : [plain(`${v('heal')}${obj} for `), hl(span(eff.minHeal, eff.maxHeal), 'heal')];
         case 'hot':
-            return [plain(`${v('heal')}${obj} for `), hl(`${eff.healPerTurn} per turn`, 'hot'), plain(` ${forTurns(eff.turns)}`)];
+            return eff.restoresMP
+                ? [plain(`${v('restore')} `), hl(`${eff.healPerTurn} MP`, 'mpRestore'), plain(` per turn ${forTurns(eff.turns)}`), ...to('to')]
+                : [plain(`${v('heal')}${obj} for `), hl(`${eff.healPerTurn} per turn`, 'hot'), plain(` ${forTurns(eff.turns)}`)];
         case 'buff':
         case 'debuff': {
             const debuff = eff.type === 'debuff';
@@ -275,7 +279,7 @@ function effectPhrase(eff: TriggerEffect, whom: string | null, third: boolean, a
             // The creature's id, which is its name ('fungal-spore' → 'Fungal Spore'; data/units/summons.ts, not
             // imported here: it imports this module's), and how many can be out at once when more than one
             const name = capitalizeWords(eff.creature.replace(/-/g, ' '));
-            const lasts = eff.turns === 'forever' ? 'until slain or the party leaves the dungeon' : forTurns(eff.turns);
+            const lasts = eff.turns === 'forever' ? 'that lasts until slain' : forTurns(eff.turns);
             return [plain(`${v('summon')} `), hl(aOrAn(name), 'buff'), plain(` ${lasts}${(eff.max ?? 1) > 1 ? `, up to ${eff.max} at once` : ''}`)];
         }
         case 'dispel': {
@@ -339,33 +343,11 @@ export function triggerSentence(t: Trigger, turns?: number, bearer = 'itself'): 
 export const describeTrigger = (t: Trigger): string => sentenceText(triggerSentence(t));
 
 /**
- * What a passive effect does to its bearer, as sentences (the class kit and character select list them; `bearer` is
- * what a trigger calls its bearer): one for its stat changes ('+3 Block': no full stop, like the flat passives beside
- * it), one for its trigger, aura, root, HoT or DoT. A buff with both stats and a trigger gives both.
+ * What a passive effect does to its bearer, as a sentence (the class kit and character select list them; `bearer` is
+ * what a trigger calls its bearer): its trigger or its aura.
  */
-export function passiveEffectSentences(p: PassiveEffect, bearer = 'you'): Sentence[] {
-    const e = p.effect;
-    switch (e.type) {
-        case 'buff':
-        case 'debuff': {
-            const debuff = e.type === 'debuff';
-            const stats = statChanges(e, debuff);
-            return [
-                ...(stats ? [[hl(stats, debuff ? 'debuff' : 'buff')]] : []),
-                ...(e.trigger ? [triggerSentence(e.trigger, undefined, bearer)] : []),
-            ];
-        }
-        case 'root':
-            return [finish([plain("can't move")])];
-        case 'aura':
-            return [finish([plain('radiates an aura that '), ...auraText(e.aura)])];
-        case 'hot':
-            return [finish([plain('heals '), hl(`${e.healPerTurn} per turn`, 'hot')])];
-        case 'dot':
-            return [finish([plain('takes '), ...amountOf(`${e.damagePerTurn}`, e.damageElement, e.damagesMP ? 'mpDamage' : 'dot'),
-                plain(`${e.damagesMP ? ' MP' : ''} damage per turn`)])];
-    }
-}
+export const passiveEffectSentence = (p: PassiveEffect, bearer = 'you'): Sentence =>
+    p.trigger ? triggerSentence(p.trigger, undefined, bearer) : finish([plain('radiates an aura that '), ...auraText(p.aura)]);
 
 /** Who an ability's effect lands on: the ability's own target kind, the caster ('self'), or its allies in the area. */
 type Gets = TargetType | 'allies';
@@ -421,7 +403,7 @@ export function abilitySentences(ability: Pick<Ability, 'target' | 'area' | 'ran
         if (eff.type === 'heal' && !eff.restoresMP) {
             const phrase = effectPhrase(eff, whom, true);
             const hot = next();
-            if (hot?.type === 'hot') {
+            if (hot?.type === 'hot' && !hot.restoresMP) {
                 i++;
                 phrase.push(plain(', then '), hl(`${hot.healPerTurn} per turn`, 'hot'), plain(` ${forTurns(hot.turns)}`), ...stacking(hot));
             }

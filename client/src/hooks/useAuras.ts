@@ -32,10 +32,10 @@ export function useAuras({ members, partyPositions, partyStats, currentZone, ene
         const pos = positions.current[i];
         if (m.hp <= 0 || !pos) return [];
         const key = unitKey({ side: 'party', idx: i });
-        return [{ key, side: 'party', body: { pos }, zone: currentZone, healing: partyStats[i]?.healing ?? 0, threatKey: key, auras: auraSources(m.buffs) }];
+        return [{ key, side: 'party', body: { pos }, zone: currentZone, level: partyStats[i]?.level ?? 1, healing: partyStats[i]?.healing ?? 0, threatKey: key, auras: auraSources(m.buffs) }];
       }),
       ...enemies.filter(e => e.zoneId === currentZone && e.currentHp > 0).map((e): AuraUnit => ({
-        key: e.id, side: isAlly(e) ? 'party' : 'enemy', body: bodyOf(e), zone: e.zoneId, healing: e.stats.healing,
+        key: e.id, side: isAlly(e) ? 'party' : 'enemy', body: bodyOf(e), zone: e.zoneId, level: e.stats.level, healing: e.stats.healing,
         threatKey: isAlly(e) ? e.id : undefined, auras: auraSources(e.buffs),
       })),
     ];

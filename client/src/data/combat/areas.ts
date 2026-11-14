@@ -1,6 +1,6 @@
 // Ability areas: which tiles an ability aimed at a tile affects (a single tile, a blast, a line).
 import type { Ability, AreaType } from './abilities';
-import { bresenham, chebyshev, covers, footprint, footprintKeys, posKey, type Body, type Pos } from '../world/grid';
+import { bresenham, chebyshev, covers, footprint, footprintKeys, posKey, samePos, type Body, type Pos } from '../world/grid';
 
 /** Whether an ability hits an area (blast, line) rather than one unit. */
 export const isArea = (a: { area?: AreaType }): boolean => !!a.area && a.area !== 'single';
@@ -17,7 +17,7 @@ export const blastRadius = (area: 'blast1' | 'blast2'): number => (area === 'bla
 /**
  * The floor tiles affected by an area ability aimed at `target`: a tile, or a body (areaCenter: a large creature
  * aimed at, or a large caster's own burst). A blast spreads around the whole of it (blast1 on a 2×2: it and the
- * ring of 12 around it); a line runs from the caster's tile nearest the aim.
+ * ring of 12 around it; a blast aimed at a tile is never given one: areaAim); a line runs from the caster's tile nearest the aim.
  */
 export function getAffectedTiles(
   caster: Pos | Body,
@@ -62,12 +62,22 @@ export const areaCenter = (at: Pos, units: Body[]): Pos | Body =>
   units.find(u => (u.size ?? 1) > 1 && covers(u, at)) ?? at;
 
 /**
+ * What an area used by `caster` and aimed at tile `at` centers on, with `units` (everyone else on the map) in place.
+ * A blast aimed at a tile stays a plain square round that tile (blast1 is always 3×3), even on a large creature; it
+ * wraps a large body only when centered on the caster itself (its own burst). Anything else (a single target, a
+ * line) is centered on the large body there, if any (areaCenter).
+ */
+export const areaAim = (caster: Pos | Body, at: Pos, area: AreaType | undefined, units: Body[]): Pos | Body => {
+  const blast = area === 'blast1' || area === 'blast2';
+  return blast && !footprint(caster).some(t => samePos(t, at)) ? at : areaCenter(at, [...('pos' in caster ? [caster] : []), ...units]);
+};
+
+/**
  * Keys of the tiles an ability used by `caster` and aimed at tile `at` affects, with `units` (everyone else on the
- * map) in place: centered on the large body there, if any (areaCenter; the caster's own, for its burst). What
- * aiming, the AI, the hits and the map's preview all use.
+ * map) in place (areaAim). What aiming, the AI, the hits and the map's preview all use.
  */
 export const aimedArea = (caster: Body, at: Pos, area: AreaType | undefined, floors: ReadonlySet<string>, units: Body[]) =>
-  affectedKeys(caster, areaCenter(at, [caster, ...units]), area, floors);
+  affectedKeys(caster, areaAim(caster, at, area, units), area, floors);
 
 /**
  * What an ability's area does to those in it (the map tints it by this): harms (an enemy ability's effects on its

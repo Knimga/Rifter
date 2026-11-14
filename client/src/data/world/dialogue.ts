@@ -128,10 +128,11 @@ export const DIALOGUES: Record<string, Conversation[]> = {
       opening: [
         "Ha! You've done it! And you've returned with another rift key! So... a pattern is established. Defeating a rift-guardian grants you access to the next one. And you still hold the first key, and can revisit at any time.",
         "I don't know where this cycle will lead, but we must follow it. It is the only forward motion we have. Maybe inside one of these dimensions we will find something that can lead us to answers, or salvation.",
-        "Take some time to rest. See Denisel to trade for a new piece of gear, and Lynn to enchant what you have. When you're ready, use the Rifter again, and keep exploring. Come to me again if you find something.",
+        "Take some time to rest. See Denisel to trade for a new piece of gear, and Lynn to enchant what you have. When you're ready, use the Rifter again, and keep exploring.",
+        "Some new breadcrumb may eventually appear. It must. Come to me when it does.",
         "Good luck!"
       ],
-      effects: [{ kind: 'completeQuest', quest: 'use-the-rifter' }],
+      effects: [{ kind: 'completeQuest', quest: 'use-the-rifter' }, { kind: 'giveQuest', quest: 'explore-the-rifts' }],
     },
     {
       opening: ["Ah... Still here. Good. What would you like to know?"],

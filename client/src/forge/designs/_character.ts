@@ -554,24 +554,37 @@ const SHAWL_FOLDS: [y: number, rx: number, rz: number, dip: number, r: number][]
  * `coversFace` it is pulled up over the mouth to just below the nose; otherwise it ends in a gathered
  * collar under the chin. 12-sided rings with room to spare, so the head's squarish jaw never pokes through.
  * `bunched`: the fabric lies on the shoulders in thick folds (SHAWL_FOLDS) rather than as a smooth covering.
+ * A female figure's (`build.figure` 'female') is slimmer, hugging her upper arms and back: 14-sided, shaped
+ * over the bust (bustRing) just outside a robe's or blouse's front (casterRobe's open edging never pokes through), its
+ * lower edge falling lower down her back, and roomy enough at the neck to sit outside casterRobe's cowl and hood.
+ * (The bunched folds are sized for the male figure.)
  */
-export function shawl(m: Mesh, color: RGB, coversFace: boolean, bunched = false): void {
+export function shawl(m: Mesh, color: RGB, coversFace: boolean, bunched = false, build: BodyBuild = {}): void {
   const T = TORSO;
   m.part('shawl', [0, T.collar, 0]);
   const [hx, hy, hz] = HEAD.center;
-  const N = 12;
-  const rings = [
-    ell(T.shoulder - 0.1, 0.325, 0.165, N), // lower edge, over chest, back and upper arms
+  const female = build.figure === 'female';
+  const N = female ? 14 : 12;
+  const LOW = T.shoulder - (female ? 0.12 : 0.1);
+  const rings = female ? [
+    bustRing(LOW, 0.285, 0.13, 0.07, N), // lower edge, around the upper arms and over the bust
+    bustRing(T.shoulder + 0.06, 0.28, 0.15, 0.03, N), // over the shoulder caps
+    ell(T.collar + 0.03, 0.176, 0.136, N), // gathered at the neck, outside a hood's cowl
+  ] : [
+    ell(LOW, 0.325, 0.165, N), // lower edge, over chest, back and upper arms
     ell(T.shoulder + 0.045, 0.3, 0.152, N), // capping the shoulders and arm tops
     ell(T.collar + 0.03, 0.135, 0.112, N), // gathered around the neck
   ];
+  const s0 = m.faces.length;
   if (coversFace) {
     rings.push(ell(hy - HEAD.ry * 0.62, 0.112, 0.13, N, hx, hz + 0.02)); // around the jaw and mouth
     rings.push(ell(hy - HEAD.ry * 0.18, 0.118, 0.136, N, hx, hz + 0.015)); // top edge, just below the nose
   } else {
     rings.push(ell(T.collar + 0.075, 0.13, 0.108, N)); // a soft collar under the chin
   }
-  loft(m, rings, color, { caps: false });
+  loft(m, rings, color, { caps: false, bandCenters: female });
+  // A female figure's lower edge falls lower down her back, deepest at the middle
+  if (female) m.xf(s0, (p) => (p[1] < LOW + 0.01 && p[2] < 0 ? [p[0], p[1] - 0.16 * (-p[2] / 0.13) ** 1.5, p[2]] : p));
   if (!bunched) return;
   // The folds: each a closed roll around the body, its path wavering and sagging unevenly, swelling and thinning as it
   // goes (slow waves, out of step from fold to fold)
@@ -599,6 +612,11 @@ export interface HoodLook {
   trim: RGB;
 }
 
+/** A soft cowl of cloth gathered around the neck, where a robe's hood (down, or up: casterRobe's `hoodUp`) meets it. */
+function neckCowl(m: Mesh, cloth: RGB): void {
+  loft(m, [ell(TORSO.collar - 0.03, 0.19, 0.14, 12), ell(TORSO.collar + 0.03, 0.165, 0.125, 12), ell(TORSO.collar + 0.07, 0.145, 0.112, 12)], cloth, { caps: false });
+}
+
 /**
  * A hood pushed back: a soft cowl gathered around the neck, and the empty hood hanging behind the head:
  * a tapering cone whose wide base is gathered at the back of the collar (blending into the shoulders)
@@ -606,7 +624,7 @@ export interface HoodLook {
  */
 export function hoodDown(m: Mesh, look: HoodLook): void {
   m.part('hood', [0, TORSO.collar, 0]);
-  loft(m, [ell(TORSO.collar - 0.03, 0.19, 0.14, 12), ell(TORSO.collar + 0.03, 0.165, 0.125, 12), ell(TORSO.collar + 0.07, 0.145, 0.112, 12)], look.cloth, { caps: false });
+  neckCowl(m, look.cloth);
 
   // The hanging hood, built along its own axis D (back and down from the collar), X across, Y its "up"
   const base: Vec3 = [0, TORSO.collar - 0.05, -0.1];
@@ -818,6 +836,11 @@ export interface SkirtLook {
    * about 0.4 is a little past the knee. Lower is longer, and flares wider.
    */
   hem?: number;
+  /**
+   * Slim: a gentle A-line from the waist to the hem, as casterRobe's female robe (just clear of the thighs and knees),
+   * not flaring out at the hips. Lynn's.
+   */
+  slim?: boolean;
 }
 
 /**
@@ -829,13 +852,19 @@ export function skirt(m: Mesh, look: SkirtLook): void {
   const T = TORSO;
   const N = 14;
   const hem = look.hem ?? 0.13;
-  // The hem's half-widths: wider the longer it falls (0.27 x 0.2 just past the knee)
-  const hx = 0.27 + (0.4 - hem) * 0.12, hz = 0.2 + (0.4 - hem) * 0.1;
+  // The hem's half-widths: wider the longer it falls (0.27 x 0.2 just past the knee; slim, 0.24 x 0.165)
+  const hx = look.slim ? 0.24 + (0.4 - hem) * 0.08 : 0.27 + (0.4 - hem) * 0.12;
+  const hz = look.slim ? 0.165 + (0.4 - hem) * 0.06 : 0.2 + (0.4 - hem) * 0.1;
+  // Its rings' half-widths from the knee up to the hips
+  const [knee, thigh, hip, hipTop] = look.slim
+    ? [[0.235, 0.16], [0.215, 0.145], [0.2, 0.13], [0.176, 0.116]]
+    : [[0.255, 0.185], [0.24, 0.17], [0.208, 0.14], [0.182, 0.123]];
   m.part('skirt', [0, T.waist, 0]);
   loft(m, [
     ell(hem, hx, hz, N),
-    ...(hem < 0.42 ? [ell(0.47, 0.255, 0.185, N)] : []), // past the knee: falling straight from there
-    ell(T.hip - 0.14, 0.24, 0.17, N), ell(T.hip, 0.208, 0.14, N), ell(T.hip + 0.04, 0.182, 0.123, N), ell(T.waist - 0.04, 0.142, 0.097, N),
+    ...(hem < 0.42 ? [ell(0.47, knee[0], knee[1], N)] : []), // past the knee: falling straight from there
+    ell(T.hip - 0.14, thigh[0], thigh[1], N), ell(T.hip, hip[0], hip[1], N), ell(T.hip + 0.04, hipTop[0], hipTop[1], N),
+    ell(T.waist - 0.04, 0.142, 0.097, N),
   ], look.cloth, { bandCenters: true, caps: false });
   // Closed at the waist, over the blouse
   loft(m, [ell(T.waist - 0.04, 0.142, 0.097, N), ell(T.waist - 0.025, 0.136, 0.093, N)], look.cloth);
@@ -862,13 +891,17 @@ export interface CasterRobeLook {
    * the opening edged in `trim` from the hem to the collar.
    */
   open?: { shirt: RGB };
+  /** The hood up over the head (hoodUp, over a cowl at the neck) instead of pushed back; it hides the hair, so none is drawn: Serivae. */
+  hoodUp?: boolean;
+  /** With `hoodUp`: the cowl gathered at the neck under the hood, in its own color (default the hood's): Serivae's yellow. */
+  cowl?: RGB;
 }
 
 /**
  * A caster in robes (the Arcanist and the Occultist): the standard body in `build`'s arm pose, a robe
  * fitted at the waist and falling to the ankles (clear of the legs) with edging at the hem, a sash with
  * knotted ends (or, `look.open`, worn open in front with no sash), bell sleeves widening toward the bare hands, small shoulder caps blending the sleeves
- * into the robe, short spiky hair (or `look.drawHair`), and the hood pushed back. `rf` jitters the hair.
+ * into the robe, short spiky hair (or `look.drawHair`), and the hood pushed back (or `look.hoodUp`, up over the head). `rf` jitters the hair.
  */
 export function casterRobe(m: Mesh, rf: (a: number, b: number) => number, look: CasterRobeLook, build: BodyBuild = {}): void {
   buildBody(m, {
@@ -883,20 +916,23 @@ export function casterRobe(m: Mesh, rf: (a: number, b: number) => number, look: 
   const T = TORSO;
   m.part('robe', [0, T.waist, 0]);
   const N = 10;
-  // A female figure's robe (Ileena's) narrows at the waist and swells forward over the bust as Lynn's blouse does
-  // (bustRing), a little outside it, easing in to her narrower shoulders
-  const rings = build.figure === 'female' ? [
-    ell(0.05, 0.3, 0.2, N), ell(0.45, 0.25, 0.165, N), ell(T.hip, 0.21, 0.136, N), ell(T.waist, 0.136, 0.094, N),
+  // A female figure's robe (Ileena's, Serivae's) narrows at the waist and swells forward over the bust as Lynn's blouse
+  // does (bustRing), a little outside it, easing in to her narrower shoulders. Below the waist it is slim: a gentle
+  // A-line over her thinner legs (just clear of the thighs and knees), not flaring out at the hips
+  const female = build.figure === 'female';
+  const [hemX, hemZ] = female ? [0.27, 0.185] : [0.3, 0.2]; // the hem's half-widths
+  const rings = female ? [
+    ell(0.05, hemX, hemZ, N), ell(0.45, 0.235, 0.158, N), ell(T.hip, 0.2, 0.13, N), ell(T.waist, 0.136, 0.094, N),
     bustRing(T.chest - 0.04, 0.162, 0.106, 0.016, N), bustRing(T.chest + 0.04, 0.182, 0.112, 0.054, N), bustRing(T.chest + 0.1, 0.184, 0.114, 0.032, N),
     ell(T.shoulder + 0.01, bodyFrame(build).shoulderX - 0.01, 0.118, N), ell(T.collar, 0.126, 0.09, N),
   ] : [
-    ell(0.05, 0.3, 0.2, N), ell(0.45, 0.25, 0.165, N), ell(T.hip, 0.21, 0.136, N), ell(T.waist, 0.15, 0.1, N),
+    ell(0.05, hemX, hemZ, N), ell(0.45, 0.25, 0.165, N), ell(T.hip, 0.21, 0.136, N), ell(T.waist, 0.15, 0.1, N),
     ell(T.chest, 0.178, 0.114, N), ell(T.shoulder + 0.01, 0.2, 0.12, N), ell(T.collar, 0.135, 0.095, N),
   ];
   const open = look.open;
   if (!open) {
     loft(m, rings, look.robe);
-    band(m, 0.11, 0.04, 0.29, 0.193, 0.302, 0.202, look.trim); // hem edging
+    band(m, 0.11, 0.04, hemX - 0.01, hemZ - 0.007, hemX + 0.002, hemZ + 0.002, look.trim); // hem edging
     // Sash at the waist, its knotted ends hanging at one side
     // (10-sided like the robe, and just outside it, so the robe never pokes through)
     loft(m, [ell(T.waist + 0.035, 0.162, 0.108, N), ell(T.waist - 0.035, 0.165, 0.11, N)], look.sash, { caps: false });
@@ -911,7 +947,7 @@ export function casterRobe(m: Mesh, rf: (a: number, b: number) => number, look: 
     // front, are within 20° of it; the faces beside them are 40° off)
     const opening = (c: Vec3) => c[2] > 0 && Math.abs(Math.atan2(c[0], c[2])) < 0.35;
     loft(m, rings, (c: Vec3, n: Vec3): RGB => (opening(c) && Math.abs(n[1]) < 0.9 ? (c[1] > T.hip ? open.shirt : look.pants) : look.robe));
-    loft(m, [ell(0.11, 0.29, 0.193, N), ell(0.04, 0.302, 0.202, N)], (c: Vec3): RGB => (opening(c) ? look.pants : look.trim), { caps: false }); // hem edging
+    loft(m, [ell(0.11, hemX - 0.01, hemZ - 0.007, N), ell(0.04, hemX + 0.002, hemZ + 0.002, N)], (c: Vec3): RGB => (opening(c) ? look.pants : look.trim), { caps: false }); // hem edging
     // The opening's two edges, trimmed from the hem to the collar
     for (const i of [2, 3]) tube(m, rings.map((r): Vec3 => [r[i][0] * 1.03, r[i][1], r[i][2] * 1.03]), 0.014, 0.014, 4, look.trim);
   }
@@ -933,7 +969,14 @@ export function casterRobe(m: Mesh, rf: (a: number, b: number) => number, look: 
     blob(m, [sh[0] * 0.98, sh[1] + 0.01, 0], [0.072, 0.06, 0.08], 0, 0, look.robe, { floorY: sh[1] - 0.04 });
   }
 
+  const hood: HoodLook = { cloth: mulC(look.robe, 0.95), lining: look.lining, trim: look.trim };
+  if (look.hoodUp) {
+    m.part('hood', [0, TORSO.collar, 0]);
+    neckCowl(m, look.cowl ?? hood.cloth);
+    hoodUp(m, hood);
+    return;
+  }
   if (look.drawHair) look.drawHair(m);
   else spikyHair(m, look.hair, rf);
-  hoodDown(m, { cloth: mulC(look.robe, 0.95), lining: look.lining, trim: look.trim });
+  hoodDown(m, hood);
 }

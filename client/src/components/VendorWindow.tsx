@@ -7,6 +7,7 @@
 import { Fragment, useState } from 'react';
 import ModalWindow, { WindowCloseButton } from './ui/ModalWindow';
 import RightClickHint from './ui/RightClickHint';
+import SortItemsButton from './ui/SortItemsButton';
 import { PartyGold, StatusLine, useGoldPulse } from './ui/TradeStatus';
 import ItemGrid from './ItemGrid';
 import Portrait from './hud/Portrait';
@@ -15,7 +16,7 @@ import type { NpcData } from '../data/world/npcs';
 import { equipCompare, type PartyMemberConfig } from '../data/units/party';
 import type { Item } from '../data/gear';
 import type { Stats } from '../data/units/stats';
-import { CLASSES } from '../data/units/classes';
+import { proficienciesOf } from '../data/units/subclasses';
 import { INVENTORY_COLS, INVENTORY_SIZE, isProficient } from '../data/gear/inventory';
 import { VENDOR_COLS, VENDOR_SIZE, partyItemLine, shelfItemLine, type Shelf, type TradeLine, type TradeResult, type TradeState } from '../data/gear/vendor';
 
@@ -28,7 +29,7 @@ const TOOLTIP_BELOW_ROWS = 2;
 /** The vendor panel's tabs. */
 const SHELVES: { shelf: Shelf; name: string }[] = [{ shelf: 'stock', name: 'Wares' }, { shelf: 'buyback', name: 'Buy Back' }];
 
-export default function VendorWindow({ vendor, party, partyStats, state, onTradeShelf, onTradeParty, onClose }: {
+export default function VendorWindow({ vendor, party, partyStats, state, onTradeShelf, onTradeParty, onSortItems, onClose }: {
   vendor: NpcData;
   party: PartyMemberConfig[];
   /** Each member's stats, for the tooltips while they are picked (e.g. a weapon's damage with them). */
@@ -38,6 +39,8 @@ export default function VendorWindow({ vendor, party, partyStats, state, onTrade
   /** Right-click on an item on one of the vendor's shelves / on a party item: the result (its message, and whether it went through). */
   onTradeShelf: (shelf: Shelf, idx: number) => TradeResult;
   onTradeParty: (idx: number) => TradeResult;
+  /** The button beside the gold: auto-sort the party's inventory. */
+  onSortItems: () => void;
   onClose: () => void;
 }) {
   // The member whose proficiencies tint the grids (none when the window opens)
@@ -54,7 +57,7 @@ export default function VendorWindow({ vendor, party, partyStats, state, onTrade
     gold.pulse(!result.ok);
   };
   const chosen = member !== null ? party[member] : null;
-  const unusable = (item: Item) => !!chosen && !isProficient(CLASSES[chosen.selectedClass], item);
+  const unusable = (item: Item) => !!chosen && !isProficient(proficienciesOf(chosen), item);
   const marks = (line: (item: Item) => TradeLine, dims: boolean) => (item: Item) => {
     const l = line(item);
     return { dim: dims && !l.action, isNew: !!state.trades[item.id] };
@@ -117,7 +120,10 @@ export default function VendorWindow({ vendor, party, partyStats, state, onTrade
       <section aria-label="Party inventory" className="rf-panel flex-none mt-3 p-3.5">
         <div className="flex items-baseline justify-between mb-2.5">
           <h3 className="rf-h">Inventory <RightClickHint text="Sell" label="Right-click to sell" /></h3>
-          <PartyGold gold={state.gold} cls={gold.cls} />
+          <span className="flex items-center gap-2.5">
+            <SortItemsButton onSort={onSortItems} />
+            <PartyGold gold={state.gold} cls={gold.cls} />
+          </span>
         </div>
         <ItemGrid label="Party inventory" items={state.inventory} cols={INVENTORY_COLS} size={INVENTORY_SIZE}
           canUse={(item) => !unusable(item)} unusableNote={note} {...memberTips}

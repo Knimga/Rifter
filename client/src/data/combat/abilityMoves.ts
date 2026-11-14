@@ -1,8 +1,7 @@
 // Movement abilities (Ability.move): where a caster may move to by one, and resolving it. The caster moves to the
 // aimed square first (planAbilityMove), then the ability resolves as usual from where it landed (executeAction).
-// Shared by every unit that could use one. Today only the party does: the enemy AI doesn't choose them yet (see
-// enemyAI.ts); when it does, it needs only to call moveAims / planAbilityMove to find where one may be aimed, pick one,
-// and resolve it through executeMoveAction; landing the outcome (useActionOutcomes) already handles creatures.
+// Shared by the party and the creatures: the party aims them by hand (moveAims), the enemy AI picks an aim with
+// planAbilityMove (enemyAI.ts); both resolve through executeMoveAction, and useActionOutcomes lands the move.
 import type { Ability } from './abilities';
 import { areaCenter, isArea } from './areas';
 import { executeAction, type ActionOutcome, type ActionWorld, type CombatUnit } from './abilityExecution';
@@ -115,5 +114,6 @@ export function executeMoveAction(
   const moved = samePos(plan.landing, caster.pos) ? caster : { ...caster, pos: plan.landing };
   const outcome = executeAction(moved, action, targets, aimAt, allies, world);
   if (moved === caster) return outcome;
-  return { ...outcome, move: { ref: caster.ref, to: plan.landing, tiles: plan.path.length, style: action.move?.style ?? 'dash' } };
+  const element = action.displayElement ?? action.effects.find(e => e.damageElement)?.damageElement;
+  return { ...outcome, move: { ref: caster.ref, to: plan.landing, tiles: plan.path.length, style: action.move?.style ?? 'dash', ...(element && { element }) } };
 }

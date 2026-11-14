@@ -1,5 +1,5 @@
 import { bodyOf, creatureName, isAlly, withEnemyBuffs, type EnemyInstance } from '../units/enemies';
-import { runsDown, type ActiveDot, type ActiveHot, type Stats } from '../units/stats';
+import { regenAmount, runsDown, type ActiveDot, type ActiveHot, type Stats } from '../units/stats';
 import { bodyCenter, inRangeAndSight, type Pos } from '../world/grid';
 import { countDownTurns, tickDots, tickHots, type ActionOutcome } from './abilityExecution';
 import { AGGRO_RANGE, COMBAT_TEXT_COLOR } from '../constants';
@@ -193,18 +193,20 @@ export interface TurnTick {
   hp: number;
   mp: number;
   heal: number;                     // HoT healing this turn
+  mpHeal: number;                   // HoT MP restored this turn (restoresMP HoTs)
   dotDamage: number;                // DoT damage to HP this turn
   mpDotDamage: number;              // DoT damage to MP this turn (damagesMP DoTs)
   dotSources: Map<string, number>;  // threatKey → threat from the DoTs that unit applied
 }
 
 export function turnStartTick(stats: Stats, hp: number, mp: number, hots: ActiveHot[], dots: ActiveDot[]): TurnTick {
-  const heal = tickHots(hots, stats);
+  const { heal, mpHeal } = tickHots(hots, stats);
   const { damage, mpDamage, threatBySource } = tickDots(dots, stats);
   return {
-    hp: Math.max(0, Math.min(stats.hp, hp + stats.hpRegen + heal) - damage),
-    mp: Math.max(0, Math.min(stats.mp, mp + stats.mpRegen) - mpDamage),
+    hp: Math.max(0, Math.min(stats.hp, hp + regenAmount(stats.hp, stats.hpRegen) + heal) - damage),
+    mp: Math.max(0, Math.min(stats.mp, mp + regenAmount(stats.mp, stats.mpRegen) + mpHeal) - mpDamage),
     heal,
+    mpHeal,
     dotDamage: damage,
     mpDotDamage: mpDamage,
     dotSources: threatBySource,

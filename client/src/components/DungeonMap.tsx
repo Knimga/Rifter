@@ -13,7 +13,7 @@ import type { EnemyAoePreview } from '../hooks/useEnemyTurn';
 import { yawFromGridMove } from '../forge/core/facing';
 import { buildTerrain } from '../forge/terrain/build';
 import type { TerrainStyle } from '../forge/terrain/types';
-import { affectedKeys, areaCenter, isArea } from '../data/combat/areas';
+import { affectedKeys, areaAim, areaCenter, isArea } from '../data/combat/areas';
 import { footprintKeys, inRangeAndSight, isAdjacent, keyPos, posKey, samePos, type Pos } from '../data/world/grid';
 import { approachTile, closestReachable } from '../data/world/movement';
 import type { Item } from '../data/gear';
@@ -47,7 +47,7 @@ function enemyOverlay(enemy: EnemyInstance, hovered: boolean) {
   return (
     <>
       {hovered && <MapTag text={creatureName(enemy)} className="mb-1" />}
-      <UnitStatus markers={statusMarkers(enemy.buffs, enemy.hots, enemy.dots)} hp={enemy.currentHp} maxHp={enemy.stats.hp}
+      <UnitStatus markers={statusMarkers(enemy.buffs, enemy.hots, enemy.dots, enemy.stats.level)} hp={enemy.currentHp} maxHp={enemy.stats.hp}
         mp={enemy.currentMp} maxMp={enemy.stats.mp} />
     </>
   );
@@ -76,6 +76,8 @@ interface Props {
   onOpenChest: (chestId: string) => void;
   activeTarget: TargetType | null;  // target type of the selected ability (null = none selected)
   activeAbilityArea?: AreaType;
+  /** The selected ability takes only its caster's summons (Ability.summonsOnly): the caster's unitKey (none: any ally). */
+  summonsOnlyOf?: string | null;
   /**
    * Whether the selected ability's area helps (heals, buffs) or harms: its tiles show green or red. 'mixed'
    * (it harms enemies and helps allies): tiles with an enemy on them red, the rest green.
@@ -151,7 +153,7 @@ interface Props {
   fog: FogState | null;
 }
 
-export default function DungeonMap({ playerPos, activeMoverPos, party, moveTargets, moveApCost, onMove, onLocationChange, onDoorClick, chests, emptiedChests, onOpenChest, activeTarget, activeAbilityArea, areaTone, actionRange, onAbilityUse, onAbilityDeselect, onMemberSelect, enemies, inCombat, isPlayerTurn, activeCombatantId, floatingTexts, onFloatingTextComplete, zone, riftPos: riftTile, riftShut = false, partyBuffs, partyHots, partyDots, terrain, clutter, doorObject, enemyAoePreview, enemyTargetKey, tileTargets = null, activeMove = false, moveAims = null, droppedItems = {}, droppedKeys = {}, keyMark = null, foundKey = null, sceneObjects = NO_OBJECTS, dialogue = null, droppedGold = {}, droppedShards = {}, onLootClick, aims, moves, fx, highlightUnitId = null, fog, onReady }: Props) {
+export default function DungeonMap({ playerPos, activeMoverPos, party, moveTargets, moveApCost, onMove, onLocationChange, onDoorClick, chests, emptiedChests, onOpenChest, activeTarget, activeAbilityArea, summonsOnlyOf = null, areaTone, actionRange, onAbilityUse, onAbilityDeselect, onMemberSelect, enemies, inCombat, isPlayerTurn, activeCombatantId, floatingTexts, onFloatingTextComplete, zone, riftPos: riftTile, riftShut = false, partyBuffs, partyHots, partyDots, terrain, clutter, doorObject, enemyAoePreview, enemyTargetKey, tileTargets = null, activeMove = false, moveAims = null, droppedItems = {}, droppedKeys = {}, keyMark = null, foundKey = null, sceneObjects = NO_OBJECTS, dialogue = null, droppedGold = {}, droppedShards = {}, onLootClick, aims, moves, fx, highlightUnitId = null, fog, onReady }: Props) {
   const { width, height, floors, doors } = zone;
   const hover = useHoveredTile();
   const hoveredTile = hover.hovered;
@@ -205,7 +207,7 @@ export default function DungeonMap({ playerPos, activeMoverPos, party, moveTarge
   ])], [droppedItems, droppedKeys, droppedGold, droppedShards]);
   // Party members drawn as their class models, with HP/MP bars and effect markers above their heads
   const modelParty = useMemo(
-    () => party.map(m => toMapMember(m, statusMarkers(partyBuffs[m.partyIndex] ?? [], partyHots[m.partyIndex] ?? [], partyDots[m.partyIndex] ?? []))),
+    () => party.map(m => toMapMember(m, statusMarkers(partyBuffs[m.partyIndex] ?? [], partyHots[m.partyIndex] ?? [], partyDots[m.partyIndex] ?? [], m.level))),
     [party, partyBuffs, partyHots, partyDots],
   );
   const doorByKey = useMemo(() => new Map(doors.map(d => [posKey(d.pos), d])), [doors]);
@@ -227,19 +229,27 @@ export default function DungeonMap({ playerPos, activeMoverPos, party, moveTarge
     }
     return [...out, ...scenery, ...sceneObjects];
   }, [doors, floors, riftPos, riftOpening, doorObject, chests, emptiedKey, scenery, sceneObjects]); // eslint-disable-line react-hooks/exhaustive-deps -- the zone by its doors and floor; emptied chests by their key
+  // A hovered door the party knows of: its model lit a little, besides its tile's glow
+  const hoveredDoorId = hoveredTile && isKnown(posKey(hoveredTile)) ? doorByKey.get(posKey(hoveredTile))?.id : undefined;
+  const shownObjects = useMemo(
+    () => (hoveredDoorId ? mapObjects.map(o => (o.id === hoveredDoorId ? { ...o, highlighted: true } : o)) : mapObjects),
+    [mapObjects, hoveredDoorId],
+  );
 
   // What aiming at a tile aims at: the large creature on it (all of it), else the tile (as aimPartyAction does)
   const enemyBodies = useMemo(() => modelEnemies.map(bodyOf), [modelEnemies]);
   const aimAt = (p: Pos) => areaCenter(p, enemyBodies);
   const inRangeWithLOS = (p: Pos) => inRangeAndSight(activeMoverPos, aimAt(p), actionRange, zone.sight);
   // Whether the armed ability can be aimed at a tile: in range and sight, or (a movement ability) wherever it can go
+  // Whether a summoned ally is one the armed ability may take (always, unless it is summons-only: then the caster's own)
+  const ownsSummon = (e: EnemyInstance & { summon: { owner: string } }) => !summonsOnlyOf || e.summon.owner === summonsOnlyOf;
   const canAim = (p: Pos) => (activeMove ? !!moveAims?.has(posKey(p)) : inRangeWithLOS(p));
 
   // AoE preview tiles (computed from hover position)
   const aoeTiles = useMemo(() => {
     // Enemy abilities only in combat (on the party's turn); ally ones out of combat too
     if (!activeTarget || !isAoE || !hoveredTile || !canAct || (activeTarget === 'enemy' && !inCombat) || !canAim(hoveredTile)) return new Set<string>();
-    return affectedKeys(activeMoverPos, aimAt(hoveredTile), activeAbilityArea, zone.sight);
+    return affectedKeys(activeMoverPos, areaAim(activeMoverPos, hoveredTile, activeAbilityArea, enemyBodies), activeAbilityArea, zone.sight);
   }, [activeTarget, isAoE, hoveredTile, inCombat, isPlayerTurn, activeMoverPos, actionRange, zone.sight, activeAbilityArea, enemyBodies, activeMove, moveAims]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /**
@@ -281,7 +291,7 @@ export default function DungeonMap({ playerPos, activeMoverPos, party, moveTarge
       // tile: the handler deselects elsewhere; a movement ability, only where it can go)
       const valid = activeMove ? !!moveAims?.has(key)
         : activeTarget === 'self' ? true
-        : activeTarget === 'ally' ? isAoE || !!member || (!!enemy && isAlly(enemy)) // an area can be aimed at any tile; range is checked on use
+        : activeTarget === 'ally' ? isAoE || (!summonsOnlyOf && !!member) || (!!enemy && isAlly(enemy) && ownsSummon(enemy)) // an area can be aimed at any tile; range is checked on use
         : activeTarget === 'tile' ? !!tileTargets?.has(key)
         : isAoE || (!!enemy && !isAlly(enemy));
       return { walk: null, use: () => (valid ? onAbilityUse(p) : onAbilityDeselect()) };
@@ -326,6 +336,8 @@ export default function DungeonMap({ playerPos, activeMoverPos, party, moveTarge
     const targetable = enemy && !isAlly(enemy) && activeTarget === 'enemy' && !isAoE && inCombat && isPlayerTurn && canAim(p);
     // A summoned ally takes the party's helpful abilities
     const isAllyUnit = !!member || (!!enemy && isAlly(enemy));
+    // What an 'ally' ability can be aimed at: any of them, or (summons-only) the caster's own summons
+    const isAllyTarget = summonsOnlyOf ? !!enemy && isAlly(enemy) && ownsSummon(enemy) : isAllyUnit;
     const isMoverTile = samePos(p, activeMoverPos);
     const isSelfTile = activeTarget === 'self' && inCombat && isPlayerTurn && isMoverTile;
     const isDoorAdjacent = !!door && isAdjacent(playerPos, p);
@@ -341,7 +353,7 @@ export default function DungeonMap({ playerPos, activeMoverPos, party, moveTarge
     // Overlay on the tile (the floor stays visible under its muted tint)
     const highlight: keyof typeof TILE_HIGHLIGHT | null =
       enemy && enemy.id === activeCombatantId ? 'acting'
-      : isSelfTile || (activeTarget === 'ally' && isAllyUnit && canAim(p)) || (isTileTarget && !isAoE && hover.isHovered(p)) || isLanding ? 'ally'
+      : isSelfTile || (activeTarget === 'ally' && isAllyTarget && canAim(p)) || (isTileTarget && !isAoE && hover.isHovered(p)) || isLanding ? 'ally'
       : targetable || isEnemyTargeted ? 'enemy'
       : aoeTiles.has(key) ? (areaTone === 'help' || (areaTone === 'mixed' && !(enemy && !isAlly(enemy))) ? 'areaHelp' : 'areaHarm')
       : isTileTarget ? 'areaHelp'
@@ -390,7 +402,7 @@ export default function DungeonMap({ playerPos, activeMoverPos, party, moveTarge
     <Board board={board} floor={floor} under={<div ref={setTerrainHost} className="absolute inset-0 pointer-events-none" />}>
       <Suspense fallback={null}>
         {/* Keyed by zone: entering another zone places every model fresh instead of gliding it across */}
-        <ModelLayer key={zone.id} board={board} party={modelParty} enemies={modelEnemies} loot={modelLoot} objects={mapObjects} renderEnemyOverlay={renderEnemyOverlay} aims={aims} moves={moves} fx={fx} fog={fog} onReady={onReady} terrain={zoneTerrain} terrainHost={terrainHost} />
+        <ModelLayer key={zone.id} board={board} party={modelParty} enemies={modelEnemies} loot={modelLoot} objects={shownObjects} renderEnemyOverlay={renderEnemyOverlay} aims={aims} moves={moves} fx={fx} fog={fog} onReady={onReady} terrain={zoneTerrain} terrainHost={terrainHost} />
       </Suspense>
 
       {/* The AP the hovered move costs, where its move line ends */}
@@ -405,6 +417,11 @@ export default function DungeonMap({ playerPos, activeMoverPos, party, moveTarge
         const { x, y } = keyPos(key);
         return <LootSparkle key={`sparkle-${key}`} board={board} x={x} y={y} />;
       })}
+
+      {/* A container the party knows of that is unopened or still holds something (not emptied) sparkles too */}
+      {chests.filter(c => !emptiedChests.has(c.id) && isKnown(posKey(c.pos))).map(c => (
+        <LootSparkle key={`sparkle-chest-${c.id}`} board={board} x={c.pos.x} y={c.pos.y} />
+      ))}
 
       {/* How many items a pile holds, when more than one */}
       {Object.entries(droppedItems).filter(([key, items]) => items.length > 1 && isKnown(key)).map(([key, items]) => {

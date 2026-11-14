@@ -10,9 +10,10 @@ import { bodyCenter, type Pos } from '../data/world/grid';
 import { bodyOf, isAlly, type EnemyInstance } from '../data/units/enemies';
 import type { MemberState } from '../data/units/party';
 import { runsDown, type Stats } from '../data/units/stats';
+import { record } from '../devtools/runRecorder'; // TEMP (testing only)
 import type { SpawnFloat } from './useFloatingText';
 
-export function useTurnTicks({ combatActive, round, currentCombatant, membersRef, updateMembers, partyStatsRef, partyPosRef, enemiesRef, currentZoneRef, setEnemies, setCombat, spawnFloat }: {
+export function useTurnTicks({ combatActive, round, currentCombatant, membersRef, updateMembers, partyStatsRef, partyPosRef, enemiesRef, currentZoneRef, setEnemies, setCombat, spawnFloat, glowVanishing }: {
   combatActive: boolean;
   /** The combat round and whose turn it is: each new turn ends the last unit's and starts this one's. */
   round: number;
@@ -27,10 +28,19 @@ export function useTurnTicks({ combatActive, round, currentCombatant, membersRef
   setEnemies: Dispatch<SetStateAction<EnemyInstance[]>>;
   setCombat: Dispatch<SetStateAction<CombatState>>;
   spawnFloat: SpawnFloat;
+  /** A summoned creature vanishing: its model glows where it stood (useActionOutcomes). */
+  glowVanishing: (gone: EnemyInstance[]) => void;
 }) {
+  /** A unit's turn-start tick, for the run recorder (devtools/runRecorder.ts): its HP and MP before and after, and why. */
+  const recordTick = (unit: string, hp: number, mp: number, t: TurnTick) => record('tick', () => ({
+    unit, hp: `${hp} → ${t.hp}`, mp: `${mp} → ${t.mp}`,
+    ...(t.heal ? { hotHeal: t.heal } : {}), ...(t.mpHeal ? { hotMpHeal: t.mpHeal } : {}),...(t.dotDamage ? { dotDamage: t.dotDamage } : {}), ...(t.mpDotDamage ? { mpDotDamage: t.mpDotDamage } : {}),
+  }));
+
   /** A unit's tick as floating text over it. */
   const showTick = useCallback((pos: Pos, tick: TurnTick) => {
     if (tick.heal > 0) spawnFloat(pos.x, pos.y, `+${tick.heal}`, COMBAT_TEXT_COLOR.heal);
+    if (tick.mpHeal > 0) spawnFloat(pos.x, pos.y, `+${tick.mpHeal} MP`, COMBAT_TEXT_COLOR.mpRestore);
     if (tick.dotDamage > 0) spawnFloat(pos.x, pos.y, `-${tick.dotDamage}`, COMBAT_TEXT_COLOR.dot);
     if (tick.mpDotDamage > 0) spawnFloat(pos.x, pos.y, `-${tick.mpDotDamage} MP`, COMBAT_TEXT_COLOR.mpDamage);
   }, [spawnFloat]);
@@ -41,7 +51,8 @@ export function useTurnTicks({ combatActive, round, currentCombatant, membersRef
    */
   const gainTickThreat = useCallback((tick: TurnTick, healed?: string) => {
     const gains = new Map(tick.dotSources);
-    if (healed && tick.heal > 0) gains.set(healed, (gains.get(healed) ?? 0) + healThreat(tick.heal));
+    // (an MP-restoring HoT builds threat like an HP one, as an MP heal does: executeAction)
+    if (healed && tick.heal + tick.mpHeal > 0) gains.set(healed, (gains.get(healed) ?? 0) + healThreat(tick.heal + tick.mpHeal));
     if (![...gains.values()].some((g) => g > 0)) return;
     const multipliers = new Map<string, number>([
       ...partyStatsRef.current.map((s, i) => [unitKey({ side: 'party', idx: i }), s.threatMultiplier] as const),
@@ -68,6 +79,7 @@ export function useTurnTicks({ combatActive, round, currentCombatant, membersRef
     if (c.isPlayer) {
       const i = c.partyIndex ?? 0, m = membersRef.current[i], tick = memberTick(i);
       if (!m || !tick || tickChangesNothing(tick, m.hp, m.mp, [m.hots, m.dots])) return;
+      recordTick(c.name, m.hp, m.mp, tick);
       showTick(partyPosRef.current[i], tick);
       gainTickThreat(tick, unitKey({ side: 'party', idx: i }));
       updateMembers(x => ({ ...x, hp: tick.hp, mp: tick.mp }), j => j === i);
@@ -76,6 +88,7 @@ export function useTurnTicks({ combatActive, round, currentCombatant, membersRef
     const e = enemiesRef.current.find(x => x.id === c.id && x.currentHp > 0);
     const event = e && creatureTurnStart(e).event;
     if (!e || !event) return;
+    recordTick(c.name, e.currentHp, e.currentMp, event.tick);
     showTick(event.pos, event.tick);
     gainTickThreat(event.tick, isAlly(e) ? e.id : undefined);
     setEnemies(prev => prev.map(x => (x.id === c.id ? creatureTurnStart(x).enemy : x)));
@@ -92,6 +105,7 @@ export function useTurnTicks({ combatActive, round, currentCombatant, membersRef
     if (creatureTurnEnd(e).vanished) {
       const at = bodyCenter(bodyOf(e));
       spawnFloat(at.x, at.y, 'Vanished', COMBAT_TEXT_COLOR.stopped);
+      glowVanishing([e]);
     }
     setEnemies(prev => prev.flatMap(x => {
       if (x.id !== c.id) return [x];
@@ -108,6 +122,7 @@ export function useTurnTicks({ combatActive, round, currentCombatant, membersRef
     lastTurn.current = turnKey ? currentCombatant : null;
     if (!turnKey || !currentCombatant) return;
     if (last) endTurn(last);
+    record('turn', () => ({ round, unit: currentCombatant.name }));
     startTurn(currentCombatant);
   }, [turnKey]); // eslint-disable-line react-hooks/exhaustive-deps -- the turn, by its key
 
@@ -133,9 +148,10 @@ export function useTurnTicks({ combatActive, round, currentCombatant, membersRef
       const at = bodyCenter(bodyOf(e));
       spawnFloat(at.x, at.y, 'Vanished', COMBAT_TEXT_COLOR.stopped);
     }
+    glowVanishing(vanished);
     // Onto the creatures as they are when it lands: an update queued since the ref was read (an aura sync) isn't lost
     if (updated !== before) setEnemies(prev => (prev === before ? updated : applyRestTick(prev, zoneId).enemies));
-  }, [showTick, spawnFloat, updateMembers]); // eslint-disable-line react-hooks/exhaustive-deps -- reads stable refs
+  }, [showTick, spawnFloat, updateMembers, glowVanishing]); // eslint-disable-line react-hooks/exhaustive-deps -- reads stable refs
 
   useEffect(() => {
     if (combatActive) return;

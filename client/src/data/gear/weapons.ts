@@ -90,7 +90,7 @@ const MAGIC_WEAPON_ELEMENTS: readonly DamageElement[] = ['fire', 'ice', 'lightni
 export const WEAPON_TYPE_DATA: Record<WeaponType, WeaponTypeData> = {
   'Daggers': {
     value: 0.9,
-    baseDamage: { min: 4, max: 7 },
+    baseDamage: { min: 12, max: 21 },
     range: 1,
     attackAp: 1,
     twoHanded: false,
@@ -105,7 +105,7 @@ export const WEAPON_TYPE_DATA: Record<WeaponType, WeaponTypeData> = {
   },
   '1h Swords': {
     value: 1,
-    baseDamage: { min: 5, max: 9 },
+    baseDamage: { min: 15, max: 27 },
     range: 1,
     attackAp: 1,
     twoHanded: false,
@@ -118,7 +118,7 @@ export const WEAPON_TYPE_DATA: Record<WeaponType, WeaponTypeData> = {
   },
   '2h Swords': {
     value: 1.5,
-    baseDamage: { min: 8, max: 14 },
+    baseDamage: { min: 24, max: 42 },
     range: 1,
     attackAp: 2,
     twoHanded: true,
@@ -134,13 +134,13 @@ export const WEAPON_TYPE_DATA: Record<WeaponType, WeaponTypeData> = {
   },
   '1h Maces': {
     value: 1,
-    baseDamage: { min: 6, max: 9 },
+    baseDamage: { min: 18, max: 27 },
     range: 1,
     attackAp: 1,
     twoHanded: false,
     defaultAttackCategory: 'melee',
     defaultDamageElement: 'physical',
-    implicit: { stat: 'armor', baseValue: 4, growthPerLevel: 0.2 },
+    implicit: { stat: 'armor', baseValue: 5, growthPerLevel: 0.2, percent: true },
     invalidAffixes: [
       'finesse', 'meleeCrit', 'dodge', 'initiative', 'subtlety', 'perception', 'reducedThreat',
       ...rangedStats, ...nonWeaponAffixes,
@@ -149,13 +149,13 @@ export const WEAPON_TYPE_DATA: Record<WeaponType, WeaponTypeData> = {
   },
   '2h Maces': {
     value: 1.5,
-    baseDamage: { min: 9, max: 15 },
+    baseDamage: { min: 27, max: 45 },
     range: 1,
     attackAp: 2,
     twoHanded: true,
     defaultAttackCategory: 'melee',
     defaultDamageElement: 'physical',
-    implicit: { stat: 'armor', baseValue: 6, growthPerLevel: 0.4 },
+    implicit: { stat: 'armor', baseValue: 8, growthPerLevel: 0.3, percent: true },
     invalidAffixes: [
       'finesse', 'mind', 'spirit',  'meleeCrit', 'initiative', 'subtlety', 'perception', ...THREAT_AFFIXES,
       ...rangedStats, ...nonWeaponAffixes, 'magicHit', 'magicCrit', 'mp',
@@ -165,13 +165,13 @@ export const WEAPON_TYPE_DATA: Record<WeaponType, WeaponTypeData> = {
   },
   '1h Axes': {
     value: 1,
-    baseDamage: { min: 4, max: 10 },
+    baseDamage: { min: 12, max: 30 },
     range: 1,
     attackAp: 1,
     twoHanded: false,
     defaultAttackCategory: 'melee',
     defaultDamageElement: 'physical',
-    implicit: { stat: 'meleeDamage', baseValue: 2, growthPerLevel: 0.4 },
+    implicit: { stat: 'meleeDamage', baseValue: 4, growthPerLevel: 0.3 },
     invalidAffixes: [
       'mind', 'spirit', 'healing', 'subtlety', 'perception', 'spellcraft', 'devotion', 'increasedThreat',
       ...rangedStats, ...magicStats, ...nonWeaponAffixes, 'mp',
@@ -181,13 +181,13 @@ export const WEAPON_TYPE_DATA: Record<WeaponType, WeaponTypeData> = {
   },
   '2h Axes': {
     value: 1.5,
-    baseDamage: { min: 7, max: 16 },
+    baseDamage: { min: 21, max: 48 },
     range: 1,
     attackAp: 2,
     twoHanded: true,
     defaultAttackCategory: 'melee',
     defaultDamageElement: 'physical',
-    implicit: { stat: 'meleeDamage', baseValue: 4, growthPerLevel: 0.7 },
+    implicit: { stat: 'meleeDamage', baseValue: 6, growthPerLevel: 0.5 },
     invalidAffixes: [
       'mind', 'spirit', 'healing', 'subtlety', 'perception', 'spellcraft', 'devotion', ...THREAT_AFFIXES,
       ...rangedStats, ...magicStats, ...nonWeaponAffixes, 'mp',
@@ -197,7 +197,7 @@ export const WEAPON_TYPE_DATA: Record<WeaponType, WeaponTypeData> = {
   },
   'Bows': {
     value: 1.2,
-    baseDamage: { min: 6, max: 9 },
+    baseDamage: { min: 18, max: 27 },
     range: 5,
     attackAp: 2,
     twoHanded: false,
@@ -214,13 +214,13 @@ export const WEAPON_TYPE_DATA: Record<WeaponType, WeaponTypeData> = {
   },
   'Crossbows': {
     value: 1.2,
-    baseDamage: { min: 6, max: 11 },
+    baseDamage: { min: 18, max: 33 },
     range: 4,
     attackAp: 2,
     twoHanded: false,
     defaultAttackCategory: 'ranged',
     defaultDamageElement: 'physical',
-    implicit: { stat: 'physicalDamage', baseValue: 2, growthPerLevel: 0.5 },
+    implicit: { stat: 'physicalDamage', baseValue: 4, growthPerLevel: 0.4 },
     invalidAffixes: [
       'strength', 'healing', 'parry', 'glancingBlow', 'increasedThreat',
       'redoubt', 'devotion', 'magicHit', 'magicCrit',
@@ -231,13 +231,13 @@ export const WEAPON_TYPE_DATA: Record<WeaponType, WeaponTypeData> = {
   },
   'Staves': {
     value: 2.2,
-    baseDamage: { min: 6, max: 10 },
+    baseDamage: { min: 18, max: 30 },
     range: 4,
     attackAp: 2,
     twoHanded: true,
     defaultAttackCategory: 'magic',
     dropElements: MAGIC_WEAPON_ELEMENTS,
-    implicit: { stat: 'magicDamage', baseValue: 2, growthPerLevel: 0.5 },
+    implicit: { stat: 'magicDamage', baseValue: 4, growthPerLevel: 0.4 },
     invalidAffixes: [
       'strength', 'finesse', 'parry', 'glancingBlow', 'dodge', 'increasedThreat',
       'evasion', 'redoubt', 'expertise', 'subtlety',
@@ -248,7 +248,7 @@ export const WEAPON_TYPE_DATA: Record<WeaponType, WeaponTypeData> = {
   },
   'Wands': {
     value: 1.9,
-    baseDamage: { min: 3, max: 5 },
+    baseDamage: { min: 9, max: 15 },
     range: 3,
     attackAp: 1,
     twoHanded: false,

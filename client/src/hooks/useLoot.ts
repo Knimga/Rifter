@@ -12,14 +12,14 @@ import { findOpenTilesNear, posKey, type Pos } from '../data/world/grid';
 import { effectsMark, type DialogueEffect, type QuestMark } from '../data/world/dialogue';
 import { currentStep, type QuestEvent, type QuestLog } from '../data/world/quests';
 import type { DungeonData, ZoneData } from '../data/world/gen';
-import { DUNGEONS, foundKeyIn, type AreaKey, type DungeonKey } from '../data/world/dungeons';
-import { bossKeyDrop, riftGlowCss } from '../data/world/rifts';
+import { foundKeyIn, isPassage, type AreaKey, type DungeonKey } from '../data/world/dungeons';
+import { bossKeyDrop, keyReceived } from '../data/world/rifts';
 import { useLatest } from './useLatest';
 import type { useScenes } from './useScenes';
-import type { useFloatingText } from './useFloatingText';
+import type { SpawnFloat } from './useFloatingText';
+import type { Announce } from './useAnnouncements';
 
 type Scenes = ReturnType<typeof useScenes>;
-type Floats = ReturnType<typeof useFloatingText>;
 
 export function useLoot({
   location, dungeonKey, dungeon, setDungeon, currentZone, partyLevel, questLog, scenes, runDialogueEffects, questDid,
@@ -50,8 +50,9 @@ export function useLoot({
   pickUpShards: (found: ShardCounts) => void;
   /** Fresh wares for the vendor at a level (useVendor): a boss's defeat. */
   restockVendor: (level: number) => void;
-  spawnFloat: Floats['spawnFloat'];
-  announce: Floats['announce'];
+  spawnFloat: SpawnFloat;
+  /** Announces a key received, over the map (useAnnouncements). */
+  announce: Announce;
 }) {
   const dungeonRef = useLatest(dungeon);
   const currentZoneRef = useLatest(currentZone);
@@ -94,7 +95,8 @@ export function useLoot({
   /** Pick up the rift key lying on `pos` in this dungeon: onto the keyring (the quests waiting on it move on). */
   const pickUpRiftKey = useCallback((pos: Pos, riftKey: DungeonKey) => {
     addKey(riftKey);
-    announce(pos.x, pos.y, DUNGEONS[riftKey].keyName, riftGlowCss(DUNGEONS[riftKey].riftColor));
+    const received = keyReceived(riftKey);
+    announce(received.text, received.color);
     clearKeyAt(pos);
     questDidRef.current({ pickUpKeyIn: dungeonKey });
   }, [dungeonKey, addKey, announce, clearKeyAt, questDidRef]);
@@ -148,7 +150,7 @@ export function useLoot({
   /**
    * Loot for enemies that just died (any cause), on the tiles they fell: items favouring what the party can use, gold
    * (rolled apart from items: rollGold) and, for any enemy, a chance of a group of affix shards (SHARD_DROP_CHANCE).
-   * A boss also drops a rift key the party doesn't have (and that isn't already lying in this dungeon), if one is
+   * A boss also drops the next rift key the party doesn't have (bossKeyDrop; not one already lying in this dungeon), if one is
    * left: on its tile, or the nearest floor tile beside it with nothing lying on it.
    */
   const dropLoot = useCallback((dead: EnemyInstance[]) => {
@@ -170,9 +172,10 @@ export function useLoot({
         const found = rollShardDrop(SHARD_DROP_CHANCE);
         if (found) shardDrops[posKey(e.pos)] = mergeShards(shardDrops[posKey(e.pos)] ?? {}, found);
       }
-      if (isBoss(e)) {
+      // (a passage has no boss, and no key of its own to drop by)
+      if (isBoss(e) && !isPassage(dungeonKey)) {
         const lying = [...d.zones.flatMap(z => Object.values(z.droppedKeys)), ...keyDrops.map(k => k.key)];
-        const key = bossKeyDrop(keysRef.current, lying);
+        const key = bossKeyDrop(dungeonKey, keysRef.current, lying);
         if (key) keyDrops.push({ at: e.pos, key });
       }
     }
@@ -194,7 +197,7 @@ export function useLoot({
       }
       return { ...z, droppedItems: merged, droppedGold: gold, droppedShards: shardPiles, droppedKeys: keys };
     });
-  }, [partyCanUse, updateCurrentZone, restockVendor, dungeonRef, partyLevelRef, keysRef]);
+  }, [dungeonKey, partyCanUse, updateCurrentZone, restockVendor, dungeonRef, partyLevelRef, keysRef]);
 
   return { takeGold, takeShards, foundKey, keyMark, finishFinding, pickUp, pickUpRef, dropLoot };
 }

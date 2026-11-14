@@ -10,7 +10,7 @@ import { isFreeFloor, type DungeonData } from '../data/world/gen';
 import { bodySize, isAlly, withEnemyBuffs, type EnemyInstance } from '../data/units/enemies';
 import { createSummon, summonClass, summonsOf } from '../data/units/summons';
 import type { MemberState } from '../data/units/party';
-import { addBuffs, addTicking, dropDispelled, type Stats } from '../data/units/stats';
+import { addBuffs, addTicking, dropDispelled, type DamageElement, type Stats } from '../data/units/stats';
 import type { UnitAim, UnitFx, UnitMove } from '../components/ModelLayer';
 import { elementTint } from '../components/ui/AbilityCard';
 import type { SpawnFloat } from './useFloatingText';
@@ -54,6 +54,22 @@ export function useActionOutcomes({ spawnFloat, updateMembers, placeMember, part
   }, []);
   useEffect(() => cancelPendingOutcomes, [cancelPendingOutcomes]);
 
+  /**
+   * Pulse a glow behind a unit's model (unitKey), in `color` or its element's (elementTint; none: physical's). `leaving`:
+   * the unit is being removed (a summon vanishing), so it pulses where it stood (UnitFx.glow).
+   */
+  const glowUnits = useCallback((glows: { unit: string; element?: DamageElement; color?: string; leaving?: boolean }[]) => {
+    if (!glows.length) return;
+    setUnitFx((prev) => {
+      const next = { ...prev };
+      for (const g of glows) {
+        const seq = ++fxSeq.current;
+        next[g.unit] = { ...next[g.unit], glow: { color: g.color ?? elementTint(g.element ?? 'physical'), seq, ...(g.leaving && { leaving: true }) } };
+      }
+      return next;
+    });
+  }, []);
+
   /** An action's effects: floating text, HP/MP/effect changes on party and enemies, threat, summons. */
   const landOutcome = useCallback((outcome: ActionOutcome, caster: CombatUnit) => {
     for (const f of outcome.floats) spawnFloat(f.pos.x, f.pos.y, f.text, f.color);
@@ -70,6 +86,9 @@ export function useActionOutcomes({ spawnFloat, updateMembers, placeMember, part
         return next;
       });
     }
+    if (outcome.glows) glowUnits(outcome.glows);
+    // A blink has landed (the outcome lands once its model has faded back in): its caster glows in the ability's element
+    if (outcome.move?.style === 'blink') glowUnits([{ unit: unitKey(outcome.move.ref), element: outcome.move.element }]);
 
     const partyChanges = new Map<number, UnitChange>();
     const enemyChanges = new Map<string, UnitChange>();
@@ -163,9 +182,16 @@ export function useActionOutcomes({ spawnFloat, updateMembers, placeMember, part
       const replaced = new Set(enemiesRef.current.filter(e => !creatures.includes(e)).map(e => e.id));
       setEnemies(prev => [...prev.filter(e => !replaced.has(e.id)), ...added]);
       setCombat(prev => prev.active ? joinCombat(prev, added) : prev);
+      // Each new model glows as it appears, in its summoning ability's element
+      glowUnits(added.map(e => ({ unit: e.id, element: e.summon?.element })));
     }
-  }, [spawnFloat, updateMembers]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [spawnFloat, updateMembers, glowUnits]); // eslint-disable-line react-hooks/exhaustive-deps
   const landRef = useLatest(landOutcome);
+
+  /** Glow the summoned creatures about to be removed (vanished by time, or by the fight's end) where they stand. */
+  const glowVanishing = useCallback((gone: EnemyInstance[]) => {
+    glowUnits(gone.map(e => ({ unit: e.id, element: e.summon?.element, leaving: true })));
+  }, [glowUnits]);
 
   /**
    * A movement ability's move (ActionOutcome.move), for a party member or a creature alike: the unit is put on its
@@ -214,5 +240,5 @@ export function useActionOutcomes({ spawnFloat, updateMembers, placeMember, part
   // For the enemy turn (useEnemyTurn), which reads it from a ref
   const applyOutcomeRef = useLatest(applyActionOutcome);
 
-  return { unitAims, unitMoves, unitFx, applyActionOutcome, applyOutcomeRef, cancelPendingOutcomes };
+  return { unitAims, unitMoves, unitFx, applyActionOutcome, applyOutcomeRef, cancelPendingOutcomes, glowVanishing };
 }

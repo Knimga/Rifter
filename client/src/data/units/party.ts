@@ -1,15 +1,18 @@
 import { CLASSES, type ClassKey } from './classes';
-import { EMPTY_GEAR, generateArmor, generateOffhand, generateShield, generateWeapon, getGearArmorBonus, getGearBuffs, heldWeapon, isWeaponItem, type GearSlots, type Item, type WeaponItem } from '../gear';
+import { EMPTY_GEAR, generateArmor, generateOffhand, generateShield, generateWeapon, getGearArmorBonus, getGearBuffs, heldWeapon, isShieldItem, isWeaponItem, type GearSlots, type Item, type WeaponItem } from '../gear';
 import { equipSlotFor, gearWith, isProficient, otherEquipSlot } from '../gear/inventory';
-import type { PassiveEffect } from '../combat/abilities';
+import type { Ability, PassiveEffect } from '../combat/abilities';
+import { proficienciesOf, subclass, type SubclassData } from './subclasses';
 import { unitKey } from '../combat/abilityExecution';
 import { ATTRIBUTE_KEYS, ATTRIBUTE_POINTS_PER_LEVEL, BUFFABLE_STATS, SKILL_KEYS, SKILL_POINTS_PER_LEVEL, isPassiveEntry, passiveEffectEntries, recomputeStats, type ActiveBuff, type BuffableStat, type ActiveDot, type ActiveHot, type AttributeKey, type PlayerStatInput, type SkillKey, type Stats } from './stats';
-import { getOffense } from '../combat/attackResolution';
+import { damageFactor, getOffense } from '../combat/attackResolution';
 import { scaledRange } from '../random';
 
 export interface PartyMemberConfig {
   characterName: string;
   selectedClass: ClassKey;
+  /** Its subclass (SUBCLASSES id, one of its class's), picked for good; none until then. */
+  subclass?: string;
   gear: GearSlots;
   /** Points spent on attributes and skills (from level-ups), on top of the class's own. */
   pointsSpent: Record<AttributeKey, number>;
@@ -34,13 +37,16 @@ export function createMember(classKey: ClassKey, name: string): PartyMemberConfi
   };
 }
 
-/** What a member's stats are computed from (calculateStats / recomputeStats): class, the party's level, gear, spent points. */
+/** What a member's stats are computed from (calculateStats / recomputeStats): class and subclass, the party's level, gear, spent points. */
 export function memberStatInput(m: PartyMemberConfig, level: number): PlayerStatInput {
   return {
     mode: 'player',
     classKey: m.selectedClass,
+    subclass: m.subclass,
     level,
     gearArmorBonus: getGearArmorBonus(m.gear),
+    shield: !!m.gear.offhand && isShieldItem(m.gear.offhand),
+    dagger: heldWeapon(m.gear)?.weaponType === 'Daggers',
     pointsSpent: m.pointsSpent,
     skillPointsSpent: m.skillPointsSpent,
   };
@@ -50,8 +56,8 @@ export function memberStatInput(m: PartyMemberConfig, level: number): PlayerStat
 export const memberStats = (m: PartyMemberConfig, level: number, buffs: ActiveBuff[]): Stats =>
   recomputeStats(memberStatInput(m, level), [...buffs, ...getGearBuffs(m.gear)]);
 
-/** A stat's change on the gear (EquipCompare). */
-export interface StatDelta { stat: BuffableStat; delta: number }
+/** A stat's change on the gear (EquipCompare): flat, or  (a % of the stat: an armor, MR, HP or MP affix). */
+export interface StatDelta { stat: BuffableStat; delta: number; percent?: boolean }
 
 /**
  * Comparing an item with what a member wears (item tooltips, Ctrl): the item in its slot now, and the stats the
@@ -68,16 +74,25 @@ export interface EquipCompare {
   damage?: { before: [number, number] | null; after: [number, number] };
 }
 
-/** The gear's own stats, summed by stat: its implicits and affixes, and its armor. */
-function gearStatTotals(gear: GearSlots): Map<BuffableStat, number> {
-  const totals = new Map<BuffableStat, number>([['armor', getGearArmorBonus(gear)]]);
+/**
+ * The gear's own stats, summed by stat: its implicits and affixes, and its armor. Keyed by stat, with '%' after it for
+ * the modifiers that are a % of the stat (deltaKey).
+ */
+function gearStatTotals(gear: GearSlots): Map<string, number> {
+  const totals = new Map<string, number>([['armor', getGearArmorBonus(gear)]]);
+  const add = (key: string, n: number) => totals.set(key, (totals.get(key) ?? 0) + n);
   // Both threat stats are one 'Threat' to the player: a reduction counts against an increase, so a swap shows the net
   for (const b of getGearBuffs(gear)) {
     const stat = b.stat === 'reducedThreat' ? 'increasedThreat' : b.stat;
-    totals.set(stat, (totals.get(stat) ?? 0) + (stat === b.stat ? b.amount : -b.amount));
+    const sign = stat === b.stat ? 1 : -1;
+    if (b.amount) add(stat, sign * b.amount);
+    if (b.percent) add(deltaKey(stat, true), sign * b.percent);
   }
   return totals;
 }
+
+/** A stat's key in gearStatTotals: the stat, or (a % of it) the stat and '%'. */
+const deltaKey = (stat: BuffableStat, percent: boolean) => (percent ? `${stat}%` : stat);
 
 /**
  * What comparing `item` shows for a member (gearWith: as equipping it would, the other hand's item pushed off
@@ -86,7 +101,7 @@ function gearStatTotals(gear: GearSlots): Map<BuffableStat, number> {
  * `other`: against the slot equipping it wouldn't pick (a ring's other ring slot: otherEquipSlot), if it has one.
  */
 export function equipCompare(m: PartyMemberConfig, item: Item, stats: Stats, other = false): EquipCompare | null {
-  if (!isProficient(CLASSES[m.selectedClass], item)) return null;
+  if (!isProficient(proficienciesOf(m), item)) return null;
   const otherSlot = otherEquipSlot(m.gear, item);
   const slot = equipSlotFor(m.gear, item, (other && otherSlot) || undefined);
   const gear = gearWith(m.gear, item, slot);
@@ -94,19 +109,22 @@ export function equipCompare(m: PartyMemberConfig, item: Item, stats: Stats, oth
   return {
     equipped: m.gear[slot],
     hasOther: !!otherSlot,
-    deltas: BUFFABLE_STATS.map(stat => ({ stat, delta: (after.get(stat) ?? 0) - (before.get(stat) ?? 0) })).filter(d => d.delta !== 0),
+    deltas: BUFFABLE_STATS.flatMap(stat => [false, true].map((percent): StatDelta => {
+      const key = deltaKey(stat, percent);
+      return { stat, delta: (after.get(key) ?? 0) - (before.get(key) ?? 0), ...(percent && { percent }) };
+    })).filter(d => d.delta !== 0),
     ...(isWeaponItem(item) ? { damage: weaponDamageCompare(m, gear, stats) } : {}),
   };
 }
 
 /**
- * The held weapon's damage range now and with `gear` on (EquipCompare.damage): its base range stretched by the
- * wielder's damage bonus for it (scaledRange, as an attack rolls it). Now: from `stats`, as they are. After: from
- * the stats `gear` gives, plus what the member's buffs add to that bonus now (they stay through a swap).
+ * The held weapon's damage range now and with `gear` on (EquipCompare.damage): its base range at the wielder's level
+ * and with its damage % for it (scaledRange by damageFactor, as an attack rolls it). Now: from `stats`, as they are.
+ * After: from the stats `gear` gives, plus what the member's buffs add to that % now (they stay through a swap).
  */
 function weaponDamageCompare(m: PartyMemberConfig, gear: GearSlots, stats: Stats): EquipCompare['damage'] {
   const bonus = (w: WeaponItem, s: Stats) => getOffense(s, w.attackCategory, w.damageElement).damage;
-  const range = (w: WeaponItem, b: number) => scaledRange(w.minDamage, w.maxDamage, b);
+  const range = (w: WeaponItem, b: number) => scaledRange(w.minDamage, w.maxDamage, damageFactor(stats.level, b));
   const gearOnly = memberStats(m, stats.level, []), withNew = memberStats({ ...m, gear }, stats.level, []);
   const now = heldWeapon(m.gear), next = heldWeapon(gear)!;
   const fromBuffs = bonus(next, stats) - bonus(next, gearOnly);
@@ -128,13 +146,21 @@ export interface MemberState {
   dots: ActiveDot[];
 }
 
-/**
- * The passive effects a member has for good (PassiveEffect): its class's. The one place that decides them, so what else
- * gives a member passives (a subclass) is added here.
- */
-export const memberPassiveEffects = (m: PartyMemberConfig): readonly PassiveEffect[] => CLASSES[m.selectedClass].passiveEffects ?? [];
+/** A member's subclass, once picked. */
+export const memberSubclass = (m: PartyMemberConfig): SubclassData | null => (m.subclass ? subclass(m.subclass) : null);
 
-/** The entries a member's passive effects make in its buffs, HoTs and DoTs (passiveEffectEntries); `idx`: its place in the party. */
+/**
+ * The passive effects a member has for good (PassiveEffect): its class's, then its subclass's. The one place that
+ * decides them, so whatever else gives a member passives is added here.
+ */
+export const memberPassiveEffects = (m: PartyMemberConfig): readonly PassiveEffect[] =>
+  [...(CLASSES[m.selectedClass].passiveEffects ?? []), ...(memberSubclass(m)?.passiveEffects ?? [])];
+
+/** The abilities a member can use (its action bar's choices): its class's, then its subclass's. */
+export const memberAbilities = (m: PartyMemberConfig): readonly Ability[] =>
+  [...CLASSES[m.selectedClass].abilities, ...(memberSubclass(m)?.abilities ?? [])];
+
+/** The entries a member's passive effects make in its buffs (passiveEffectEntries); `idx`: its place in the party. */
 export const memberPassiveEntries = (m: PartyMemberConfig, idx: number) =>
   passiveEffectEntries(memberPassiveEffects(m), unitKey({ side: 'party', idx }));
 
@@ -152,21 +178,14 @@ export function withoutCastEffects(s: MemberState): MemberState {
 
 /** A member's state with its passive entries replaced by the ones its passive effects make now (they changed); `idx`: its place in the party. */
 export function withCurrentPassives(s: MemberState, m: PartyMemberConfig, idx: number): MemberState {
-  const entries = memberPassiveEntries(m, idx);
-  const cast = withoutPassiveEntries(s);
-  return { ...s, buffs: [...cast.buffs, ...entries.buffs], hots: [...cast.hots, ...entries.hots], dots: [...cast.dots, ...entries.dots] };
+  return { ...s, buffs: [...s.buffs.filter(x => !isPassiveEntry(x)), ...memberPassiveEntries(m, idx)] };
 }
-
-/** A member's lists without the entries that last for good (what is cast on them stays). */
-const withoutPassiveEntries = (s: MemberState) => ({
-  buffs: s.buffs.filter(x => !isPassiveEntry(x)), hots: s.hots.filter(x => !isPassiveEntry(x)), dots: s.dots.filter(x => !isPassiveEntry(x)),
-});
 
 /** A member at full HP and MP with only its passive effects on them (a new game; back in the Sanctum after a party wipe). `idx`: its place in the party. */
 export function freshMember(m: PartyMemberConfig, level: number, idx: number): MemberState {
-  const entries = memberPassiveEntries(m, idx);
-  const s = memberStats(m, level, entries.buffs);
-  return { hp: s.hp, mp: s.mp, ...entries };
+  const buffs = memberPassiveEntries(m, idx);
+  const s = memberStats(m, level, buffs);
+  return { hp: s.hp, mp: s.mp, buffs, hots: [], dots: [] };
 }
 
 /** The member after gaining `levels` levels: ATTRIBUTE_POINTS_PER_LEVEL and SKILL_POINTS_PER_LEVEL more to spend per level. */

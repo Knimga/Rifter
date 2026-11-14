@@ -17,7 +17,7 @@ import { SiMagic } from 'react-icons/si';
 import { TbCrosshair } from 'react-icons/tb';
 import { ROLE_ICONS } from '../data/units/classes';
 import { ATTACK_CATEGORY_COLOR, DAMAGE_ELEMENT_COLOR } from '../data/constants';
-import { formatStat, type BuffableStat, type DamageElement, type Stats } from '../data/units/stats';
+import { formatStat, regenAmount, THREAT_SHIFT_STATS, type BuffableStat, type DamageElement, type Stats } from '../data/units/stats';
 import { StatTooltips, capitalize, formatSigned } from '../data/detailStrings';
 import { GLANCING_MULTIPLIER, damageReduction } from '../data/combat/attackResolution';
 import { Hint, TextTip, Tooltip } from './Tooltip';
@@ -35,7 +35,8 @@ export interface Shift {
   pending: boolean;
 }
 
-export type StatShift = (stat: BuffableStat, get: (s: Stats) => number) => Shift;
+/** `stat`: the stat (or stats: Threat's two) whose gear and effects are its shares. */
+export type StatShift = (stat: BuffableStat | readonly BuffableStat[], get: (s: Stats) => number) => Shift;
 
 /**
  * Who is shown and what they wear (CharacterSheet): a value that changes when the same member's gear does pulses
@@ -192,6 +193,8 @@ function IconRow({ icon: Icon, color, label, shift, neutral, fmt, children }: {
 }
 
 /** Threat as its difference from the 100% everyone starts at, signed: '+0%', '+12%', '−9%' (1 is 100%). */
+/** What changes the threatMultiplier (THREAT_SHIFT_STATS): the Threat row's shares. */
+const THREAT_STATS = Object.keys(THREAT_SHIFT_STATS) as BuffableStat[];
 const threatPct = (multiplier: number) => `${formatSigned(Math.round(multiplier * 100))}%`;
 
 export default function StatsPanel({ stats, hp, mp, shift }: { stats: Stats; hp: number; mp: number; shift: StatShift }) {
@@ -199,10 +202,10 @@ export default function StatsPanel({ stats, hp, mp, shift }: { stats: Stats; hp:
     <div role="tabpanel" aria-label="Stats" className="flex-1 min-h-0 mt-1.5 flex flex-col gap-1.5">
       {/* Vitals */}
       <div className="rf-stcard flex-auto flex items-center gap-4">
-        <Vital label="HP" cur={hp} max={stats.hp} fill="var(--rift-hp-bar)" regen={stats.hpRegen}
-          maxShift={shift('hp', s => s.hp)} regenShift={shift('hpRegen', s => s.hpRegen)} />
-        <Vital label="MP" cur={mp} max={stats.mp} fill="var(--rift-mp-bar)" regen={stats.mpRegen}
-          maxShift={shift('mp', s => s.mp)} regenShift={shift('mpRegen', s => s.mpRegen)} />
+        <Vital label="HP" cur={hp} max={stats.hp} fill="var(--rift-hp-bar)" regen={regenAmount(stats.hp, stats.hpRegen)}
+          maxShift={shift('hp', s => s.hp)} regenShift={shift('hpRegen', s => regenAmount(s.hp, s.hpRegen))} />
+        <Vital label="MP" cur={mp} max={stats.mp} fill="var(--rift-mp-bar)" regen={regenAmount(stats.mp, stats.mpRegen)}
+          maxShift={shift('mp', s => s.mp)} regenShift={shift('mpRegen', s => regenAmount(s.mp, s.mpRegen))} />
       </div>
 
       {/* Defense, Avoidance */}
@@ -240,7 +243,7 @@ export default function StatsPanel({ stats, hp, mp, shift }: { stats: Stats; hp:
                 const v = stats[key][row];
                 return (
                   <span key={`${row}-${key}`} className="flex items-center justify-end h-5 pl-1">
-                    <Val shift={shift(stat, s => s[key][row])} fmt={row === 'damage' ? undefined : v => formatStat(stat, v)} className="text-[10px]">{row === 'damage' ? `+${v}` : formatStat(stat, v)}</Val>
+                    <Val shift={shift(stat, s => s[key][row])} fmt={v => formatStat(stat, v)} className="text-[10px]">{formatStat(stat, v)}</Val>
                   </span>
                 );
               }),
@@ -252,10 +255,10 @@ export default function StatsPanel({ stats, hp, mp, shift }: { stats: Stats; hp:
           <IconRow icon={MdKeyboardDoubleArrowRight} color="var(--rift-label)" label="Movement" shift={shift('movement', s => s.movement)}>{stats.movement}</IconRow>
           {/* Shown for every member: Subtlety lowers it, on purpose in some builds */}
           <IconRow icon={TbCrosshair} color="var(--rift-label)" label="Threat" neutral fmt={threatPct}
-            shift={shift('threatMultiplier', s => s.threatMultiplier)}>{threatPct(stats.threatMultiplier - 1)}</IconRow>
+            shift={shift(THREAT_STATS, s => s.threatMultiplier)}>{threatPct(stats.threatMultiplier - 1)}</IconRow>
           <div aria-hidden="true" className="flex-none self-center h-px w-[100%] bg-rift-divider" />
-          <IconRow icon={ImPlus} color="var(--tone-hot)" label="Healing" shift={shift('healing', s => s.healing)}>{stats.healing}</IconRow>
-          <IconRow icon={IoMdDownload} color="var(--tone-hot)" label="Heal Rcvd" shift={shift('healingReceived', s => s.healingReceived)}>{stats.healingReceived}</IconRow>
+          <IconRow icon={ImPlus} color="var(--tone-hot)" label="Healing" shift={shift('healing', s => s.healing)} fmt={v => formatStat('healing', v)}>{formatStat('healing', stats.healing)}</IconRow>
+          <IconRow icon={IoMdDownload} color="var(--tone-hot)" label="Heal Rcvd" shift={shift('healingReceived', s => s.healingReceived)} fmt={v => formatStat('healingReceived', v)}>{formatStat('healingReceived', stats.healingReceived)}</IconRow>
         </div>
       </div>
 

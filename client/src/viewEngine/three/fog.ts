@@ -24,6 +24,11 @@ export interface FogInput {
 const EXPLORED_FOG = 0.55;
 /** How far a hit's flash washes a model toward white (0..1). */
 const FLASH_WHITE = 0.7;
+/** How far a highlight (a hovered door) washes a model toward white (0..1): subtle, it keeps its own colors. */
+const HIGHLIGHT_WHITE = 0.16;
+
+/** A wash over a model's colors: a hit's flash, or a highlight (a hovered map object). */
+type Wash = 'flash' | 'highlight';
 /** How long a tile takes to clear or fog over (ms). */
 const FADE_MS = 300;
 /** The most the clouds move between two drawn frames (ms of drift): after the map sat idle, they carry on, not jump. */
@@ -93,8 +98,8 @@ export class FogOfWar {
   readonly sheet: THREE.Mesh;
   /** Fogged copies of the shared model materials (toThree's sharedMaterials), for models on the map. */
   private materials: Map<THREE.Material, THREE.Material>;
-  /** Each fogged material's flash (flash): the same, washed toward white. */
-  private flashed: Map<THREE.Material, THREE.Material>;
+  /** Each fogged material's washes (wash): the same, washed toward white, a lot for a flash, a little for a highlight. */
+  private washed: Record<Wash, Map<THREE.Material, THREE.Material>>;
   private uniforms: Record<string, THREE.IUniform>;
   private texture: THREE.DataTexture | null = null;
   private data = new Uint8Array(4);
@@ -130,11 +135,11 @@ export class FogOfWar {
       m.customProgramCacheKey = () => `fog:${key}`;
       return m;
     };
-    // A hit's flash: the color washed toward white before the fog, so a fogged model flashes no brighter than its fog allows
-    const flash = (own?: Own): Own => (shader) => {
+    // A wash: the color washed toward white before the fog, so a fogged model is lit no brighter than its fog allows
+    const wash = (white: number, own?: Own): Own => (shader) => {
       own?.(shader);
       shader.fragmentShader = shader.fragmentShader.replace('#include <dithering_fragment>',
-        `gl_FragColor.rgb = mix(gl_FragColor.rgb, vec3(1.0), ${FLASH_WHITE.toFixed(2)});\n#include <dithering_fragment>`);
+        `gl_FragColor.rgb = mix(gl_FragColor.rgb, vec3(1.0), ${white.toFixed(2)});\n#include <dithering_fragment>`);
     };
     this.materials = new Map<THREE.Material, THREE.Material>([
       [sharedMaterials.lit, withFog(makeLit(), partialGlowShader)],
@@ -142,12 +147,13 @@ export class FogOfWar {
       [sharedMaterials.glass, withFog(makeGlass(), partialGlowShader)],
       [sharedMaterials.halo, withFog(makeHalo(), haloShader)],
     ]);
-    // Halos keep their glow through a flash
-    this.flashed = new Map<THREE.Material, THREE.Material>([
-      [this.materials.get(sharedMaterials.lit)!, withFog(makeLit(), flash(partialGlowShader), 'flash-lit')],
-      [this.materials.get(sharedMaterials.unlit)!, withFog(makeUnlit(), flash(), 'flash-unlit')],
-      [this.materials.get(sharedMaterials.glass)!, withFog(makeGlass(), flash(partialGlowShader), 'flash-glass')],
+    // Halos keep their glow through a wash
+    const washes = (kind: Wash, white: number) => new Map<THREE.Material, THREE.Material>([
+      [this.materials.get(sharedMaterials.lit)!, withFog(makeLit(), wash(white, partialGlowShader), `${kind}-lit`)],
+      [this.materials.get(sharedMaterials.unlit)!, withFog(makeUnlit(), wash(white), `${kind}-unlit`)],
+      [this.materials.get(sharedMaterials.glass)!, withFog(makeGlass(), wash(white, partialGlowShader), `${kind}-glass`)],
     ]);
+    this.washed = { flash: washes('flash', FLASH_WHITE), highlight: washes('highlight', HIGHLIGHT_WHITE) };
     // The sheet: fog color, its alpha the fog amount (drawn after the opaque models, so they hide it where in front)
     const sheetMat = new THREE.MeshBasicMaterial({ color, transparent: true, depthWrite: false });
     sheetMat.onBeforeCompile = (shader) => {
@@ -170,17 +176,17 @@ export class FogOfWar {
     });
   }
 
-  /** Wash a model (its meshes fogged by apply) toward white for a hit's flash (`on`), or back to its own colors. */
-  flash(obj: THREE.Object3D, on: boolean): void {
+  /**
+   * Wash a model (its meshes fogged by apply) toward white: a hit's flash or a highlight (`kind`), or (null) back to its
+   * own colors.
+   */
+  wash(obj: THREE.Object3D, kind: Wash | null): void {
     obj.traverse((c) => {
       if (!(c instanceof THREE.Mesh)) return;
-      if (on) {
-        const f = this.flashed.get(c.material as THREE.Material);
-        if (f) { c.userData.unflashed = c.material; c.material = f; }
-      } else if (c.userData.unflashed) {
-        c.material = c.userData.unflashed;
-        delete c.userData.unflashed;
-      }
+      const own = (c.userData.unwashed ?? c.material) as THREE.Material;
+      const w = kind ? this.washed[kind].get(own) : undefined;
+      if (w) { c.userData.unwashed = own; c.material = w; }
+      else if (c.userData.unwashed) { c.material = own; delete c.userData.unwashed; }
     });
   }
 
@@ -300,6 +306,6 @@ export class FogOfWar {
     this.texture?.dispose();
     this.sheet.geometry.dispose();
     (this.sheet.material as THREE.Material).dispose();
-    for (const m of [...this.materials.values(), ...this.flashed.values()]) m.dispose();
+    for (const m of [...this.materials.values(), ...this.washed.flash.values(), ...this.washed.highlight.values()]) m.dispose();
   }
 }

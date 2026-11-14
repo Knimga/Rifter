@@ -15,6 +15,7 @@ import { useEffect, useState, type KeyboardEvent, type MouseEvent, type ReactNod
 import ModalWindow, { WindowCloseButton } from './ui/ModalWindow';
 import GoldAmount from './ui/GoldAmount';
 import RightClickHint from './ui/RightClickHint';
+import SortItemsButton from './ui/SortItemsButton';
 import { PartyGold, StatusLine, useGoldPulse } from './ui/TradeStatus';
 import ItemGrid from './ItemGrid';
 import ItemIcon, { rarityGlow } from './ItemIcon';
@@ -27,7 +28,7 @@ import type { PartyMemberConfig } from '../data/units/party';
 import { GEAR_SLOTS, type GearSlot, type Item } from '../data/gear';
 import type { AffixStat } from '../data/gear/affixes';
 import { MAX_TIER, itemTierSum, tierSumCap } from '../data/gear/affixes';
-import { INVENTORY_COLS, INVENTORY_SIZE, type Inventory } from '../data/gear/inventory';
+import { INVENTORY_COLS, INVENTORY_SIZE, sortInventory, type Inventory } from '../data/gear/inventory';
 import { SHARDS, categoryOfShard, shardCategory, shardCount, shardName, type ShardCounts } from '../data/gear/shards';
 import {
   BENCH_ROWS, DISENCHANT_COST, SHARD_PRICE, SHATTER_COST, addAffixCost, addBlocked, addableShards, affixGroup, affixValueText,
@@ -75,7 +76,7 @@ interface Outcome {
 }
 
 
-export default function EnchanterWindow({ enchanter, npc, party, inventory, gold, shards, canUse, onClose }: {
+export default function EnchanterWindow({ enchanter, npc, party, inventory, gold, shards, canUse, onSortItems, onClose }: {
   enchanter: EnchanterActions;
   npc: NpcData;
   /** The party members: their worn gear can go on the bench too. */
@@ -85,6 +86,8 @@ export default function EnchanterWindow({ enchanter, npc, party, inventory, gold
   shards: ShardCounts;
   /** Whether someone in the party can use an item (unusable items show tinted, as in the inventory). */
   canUse: (item: Item) => boolean;
+  /** The button beside the gold (with the inventory showing): auto-sort the party's inventory. */
+  onSortItems: () => void;
   onClose: () => void;
 }) {
   const [mode, setMode] = useState<Mode>('enchant');
@@ -127,6 +130,14 @@ export default function EnchanterWindow({ enchanter, npc, party, inventory, gold
   };
   /** Right-click: put an item on the bench, or, if it is the one there, clear it. */
   const toggle = (ref: BenchRef) => place(sameBenchRef(bench, ref) ? null : ref);
+  /** Auto-sort the inventory; an inventory item on the bench is followed to its new slot (the bench points at slots). */
+  const sortItems = () => {
+    if (bench?.kind === 'inventory' && item) {
+      const at = sortInventory(inventory).indexOf(item);
+      if (at >= 0) setBench({ kind: 'inventory', idx: at });
+    }
+    onSortItems();
+  };
   const switchMode = (m: Mode) => {
     reset();
     setMode(m);
@@ -242,7 +253,10 @@ export default function EnchanterWindow({ enchanter, npc, party, inventory, gold
               </div>
               <RightClickHint text="Bench" label="Right-click to put on bench" />
             </span>
-            {goldReadout}
+            <span className="flex items-center gap-2.5">
+              {source === 'inventory' && <SortItemsButton onSort={sortItems} />}
+              {goldReadout}
+            </span>
           </div>
           {source === 'inventory' ? (
             <ItemGrid label="Party inventory" items={inventory} cols={INVENTORY_COLS} size={INVENTORY_SIZE}
@@ -357,7 +371,7 @@ function ItemColumn({ item, owner, partyLevel, onClear }: { item: Item | null; o
           <span className="block mt-[3px] text-[11px] capitalize text-rift-muted">{itemTypeLine(item)}</span>
           {owner && <span className="block mt-1 text-[11px]" style={{ color: 'var(--ac)' }}>Equipped · {owner}</span>}
           <span className="block mt-2 pt-2 text-xs text-rift-ink" style={{ borderTop: '1px solid color-mix(in srgb, var(--ac) 22%, var(--rift-seam))' }}>
-            {item.implicit ? formatModifier(item.implicit.stat, item.implicit.value) : ''}
+            {item.implicit ? formatModifier(item.implicit.stat, item.implicit.value, item.implicit.percent) : ''}
           </span>
         </>
       ) : (

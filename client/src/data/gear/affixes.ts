@@ -1,6 +1,6 @@
 // Everything about the extras an item rolls: its rarity (= how many affixes), which stats (AFFIX_ROLLS:
 // weight, value range; affix groups) and rollAffixes, which puts it together. Tune values here.
-import { ATTRIBUTE_KEYS, BUFFABLE_STATS, SKILL_KEYS, DAMAGE_ELEMENTS, type BuffableStat, type ElementStatKey } from '../units/stats';
+import { ATTRIBUTE_KEYS, BUFFABLE_STATS, SKILL_KEYS, DAMAGE_ELEMENTS, statSuffix, type BuffableStat, type ElementStatKey } from '../units/stats';
 import { pick, pickWeighted, randInt } from '../random';
 import type { Affix, Rarity } from './types';
 
@@ -98,22 +98,24 @@ export const itemTierSum = (affixes: readonly Affix[]) => affixes.reduce((sum, a
 
 const ATTRIBUTE: AffixRoll = { min: 1, tierSize: 3, weight: 2 };   // 1-3, 4-6 ... 13-15; twice as common
 const SKILL: AffixRoll = { min: 1, tierSize: 3 };                  // 1-3 ... 13-15
-const ARMOR: AffixRoll = { min: 2, tierSize: 4 };                  // 2-5, 6-9 ... 18-21
-const MAGIC_RESISTANCE: AffixRoll = { min: 1, tierSize: 3 };       // 1-3 ... 13-15
+const ARMOR: AffixRoll = { min: 2, tierSize: 4 };                  // % of armor: 2-5, 6-9 ... 18-21
+const MAGIC_RESISTANCE: AffixRoll = { min: 2, tierSize: 4 };       // % of magic resistance: 2-5 ... 18-21
 const AVOIDANCE: AffixRoll = { min: 1, tierSize: 2 };              // %: 1-2 ... 9-10 (dodge, parry, block, glancing)
 const INITIATIVE: AffixRoll = { min: 1, tierSize: 2, weight: 0.75 };             // 1-2 ... 9-10
-const CATEGORY_DAMAGE: AffixRoll = { min: 1, tierSize: 2 };        // 1-2 ... 9-10 (melee / ranged / magic damage)
+// %: 3-5, 6-7, 8-10, 11-12, 13-15 (melee / ranged / magic damage; a fractional tierSize rounds, tierRange)
+const CATEGORY_DAMAGE: AffixRoll = { min: 3, tierSize: 2.5 };
 const CATEGORY_OFFENSE: AffixRoll = { min: 1, tierSize: 2 };       // %: 1-2 ... 9-10 (their crit, penetration)
 // %: 1, 2 ... 5 (their hit). Small: hit has nothing opposing it, and past +20 every attack lands (80% base)
 const CATEGORY_HIT: AffixRoll = { min: 1, tierSize: 1 };
 // %, points added to (increasedThreat) or taken from (reducedThreat) the threat multiplier: 1-4 ... 17-20
 const THREAT: AffixRoll = { min: 1, tierSize: 4, weight: 0.75 };
-const HEALING: AffixRoll = { min: 1, tierSize: 2 };                // 1-2 ... 9-10
-const HEALING_RECEIVED: AffixRoll = { min: 1, tierSize: 1, weight: 0.75 }; // 1 ... 5: on every heal and HoT tick the wearer gets
-const HP_REGEN: AffixRoll = { min: 1, tierSize: 1, minLevel: 5, weight: 0.75 };  // 1 ... 5; too strong this early
-const MP_REGEN: AffixRoll = { min: 1, tierSize: 1, weight: 0.75 };               // 1 ... 5
-const MAX_HP: AffixRoll = { min: 4, tierSize: 4, weight: 0.75 };   // flat: 4-7, 8-11 ... 20-23
-const MAX_MP: AffixRoll = { min: 5, tierSize: 5, weight: 0.75 };   // flat: 5-9, 10-14 ... 25-29
+const HEALING: AffixRoll = { min: 3, tierSize: 2.5 };              // %: 3-5 ... 13-15 (as damage)
+const HEALING_RECEIVED: AffixRoll = { min: 2, tierSize: 2, weight: 0.75 }; // %: 2-3 ... 10-11, on every heal and HoT tick the wearer gets
+// % of max per turn: 1, 2, 2, 3, 3 (capped at 3: regen is a share of the whole pool). HP regen is too strong early
+const HP_REGEN: AffixRoll = { min: 1, tierSize: 0.5, minLevel: 5, weight: 0.75 };
+const MP_REGEN: AffixRoll = { min: 1, tierSize: 0.5, weight: 0.75 };
+const MAX_HP: AffixRoll = { min: 1, tierSize: 2, weight: 0.75 };   // % of max HP: 1-2, 3-4 ... 9-10
+const MAX_MP: AffixRoll = { min: 2, tierSize: 3, weight: 0.75 };   // % of max MP: 2-4, 5-7 ... 14-16
 
 /** Elemental affixes, the same for every element (e.g. fireResistance, shadowDamage). */
 // Weights: damage and resistance are the common elemental affixes; hit, crit and penetration are rarer
@@ -121,7 +123,7 @@ const MAX_MP: AffixRoll = { min: 5, tierSize: 5, weight: 0.75 };   // flat: 5-9,
 const ELEMENT_ROLLS: Record<'Hit' | 'Crit' | 'Damage' | 'Resistance' | 'Penetration', AffixRoll> = {
   Hit:         { min: 1, tierSize: 1, weight: 0.3 },   // %: 1, 2 ... 5 (small, as CATEGORY_HIT)
   Crit:        { min: 1, tierSize: 2, weight: 0.3 },   // %
-  Damage:      { min: 1, tierSize: 3, weight: 0.75 },  // flat: 1-3 ... 13-15
+  Damage:      { ...CATEGORY_DAMAGE, weight: 0.75 },   // %: 3-5 ... 13-15 (as category damage)
   // %: 9-12 ... 25-28 (no resistance affix below 9%). Half as likely as other affixes. Total resistance is
   // capped (ELEMENT_RESISTANCE_CAP, stats.ts).
   Resistance:  { min: 9, tierSize: 4, weight: 0.5 },
@@ -132,9 +134,9 @@ const ELEMENT_ROLLS: Record<'Hit' | 'Crit' | 'Damage' | 'Resistance' | 'Penetrat
  * Buffable stats that never roll on gear (only buffs, debuffs and class passives change them): +1 AP on an
  * item would be far too strong and a whole extra tile per move is the same. Threat is a class's identity (a
  * tank's draw, a rogue's subtlety): gear only nudges it, through increasedThreat and reducedThreat (each limited
- * to its own kinds of item), never the multiplier itself.
+ * to its own kinds of item), as buffs and class passives do.
  */
-export const NON_AFFIX_STATS = ['apMax', 'threatMultiplier', 'movement'] as const satisfies readonly BuffableStat[];
+export const NON_AFFIX_STATS = ['apMax', 'movement', 'holyResistance'] as const satisfies readonly BuffableStat[];
 /** A stat that can roll as an affix. */
 export type AffixStat = Exclude<BuffableStat, typeof NON_AFFIX_STATS[number]>;
 export const AFFIX_STATS = BUFFABLE_STATS.filter((s): s is AffixStat => !(NON_AFFIX_STATS as readonly BuffableStat[]).includes(s));
@@ -227,6 +229,21 @@ export function rollAffixValue(stat: AffixStat, tier: number, kind: AffixItemKin
   return randInt(low, high);
 }
 
+/**
+ * Stats whose affixes are a % of the stat (Affix.percent): pools and defenses that grow with level (armor and magic
+ * resistance with item level, HP and MP with level), so a % keeps its weight at every level where a flat amount would
+ * fade. Other affixes add to their stat (most of them are percentages already: damage, dodge, crit...).
+ */
+const PERCENT_OF_STAT_AFFIXES: ReadonlySet<string> = new Set(['armor', 'magicResistance', 'hp', 'mp']);
+
+/** What an affix of `stat` shows after its value: '%' for a % of the stat (PERCENT_OF_STAT_AFFIXES) or a percent stat. */
+export const affixSuffix = (stat: string) => (PERCENT_OF_STAT_AFFIXES.has(stat) ? '%' : statSuffix(stat));
+
+/** A new affix on a `kind` of item: its value rolled in tier `tier` (rollAffixValue), marked a % of its stat where it is one. */
+export const newAffix = (stat: AffixStat, tier: number, kind: AffixItemKind): Affix => ({
+  stat, tier, value: rollAffixValue(stat, tier, kind), ...(PERCENT_OF_STAT_AFFIXES.has(stat) && { percent: true }),
+});
+
 // ─── Rarity ───────────────────────────────────────────────────────────────────
 
 /** A rarity is its number of affixes: Common has none, Exquisite 4. */
@@ -299,8 +316,7 @@ export function rollAffixes(
       const stat = pickWeighted(available(group), s => AFFIX_ROLLS[s].weight ?? 1);
       used.add(stat);
       filled[group]++;
-      const tier = rollTier(partyLevel);
-      affixes.push({ stat, value: rollAffixValue(stat, tier, kind), tier });
+      affixes.push(newAffix(stat, rollTier(partyLevel), kind));
     }
   }
   return { affixes, rarity: RarityPerAffixCount[affixes.length] };

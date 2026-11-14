@@ -75,7 +75,7 @@ export const AMULETS: JewelryTemplate[] = [
     name: 'Carnelian Amulet',
     requiredLevel: 1,
     valueMultiplier: 1,
-    implicit: { stat: 'armor', baseValue: 5, growthPerLevel: 0.2 },
+    implicit: { stat: 'armor', baseValue: 5, growthPerLevel: 0.2, percent: true },
     invalidAffixes: [
       ...NO_JEWELRY_AFFIXES, ...magicStats, ...damageTypeAffixes(['fire','ice','lightning']),
       'mind', 'spirit', 'devotion', 'spellcraft', 'mpRegen'

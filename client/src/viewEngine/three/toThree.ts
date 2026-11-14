@@ -29,10 +29,10 @@ export function partialGlowShader(shader: THREE.WebGLProgramParametersWithUnifor
  */
 export function haloShader(shader: THREE.WebGLProgramParametersWithUniforms): void {
   shader.vertexShader = shader.vertexShader
-    .replace('#include <common>', '#include <common>\nattribute vec2 haloCorner;\nattribute float haloRadius;\nvarying vec2 vHaloCorner;')
+    .replace('#include <common>', '#include <common>\nattribute vec2 haloCorner;\nattribute float haloRadius;\nattribute vec2 haloStretch;\nvarying vec2 vHaloCorner;')
     .replace('#include <project_vertex>', `#include <project_vertex>
 \tfloat haloScale = pow(abs(determinant(mat3(modelViewMatrix))), 1.0 / 3.0); // its overall scale, the same in every direction (a squashed spin frame stretches one axis)
-\tmvPosition.xy += haloCorner * haloRadius * haloScale;
+\tmvPosition.xy += haloCorner * haloStretch * haloRadius * haloScale; // stretched on screen (Halo.s), else round
 \tmvPosition.z += haloRadius * haloScale;
 \tgl_Position = projectionMatrix * mvPosition;
 \tvHaloCorner = haloCorner;`);
@@ -122,13 +122,16 @@ function addHalos(g: THREE.Object3D, model: Model, partIdx: (part: number) => bo
   const CORNERS = [[-1, -1], [1, -1], [1, 1], [-1, -1], [1, 1], [-1, 1]];
   const n = halos.length * 6;
   const pos = new Float32Array(n * 3), col = new Float32Array(n * 3), corner = new Float32Array(n * 2), radius = new Float32Array(n);
+  const stretch = new Float32Array(n * 2);
   halos.forEach((h, i) => {
     const c = h.c.map(srgbToLinear);
+    const [sx, sy] = h.s ?? [1, 1];
     CORNERS.forEach(([cx, cy], k) => {
       const v = i * 6 + k;
       for (let a = 0; a < 3; a++) { pos[v * 3 + a] = h.p[a] - origin[a]; col[v * 3 + a] = c[a]; }
       corner[v * 2] = cx; corner[v * 2 + 1] = cy;
       radius[v] = h.r;
+      stretch[v * 2] = sx; stretch[v * 2 + 1] = sy;
     });
   });
   const geo = new THREE.BufferGeometry();
@@ -136,6 +139,7 @@ function addHalos(g: THREE.Object3D, model: Model, partIdx: (part: number) => bo
   geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
   geo.setAttribute('haloCorner', new THREE.BufferAttribute(corner, 2));
   geo.setAttribute('haloRadius', new THREE.BufferAttribute(radius, 1));
+  geo.setAttribute('haloStretch', new THREE.BufferAttribute(stretch, 2));
   const m = new THREE.Mesh(geo, halo);
   if (fading) {
     const from = new Float32Array(n * 3);

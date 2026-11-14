@@ -1,6 +1,7 @@
 import { CLASSES } from './classes';
+import { subclass } from './subclasses';
 import { capitalize } from '../detailStrings';
-import type { ClassKey, ClassData, Passive, ScalingPassive } from './classes';
+import type { ClassKey, ClassData, Passive, Passives, ScalingPassive } from './classes';
 import type { Aura, Effect, PassiveEffect, Trigger } from '../combat/abilities';
 
 export const ATTRIBUTE_KEYS = ['strength', 'toughness', 'finesse', 'mind', 'spirit', 'speed'] as const;
@@ -21,7 +22,8 @@ const MISC_STATS = [
   'meleeHit', 'meleeDamage', 'meleeCrit', 'meleePenetration',
   'rangedHit', 'rangedDamage', 'rangedCrit', 'rangedPenetration',
   'magicHit', 'magicDamage', 'magicCrit', 'magicPenetration',
-  'threatMultiplier', 'increasedThreat', 'reducedThreat',
+  // Threat: points added to or taken from the threatMultiplier (THREAT_SHIFT_STATS), the one way anything changes it
+  'increasedThreat', 'reducedThreat',
 ] as const;
 
 /** Every stat that can be raised or lowered by a buff/debuff. */
@@ -63,6 +65,7 @@ export interface Stats {
   skills:          Record<SkillKey, number>;
   hp:              number;
   mp:              number;
+  /** % of max HP / MP regained at the start of each turn, at least MIN_REGEN (regenAmount). */
   hpRegen:         number;
   mpRegen:         number;
   initiative:      number;
@@ -75,8 +78,9 @@ export interface Stats {
   block:           number;
   glancingBlow:    number;
   magicResistance: number;
+  /** % more on the heals and HoTs this unit casts (half of it on HoTs: executeAction). */
   healing:         number;
-  /** Added to every heal this unit receives; half of it (rounded down) to each HoT tick (combat: executeAction, tickHots). */
+  /** % more on every heal this unit receives; half of it on each HoT tick (combat: executeAction, tickHots). */
   healingReceived: number;
   melee:           AttackCategoryStats;
   ranged:          AttackCategoryStats;
@@ -219,39 +223,20 @@ export const auraToBuff = (eff: Extract<Effect, { type: 'aura' }>, idPrefix: str
 export const isPassiveEntry = (x: { turnsLeft: number; fromAura?: unknown }): boolean => !Number.isFinite(x.turnsLeft) && !x.fromAura;
 
 /**
- * A unit's passive effects (PassiveEffect: a creature's, or a party member's from its class) as the entries it starts
- * with in its buffs, HoTs and DoTs: the same entries the effect would make cast on it, but for good (turnsLeft Infinity,
- * like gear's bonuses: they never count down, show no marker and a dispel leaves them) and with no stack (nothing caps or
+ * A unit's passive effects (PassiveEffect: a creature's, or a party member's from its class) as the buff entries it
+ * starts with: the same entries a cast trigger buff or aura would make on it, but for good (turnsLeft Infinity, like
+ * gear's bonuses: they never count down, show no marker and a dispel leaves them) and with no stack (nothing caps or
  * replaces them). `ownerKey`: the unit's key (a creature's id, a member's 'party-<idx>'), whose a trigger's 'source' is.
- * A buff's stat changes reach its stats through recomputeStats, as any buff's.
  */
-export function passiveEffectEntries(passives: readonly PassiveEffect[] | undefined, ownerKey: string): { buffs: ActiveBuff[]; hots: ActiveHot[]; dots: ActiveDot[] } {
-  const out = { buffs: [] as ActiveBuff[], hots: [] as ActiveHot[], dots: [] as ActiveDot[] };
-  for (const p of passives ?? []) {
+export function passiveEffectEntries(passives: readonly PassiveEffect[] | undefined, ownerKey: string): ActiveBuff[] {
+  return (passives ?? []).flatMap(p => {
     const prefix = `passive-${p.name}`;
-    const damageElement = p.effect.damageElement ?? p.damageElement;
-    const eff = { ...p.effect, damageElement, appliesTo: 'target', turns: Infinity } as Extract<Effect, { type: PassiveEffect['effect']['type'] }>;
-    switch (eff.type) {
-      case 'buff':
-      case 'debuff':
-        out.buffs.push(...effectToBuffs(eff, prefix, p.name, ownerKey));
-        break;
-      case 'root':
-        out.buffs.push(rootToBuff(eff, prefix, p.name));
-        break;
-      case 'aura':
-        out.buffs.push(auraToBuff(eff, prefix, p.name));
-        break;
-      case 'hot':
-        out.hots.push({ name: p.name, damageElement, healPerTurn: eff.healPerTurn, turnsLeft: Infinity });
-        break;
-      case 'dot':
-        out.dots.push({ name: p.name, damageElement: eff.damageElement, damagePerTurn: eff.damagePerTurn, damagesMP: eff.damagesMP, turnsLeft: Infinity });
-        break;
-    }
-  }
-  out.buffs = out.buffs.map(b => ({ ...b, stack: undefined }));
-  return out;
+    const { damageElement } = p;
+    const entries = p.trigger
+      ? effectToBuffs({ type: 'buff', appliesTo: 'target', damageElement, turns: Infinity, trigger: p.trigger }, prefix, p.name, ownerKey)
+      : [auraToBuff({ type: 'aura', appliesTo: 'target', damageElement, turns: Infinity, aura: p.aura }, prefix, p.name)];
+    return entries.map(b => ({ ...b, stack: undefined }));
+  });
 }
 
 /** A HoT's or DoT's stacking: what its stacks share (its ability and element: tickStack) and how many fit (maxStacks). */
@@ -285,6 +270,7 @@ export interface ActiveHot {
   name?: string;
   damageElement?: DamageElement;
   healPerTurn: number;
+  restoresMP?: boolean;       // ticks restore MP instead of HP
   /** Its bearer's turns left: it heals at the start of each, counts down at the end (as ActiveBuff). */
   turnsLeft: number;
   fresh?: boolean;
@@ -302,7 +288,7 @@ export interface ActiveDot {
   /** Its bearer's turns left: it deals damage at the start of each, counts down at the end (as ActiveBuff). */
   turnsLeft: number;
   fresh?: boolean;
-  sourceKey?: string;         // threat key of the party-side unit that applied it (party member or summon: threatKey)
+  sourceKey?: string;         // threat key of the party-side unit that applied it to a foe (party member or summon: threatKey); none on its own side's
   penetration?: number;       // % points reducing armor/MR DR on each tick
   elementPenetration?: number; // % points reducing element resistance on each tick
   damagesMP?: boolean;        // ticks drain MP instead of HP
@@ -361,23 +347,28 @@ export function dropDispelled<T extends ActiveBuff | ActiveHot | ActiveDot>(list
 
 // ─── Stat Display Helpers ─────────────────────────────────────────────────────
 
-/** Stat keys (BuffableStat with 'Bonus' stripped) whose values display as percentages. */
+/**
+ * Stat keys (BuffableStat with 'Bonus' stripped) whose values are percentages: what a buff, passive or affix on one
+ * adds is percentage points. Damage (category and element) is a % bonus on every hit's damage, healing a % on heals
+ * and HoTs cast, healingReceived a % on those received, and the regens a % of max HP / MP each turn (regenAmount).
+ */
 const PERCENT_STATS = new Set([
   'dodge', 'parry', 'block', 'glancingBlow',
-  'meleeHit', 'meleeCrit', 'meleePenetration',
-  'rangedHit', 'rangedCrit', 'rangedPenetration',
-  'magicHit', 'magicCrit', 'magicPenetration',
+  'meleeHit', 'meleeCrit', 'meleePenetration', 'meleeDamage',
+  'rangedHit', 'rangedCrit', 'rangedPenetration', 'rangedDamage',
+  'magicHit', 'magicCrit', 'magicPenetration', 'magicDamage',
   'increasedThreat', 'reducedThreat',
-  // elemental: Hit/Crit/Resistance/Penetration are %; Damage is flat
-  ...DAMAGE_ELEMENTS.flatMap(el => [`${el}Hit`, `${el}Crit`, `${el}Resistance`, `${el}Penetration`]),
+  'healing', 'healingReceived', 'hpRegen', 'mpRegen',
+  ...DAMAGE_ELEMENTS.flatMap(el => ELEMENT_STAT_SUFFIXES.map(suffix => `${el}${suffix}`)),
 ]);
 
 /**
  * Stats that are not a Stats field of their own but shift another: percentage points added to (increasedThreat) or
- * taken from (reducedThreat) the threatMultiplier, as a flat change (applyFlatPassives, applyStatBuffs).
+ * taken from (reducedThreat) the threatMultiplier, as a flat change (applyFlatPassives, applyStatBuffs). They are the
+ * only way passives, buffs and gear change it (threatMultiplier is no BuffableStat), and only flat: never a percent of them.
  */
 export const THREAT_SHIFT_STATS = { increasedThreat: 1, reducedThreat: -1 } as const;
-type ThreatShiftStat = keyof typeof THREAT_SHIFT_STATS;
+export type ThreatShiftStat = keyof typeof THREAT_SHIFT_STATS;
 const isThreatShift = (key: string): key is ThreatShiftStat => key in THREAT_SHIFT_STATS;
 
 /** A stat's value as players read it: reducedThreat's is a reduction, so it shows negative ('−9% Threat'). */
@@ -388,12 +379,19 @@ export function statSuffix(key: string): string {
   return PERCENT_STATS.has(key) ? '%' : '';
 }
 
-/** Formats a stat value for display: 1 decimal place for percent stats, raw otherwise. */
+/**
+ * Percent stats shown as whole numbers. Healing (2 × spirit + devotion) is always whole; healing received is half
+ * of spirit + devotion, so it can land on a .5, which the display rounds.
+ */
+const WHOLE_PERCENT_STATS = new Set(['healing', 'healingReceived']);
+
+/** Formats a stat value for display: 1 decimal place for percent stats (whole for WHOLE_PERCENT_STATS), raw otherwise. */
 function formatStatValue(key: string, value: number): string {
-  return PERCENT_STATS.has(key) ? value.toFixed(1) : String(value);
+  if (!PERCENT_STATS.has(key)) return String(value);
+  return value.toFixed(WHOLE_PERCENT_STATS.has(key) ? 0 : 1);
 }
 
-/** Formatted value plus its '%' suffix where applicable, e.g. formatStat('dodge', 7.25) → '7.3%'. */
+/** Formatted value plus its '%' suffix where applicable, e.g. formatStat('dodge', 7.25) → '7.3%', ('healing', 14) → '14%'. */
 export const formatStat = (key: string, value: number) => `${formatStatValue(key, value)}${statSuffix(key)}`;
 
 // ─── Internal Helpers ─────────────────────────────────────────────────────────
@@ -457,8 +455,11 @@ const scalar = (key: ScalarStatKey, opts: Partial<StatAccessor> = {}): StatAcces
 // Percent stats (PERCENT_STATS: dodge, hit, crit...) come out of their formulas fractional and show one decimal, so a
 // buff or affix on one adds to it as it is, never flooring the fraction away (a +3 Dodge affix adds exactly 3)
 const STAT_ACCESSORS: StatAccessor[] = ([
-  ...(['hp', 'mp', 'hpRegen', 'mpRegen', 'initiative', 'armor', 'dodge', 'parry', 'block', 'glancingBlow', 'magicResistance', 'healing', 'healingReceived'] as const)
+  ...(['hp', 'mp', 'initiative', 'armor', 'dodge', 'parry', 'block', 'glancingBlow', 'magicResistance', 'healing', 'healingReceived'] as const)
     .map(k => scalar(k)),
+  // Regeneration is never negative, whatever passives or debuffs do (a unit never loses HP or MP to it)
+  scalar('hpRegen', { min: 0 }),
+  scalar('mpRegen', { min: 0 }),
   scalar('movement', { min: 1 }),
   scalar('apMax'), // a stun can take it to 0: the unit skips its turn
   scalar('threatMultiplier', { noFloor: true, min: MIN_THREAT_MULTIPLIER }),
@@ -511,8 +512,10 @@ export interface EnemyClassStats {
   baseArmor: number;
   /** Inherent damage type resistances (%): flat, like a passive on `${element}Resistance`. */
   resistances?: Partial<Record<DamageElement, number>>;
-  passives?: Record<string, Passive>;
+  passives?: Passives;
   scalingPassives?: ScalingPassive[];
+  /** It carries a shield (its model shows one): only then can it block (applyShieldRule), as a member needs one equipped. */
+  shield?: boolean;
 }
 
 // ─── Stat Calculation Input Types ─────────────────────────────────────────────
@@ -520,9 +523,15 @@ export interface EnemyClassStats {
 export type PlayerStatInput = {
   mode: 'player';
   classKey: ClassKey;
+  /** The member's subclass (SUBCLASSES id), once picked: its passives add to its class's. */
+  subclass?: string;
   /** The party's level (default 1). */
   level?: number;
   gearArmorBonus?: number;
+  /** A shield is equipped. Without one a member never blocks, whatever gives it block (applyShieldRule). */
+  shield: boolean;
+  /** A dagger is held: its melee damage draws on finesse first (buildRawStats). */
+  dagger?: boolean;
   /** Attribute and skill points the member has spent (level-ups). */
   pointsSpent?: Partial<Record<AttributeKey, number>>;
   skillPointsSpent?: Partial<Record<SkillKey, number>>;
@@ -548,7 +557,22 @@ const ENEMY_AP_MAX = 3;
 /** Tiles a move's worth of AP walks before speed (Stats.movement adds speed / 12): everyone's. */
 export const BASE_MOVEMENT = 3;
 
-/** Phase 1 — pure attribute + skill formulas, no passives. */
+/**
+ * The least HP or MP a unit regenerates each turn, whatever its regen % and its max (regenAmount): every unit
+ * recovers something.
+ */
+const MIN_REGEN = 1;
+
+/** What a regen stat (hpRegen / mpRegen: a % of the max each turn) gives back in a turn: at least MIN_REGEN. */
+export const regenAmount = (max: number, regenPercent: number): number => Math.max(MIN_REGEN, Math.round(max * regenPercent / 100));
+
+/**
+ * Phase 1 — pure attribute + skill formulas, no passives. HP and MP grow linearly with level (attributes and a level
+ * term), so fights keep their length as levels rise; damage keeps up through levelScale (combat/abilities.ts).
+ * Armor and magic resistance are measured against a divisor that grows with level (attackResolution.ts), so magic
+ * resistance has a level term of its own, as gear armor grows with item level. `dagger`: melee damage draws on finesse
+ * first (a dagger is held).
+ */
 function buildRawStats(
   attrs: Record<AttributeKey, number>,
   skills: Record<SkillKey, number>,
@@ -557,6 +581,7 @@ function buildRawStats(
   movement: number,
   apMax: number,
   baseHp: number,
+  dagger: boolean,
 ): Stats {
   const { strength: str, toughness: tou, finesse: fin, mind: mnd, spirit: spr, speed: spd } = attrs;
   const { perception, subtlety, expertise, spellcraft, evasion, redoubt, devotion } = skills;
@@ -564,36 +589,37 @@ function buildRawStats(
     level,
     attributes: attrs,
     skills,
-    hp:              fl(baseHp + str + (fl(tou / 2) * level)),
-    mp:              fl(10 + spr + (mnd * level)),
-    hpRegen:         1 + fl((spr / 6) + (tou / 12)),
-    mpRegen:         1 + fl((spr / 6) + (mnd / 12) + (devotion / 6)),
+    hp:              fl(baseHp + (3 * str) + (6 * tou) + (6 * (level - 1))),
+    mp:              fl(30 + (3 * spr) + (6 * mnd) + (6 * (level - 1))),
+    // % of the max: a high base and gentle slopes, since the pool they are a share of grows with level too
+    hpRegen:         4 + (spr / 10) + (tou / 20),
+    mpRegen:         6 + (spr / 10) + (mnd / 20) + (devotion / 10),
     initiative:      fl((spd / 4) + (fin / 8) + (perception / 2) + (subtlety / 6)),
     movement:        movement + fl(spd / 12),
     apMax,
     armor:           fl(tou + (armorBonus * (1 + redoubt * 0.02))),
     dodge:           3 + (spd / 3) + (fin / 6) + (evasion / 3) + (perception / 5),
-    parry:           (spd / 6) + (fin / 6) + (evasion / 6),
-    block:           0,
-    glancingBlow:    (armorBonus * (0.05 + redoubt * 0.01)) + (spd / 4) + (evasion / 4),
-    magicResistance: fl(spr + (mnd / 3) + devotion),
-    healing:         fl((spr / 3) + (devotion / 4)),
-    healingReceived: fl((spr / 6) + (devotion / 6)),
+    parry:           (spd / 6) + (fin / 6) + (expertise / 6),
+    block:           0 + (expertise / 5), // always 0 without a shield
+    glancingBlow:    ((armorBonus / level) * (0.05 + redoubt * 0.01)) + (spd / 4) + (evasion / 4),
+    magicResistance: fl(spr + (mnd / 3) + devotion + (4 * level)),
+    healing:         (2 * spr) + devotion,
+    healingReceived: (spr + devotion) / 2,
     melee: {
       hit:         (str / 5) + (fin / 4) + (expertise / 4),
-      damage:      fl((str / 3) + (fin / 6)),
+      damage:      dagger ? (2 * fin) + str : (2 * str) + fin,
       crit:        5 + (fin / 4) + (str / 6) + (expertise / 3) + (subtlety / 5),
       penetration: expertise / 3,
     },
     ranged: {
       hit:         (fin / 3) + (expertise / 4),
-      damage:      fl(fin / 3),
+      damage:      2 * fin,
       crit:        5 + (fin / 2) + (expertise / 3) + (subtlety / 5),
       penetration: expertise / 3,
     },
     magic: {
       hit:         (mnd / 3) + (spellcraft / 4),
-      damage:      fl(mnd / 3),
+      damage:      2 * mnd,
       crit:        5 + (mnd / 3) + (spellcraft / 3) + (subtlety / 5),
       penetration: spellcraft / 3,
     },
@@ -650,14 +676,18 @@ export function calculateStats(input: PlayerStatInput | EnemyStatInput): Stats {
   const apMax = input.mode === 'player' ? PLAYER_AP_MAX : ENEMY_AP_MAX;
   const skillPointsSpent = input.mode === 'player' ? input.skillPointsSpent : undefined;
 
-  // A creature's inherent resistances count as flat passives on its element resistances
-  const resistances = input.mode === 'enemy' ? input.classData.resistances ?? {} : {};
+  // The class's passives, and what adds to them: a creature's inherent resistances (flat, on its element
+  // resistances), a member's subclass's. On a stat that has one already, the flat and percent bonuses sum
   const passives: Record<string, Passive> = { ...classData.passives };
-  for (const [el, v] of Object.entries(resistances)) {
-    const key = `${el}Resistance`;
-    passives[key] = { ...passives[key], name: passives[key]?.name ?? 'Inherent', flat: (passives[key]?.flat ?? 0) + (v ?? 0) };
-  }
-  const scalingPassives = classData.scalingPassives ?? [];
+  const addPassive = (key: string, p: Passive) => {
+    const was = passives[key];
+    passives[key] = was ? { name: was.name, flat: (was.flat ?? 0) + (p.flat ?? 0), percent: (was.percent ?? 0) + (p.percent ?? 0) } : p;
+  };
+  const resistances = input.mode === 'enemy' ? input.classData.resistances ?? {} : {};
+  for (const [el, v] of Object.entries(resistances)) addPassive(`${el}Resistance`, { name: 'Inherent', flat: v ?? 0 });
+  const sub = input.mode === 'player' && input.subclass ? subclass(input.subclass) : null;
+  for (const [key, p] of Object.entries(sub?.passives ?? {})) addPassive(key, p);
+  const scalingPassives = [...(classData.scalingPassives ?? []), ...(sub?.scalingPassives ?? [])];
 
   // A base stat: its innate value, plus the flat bonuses on it (class passives, buffs, gear), then the
   // percent ones; never below 0
@@ -674,14 +704,25 @@ export function calculateStats(input: PlayerStatInput | EnemyStatInput): Stats {
     base(key, BASE_SKILLS + (classData.skills?.[key] ?? 0) + (skillPointsSpent?.[key] ?? 0)),
   ])) as Record<SkillKey, number>;
 
-  let stats = buildRawStats(attrs, skills, level, armorBonus, movement, apMax, classData.baseHp);
+  let stats = buildRawStats(attrs, skills, level, armorBonus, movement, apMax, classData.baseHp, input.mode === 'player' && !!input.dagger);
   stats = applyFlatPassives(stats, passives);
   stats = applyScalingAndPctPassives(stats, passives, scalingPassives);
-  return applyStatMinimums(stats);
+  return applyShieldRule(applyStatMinimums(stats), input);
 }
 
 /**
- * Hold every stat with a declared floor (StatAccessor.min: movement 1, threatMultiplier, element resistance)
+ * Blocking takes a shield: a unit without one has 0 block, however it was earned (a class passive, an attribute or
+ * skill formula, a buff, a gear affix). A member's shield is the one equipped; a creature's is its class's `shield`.
+ * The last step of calculateStats and of recomputeStats (buffs come after the first), so a new source of block needs
+ * nothing here: it applies once the unit has a shield.
+ */
+function applyShieldRule(stats: Stats, input: PlayerStatInput | EnemyStatInput): Stats {
+  const shield = input.mode === 'player' ? input.shield : !!input.classData.shield;
+  return !shield && stats.block !== 0 ? { ...stats, block: 0 } : stats;
+}
+
+/**
+ * Hold every stat with a declared floor (StatAccessor.min: movement 1, hpRegen and mpRegen 0, threatMultiplier, element resistance)
  * at or above it, whatever passives did. Buffs keep to the same floors (applyStatBuffs). Stats without one
  * may go negative from passives (e.g. a Clumsy -10 melee hit).
  */
@@ -741,7 +782,7 @@ export function recomputeStats(input: PlayerStatInput | EnemyStatInput, buffs: A
     b.flat += buff.amount;
     b.percent += buff.percent ?? 0;
   }
-  return applyStatBuffs(calculateStats({ ...input, baseBonuses }), buffs);
+  return applyShieldRule(applyStatBuffs(calculateStats({ ...input, baseBonuses }), buffs), input);
 }
 
 // Every buffable stat must have a way to apply: attributes and skills through the base calculation, the

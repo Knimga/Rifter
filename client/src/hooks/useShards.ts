@@ -1,5 +1,5 @@
 // The party's affix shards (data/gear/shards.ts): how many of each type it carries, shared by the whole party like
-// the inventory and the keyring. They go up when shards are found and down when they are used (enchanting, later).
+// the inventory and the keyring. They go up when shards are found and down when they are used (enchanting).
 // Shards picked up mark the party window's Shards tab until the tab is opened (`hasNew`, `seeShards`), as a new key
 // marks the Keys tab.
 import { useCallback, useState } from 'react';

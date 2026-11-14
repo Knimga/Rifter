@@ -81,7 +81,7 @@ interface Props {
   aims?: Record<string, UnitAim>;
   /** The feedback each unit's model last showed (a hit's flash, a heal's or effect's glow): a new one plays. */
   fx?: Record<string, UnitFx>;
-  /** Floating text over the map ("Level N!", gold from a sale, a heal). */
+  /** Floating text over the map (gold from a sale, a heal). */
   floatingTexts: FloatingText[];
   onFloatingTextComplete: (id: number) => void;
   /** The 3D layer has drawn its first frame (ModelLayer onReady): the page stops hiding the map. */

@@ -3,6 +3,7 @@
 import { isHarmful, isPassiveEntry, type ActiveBuff, type ActiveDot, type ActiveHot, type DamageElement } from '../../data/units/stats';
 import { auraText, capitalize, describeTrigger, formatModifier, sentenceText } from '../../data/detailStrings';
 import { DAMAGE_ELEMENT_COLOR } from '../../data/constants';
+import { auraAtLevel, triggerAtLevel } from '../../data/combat/abilities';
 import { Tooltip } from '../Tooltip';
 
 /** One effect on a unit, as its marker shows it. */
@@ -25,8 +26,11 @@ const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? '' : 's'}`;
 /** How long a marker's effect lasts, as its tooltip and label say it: 'while in aura' for an aura's effect (Infinity turns). */
 const timeLeft = (turns: number) => (Number.isFinite(turns) ? `${plural(turns, 'turn')} left` : 'while in aura');
 
-/** A unit's effects: one marker per buff source (its stats together, its stacks counted), and per HoT and DoT ability. */
-export function statusMarkers(buffs: ActiveBuff[], hots: ActiveHot[], dots: ActiveDot[]): StatusMarker[] {
+/**
+ * A unit's effects: one marker per buff source (its stats together, its stacks counted), and per HoT and DoT ability.
+ * `level`: the unit's, which an aura's or a trigger's amounts are shown at (they act at its level: auraAtLevel).
+ */
+export function statusMarkers(buffs: ActiveBuff[], hots: ActiveHot[], dots: ActiveDot[], level: number): StatusMarker[] {
   const bySource = new Map<string, ActiveBuff[]>();
   for (const b of buffs) {
     if (isPassiveEntry(b)) continue; // permanent (gear, passive) bonuses aren't effects
@@ -42,18 +46,19 @@ export function statusMarkers(buffs: ActiveBuff[], hots: ActiveHot[], dots: Acti
     // Each line once: stacks of one effect read the same
     effect: [...new Set(list.flatMap((b) => [
       ...(b.roots ? ["Rooted: can't move"] : []),
-      ...(b.aura ? [capitalize(sentenceText(auraText(b.aura.def)))] : []),
-      ...(b.trigger ? [describeTrigger(b.trigger.def)] : []),
+      ...(b.aura ? [capitalize(sentenceText(auraText(auraAtLevel(b.aura.def, level))))] : []),
+      ...(b.trigger ? [describeTrigger(triggerAtLevel(b.trigger.def, level))] : []),
       ...(b.amount ? [formatModifier(b.stat, b.amount)] : []),
       ...(b.percent ? [formatModifier(b.stat, b.percent, true)] : []),
     ]))].join(', '),
     element: list.find((b) => b.damageElement)?.damageElement,
   }));
   // A HoT or DoT: one marker per ability and element, its stacks counted (the newest's amount, the longest time left)
-  const ticking = <T extends { name?: string; damageElement?: DamageElement; turnsLeft: number }>(list: T[], marker: (t: T, stacks: number, turns: number) => StatusMarker) => {
+  const ticking = <T extends { name?: string; damageElement?: DamageElement; turnsLeft: number; restoresMP?: boolean; damagesMP?: boolean }>(list: T[], marker: (t: T, stacks: number, turns: number) => StatusMarker) => {
     const groups = new Map<string, T[]>();
     for (const t of list) {
-      const key = `${t.name ?? ''}:${t.damageElement ?? ''}`;
+      // (a HoT's MP and HP ticks of one ability are separate markers)
+      const key = `${t.name ?? ''}:${t.damageElement ?? ''}:${t.restoresMP || t.damagesMP ? 'mp' : ''}`;
       groups.set(key, [...(groups.get(key) ?? []), t]);
     }
     for (const g of groups.values()) markers.push(marker(g[g.length - 1], g.length, Math.max(...g.map((t) => t.turnsLeft))));
@@ -61,7 +66,7 @@ export function statusMarkers(buffs: ActiveBuff[], hots: ActiveHot[], dots: Acti
   // (A permanent one that is no aura's, a passive effect, shows no marker: as with buffs)
   const shown = <T extends { turnsLeft: number; fromAura?: unknown }>(list: T[]) => list.filter((t) => !isPassiveEntry(t));
   ticking(shown(hots), (h, stacks, turns) => ({
-    name: h.name ?? 'Regeneration', buff: true, turns, stacks, effect: `Heals ${h.healPerTurn} each turn.`, element: h.damageElement,
+    name: h.name ?? 'Regeneration', buff: true, turns, stacks, effect: h.restoresMP ? `Restores ${h.healPerTurn} MP each turn.` : `Heals ${h.healPerTurn} each turn.`, element: h.damageElement,
   }));
   ticking(shown(dots), (d, stacks, turns) => ({
     name: d.name ?? capitalize(d.damageElement),

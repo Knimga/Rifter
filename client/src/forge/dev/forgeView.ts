@@ -43,7 +43,7 @@ export class ForgeView {
   private scene = new THREE.Scene();
   /** The tile reference under the model, by square size (tiles a side), built on first use. */
   private grounds = new Map<number, THREE.Group>();
-  /** three.js objects cached by Model instance: a rebuilt model (new design code, params or seed) is a
+  /** three.js objects cached by Model instance: a rebuilt model (new design code or seed) is a
    *  new instance, so it always gets a fresh mesh instead of a stale cached one. */
   private objects = new Map<Model, THREE.Group>();
   private gameCam = makeGameCamera();

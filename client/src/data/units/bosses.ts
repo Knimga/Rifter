@@ -1,7 +1,7 @@
 // The dungeons' bosses: enemy classes (like data/units/enemies.ts's) each dungeon's boss room is built around
 // (DungeonConfig.bossZone.bossGroup). A boss drops a rift key when it dies (isBoss).
 import { warnCreatureTable } from '../combat/abilities';
-import type { EnemyClassData, EnemyInstance } from './enemies';
+import { type EnemyClassData, type EnemyInstance } from './enemies';
 
 //attributes prop for all bosses should total +20
 
@@ -12,37 +12,31 @@ export const BOSS_CLASSES: EnemyClassData[] = [
     attributes: { toughness: 4, mind: 8, spirit: 8 },
     highAttributes: ['mind', 'toughness'],
     lowAttributes: ['finesse', 'speed'],
-    baseHp: 30,
+    baseHp: 70,
     baseArmor: 15,
     resistances: { shadow: 20 },
     abilities: [
       {
         name: 'Mighty Scythe',
-        mpCost: 0,
-        apCost: 2,
-        range: 1,
+        mpCost: 0, apCost: 2, range: 1,
         target: 'enemy',
         attackCategory: 'melee',
         effects: [
-          { type: 'damage', appliesTo: 'target', damageElement: 'physical', minDamage: 6, maxDamage: 8 }
+          { type: 'damage', appliesTo: 'target', damageElement: 'physical', minDamage: 18, maxDamage: 24 }
         ]
       },
       {
         name: 'Necrotize',
-        mpCost: 7,
-        apCost: 1,
-        range: 5,
+        mpCost: 21, apCost: 1, range: 5,
         target: 'enemy',
         attackCategory: 'magic',
         effects: [
-          { type: 'dot', appliesTo: 'target', damageElement: 'shadow', damagePerTurn: 6, turns: 3 }
+          { type: 'dot', appliesTo: 'target', damageElement: 'shadow', damagePerTurn: 18, turns: 3 }
         ]
       },
       {
         name: 'Summon Skeleton',
-        mpCost: 10,
-        apCost: 2,
-        range: 1,
+        mpCost: 30, apCost: 2, range: 1,
         target: 'tile',
         effects: [
           { type: 'summon', appliesTo: 'caster', creature: 'skeleton', turns: 3, max: 2 }
@@ -61,47 +55,48 @@ export const BOSS_CLASSES: EnemyClassData[] = [
     attributes: { finesse: 6, mind: 8, spirit: 6 },
     highAttributes: ['mind', 'spirit'],
     lowAttributes: ['speed', 'strength'],
-    baseHp: 40,
+    baseHp: 100,
     baseArmor: 19,
-    resistances: { fire: 30, physical: 20 },
+    resistances: { fire: 30, physical: 30 },
     passives: {
-      dodge: { name: 'Ethereal', flat: 10 },
-      fireDamage: { name: 'Firelord', flat: 3 }
+      dodge: { flat: 15 },
+      fireDamage: { flat: 10 }
     },
+    passiveEffects: [
+      { name: 'Ablaze', damageElement: 'fire', aura: {
+        area: 'blast1', effects: [
+          { type: 'dot', appliesTo: 'enemies', damageElement: 'fire', damagePerTurn: 15 }
+        ]
+      }}
+    ],
     abilities: [
       {
         name: 'Conflagrate',
-        mpCost: 15,
-        apCost: 3,
-        range: 5,
+        mpCost: 45, apCost: 2, range: 5,
         target: 'enemy',
         area: 'blast2',
         attackCategory: 'magic',
         effects: [
-          { type: 'dot', appliesTo: 'target', damageElement: 'fire', damagePerTurn: 6, turns: 3 }
+          { type: 'dot', appliesTo: 'target', damageElement: 'fire', damagePerTurn: 20, turns: 3, maxStacks: 1 }
         ]
       },
       {
         name: 'Firebolt',
-        mpCost: 8,
-        apCost: 2,
-        range: 5,
+        mpCost: 24, apCost: 1, range: 5,
         target: 'enemy',
         attackCategory: 'magic',
         effects: [
-          { type: 'damage', appliesTo: 'target', damageElement: 'fire', minDamage: 9, maxDamage: 9 }
+          { type: 'damage', appliesTo: 'target', damageElement: 'fire', minDamage: 27, maxDamage: 27 }
         ]
       },
       {
         name: 'Flameclaw',
-        mpCost: 0,
-        apCost: 1,
-        range: 1,
+        mpCost: 0, apCost: 1, range: 1,
         target: 'enemy',
         attackCategory: 'magic',
         displayElement: 'fire',
         effects: [
-          { type: 'damage', appliesTo: 'target', damageElement: 'fire', minDamage: 5, maxDamage: 7 }
+          { type: 'damage', appliesTo: 'target', damageElement: 'fire', minDamage: 15, maxDamage: 21 }
         ]
       }
     ],
@@ -117,20 +112,18 @@ export const BOSS_CLASSES: EnemyClassData[] = [
     attributes: { toughness: 7, mind: 6, spirit: 7 },
     highAttributes: ['toughness', 'spirit'],
     lowAttributes: ['speed', 'finesse'],
-    baseHp: 40,
+    baseHp: 100,
     baseArmor: 13,
     resistances: { nature: 30, poison: 30 },
     passives: {
-      hpRegen: { name: 'Mycoblood', flat: 2 },
-      mpRegen: { name: 'Mycomind', flat: 2 },
+      hpRegen: { flat: 2 },
+      mpRegen: { flat: 2 },
 
     },
     abilities: [
       {
         name: 'Summon Spore',
-        mpCost: 10,
-        apCost: 2,
-        range: 1,
+        mpCost: 30, apCost: 2, range: 1,
         target: 'tile',        
         effects: [
           { type: 'summon', appliesTo: 'caster', creature: 'fungal-spore', turns: 3, max: 2 }
@@ -138,27 +131,23 @@ export const BOSS_CLASSES: EnemyClassData[] = [
       },
       {
         name: 'Chitin Bloom',
-        mpCost: 10,
-        apCost: 2,
-        range: 5,
+        mpCost: 30, apCost: 2, range: 5,
         target: 'ally',
         area: 'blast2',
         displayElement: 'nature',
         effects: [
-          { type: 'hot', appliesTo: 'allies', damageElement: 'nature', healPerTurn: 6, turns: 3 },
-          { type: 'buff', appliesTo: 'allies', stats: { armor: 20 }, turns: 3 }
+          { type: 'hot', appliesTo: 'allies', damageElement: 'nature', healPerTurn: 18, turns: 3 },
+          { type: 'buff', appliesTo: 'allies', statsPercent: { armor: 30 }, turns: 3 }
         ]
       },
       {
         name: 'Toxin Spray',
-        mpCost: 5,
-        apCost: 1,
-        range: 4,
-        target: 'enemy',
+        mpCost: 15, apCost: 1, range: 4,
+        target: 'enemy', attackCategory: 'magic',
         area: 'line',
         displayElement: 'poison',
         effects: [
-          { type: 'damage', appliesTo: 'target', damageElement: 'poison', minDamage: 6, maxDamage: 8 }
+          { type: 'damage', appliesTo: 'target', damageElement: 'poison', minDamage: 18, maxDamage: 24 }
         ]
       }
     ],
@@ -174,61 +163,53 @@ export const BOSS_CLASSES: EnemyClassData[] = [
     attributes: { toughness: 6, finesse: 4, spirit: 4, mind: 6 },
     highAttributes: ['toughness', 'mind'],
     lowAttributes: ['strength', 'spirit'],
-    baseHp: 40,
+    baseHp: 100,
     baseArmor: 17,
     passives: {
-      initiative: { name: 'Quick-witted', flat: 5 },
-      healing: { name: 'Rearer', flat: 3 },
-      healingReceived: { name: 'Bonded', flat: 3 }
+      initiative: { flat: 5 },
+      healing: { flat: 10 },
+      healingReceived: { flat: 10 }
     },
     abilities: [
       {
         name: "Master's Bond",
-        mpCost: 6,
-        apCost: 1,
-        range: 4,
+        mpCost: 18, apCost: 1, range: 4,
         target: 'ally',
         area: 'blast2',
         displayElement: 'nature',
         effects: [
           // Each hit the bonded ally lands heals the tamer
           { type: 'buff', appliesTo: 'target', maxStacks: 1, turns: 3, trigger: { when: 'attacking', on: 'hit',
-            effects: [{ type: 'heal', appliesTo: 'source', damageElement: 'nature', minHeal: 4, maxHeal: 6 }] } }
+            effects: [{ type: 'heal', appliesTo: 'source', damageElement: 'nature', minHeal: 12, maxHeal: 18 }] } }
         ]
       },
       {
         name: "Stinky Salve",
-        mpCost: 6,
-        apCost: 1,
-        range: 4,
+        mpCost: 18, apCost: 1, range: 4,
         target: 'ally',
         displayElement: 'nature',
         effects: [
-          { type: 'heal', appliesTo: 'target', damageElement: 'nature', minHeal: 6, maxHeal: 9 }
+          { type: 'heal', appliesTo: 'target', damageElement: 'nature', minHeal: 18, maxHeal: 27 }
         ]
       },
       {
         name: "Hand Crossbow",
-        mpCost: 0,
-        apCost: 1,
-        range: 4,
+        mpCost: 0, apCost: 1, range: 4,
         target: 'enemy',
         useWeapon: true,
         attackCategory: 'ranged',
         effects: [
-          { type: 'damage', appliesTo: 'target', damageElement: 'physical', minDamage: 5, maxDamage: 7 },
+          { type: 'damage', appliesTo: 'target', damageElement: 'physical', minDamage: 15, maxDamage: 21 },
         ]
       },
       {
         name: "Troll Tranquilizer",
-        mpCost: 8,
-        apCost: 2,
-        range: 4,
+        mpCost: 24, apCost: 2, range: 4,
         target: 'enemy',
         useWeapon: true,
         attackCategory: 'ranged',
         effects: [
-          { type: 'damage', appliesTo: 'target', damageElement: 'physical', minDamage: 4, maxDamage: 6 },
+          { type: 'damage', appliesTo: 'target', damageElement: 'physical', minDamage: 12, maxDamage: 18 },
           { type: 'debuff', appliesTo: 'target', damageElement: 'poison', stats: { apMax: -2 }, turns: 1 }
         ]
       }      
@@ -246,25 +227,23 @@ export const BOSS_CLASSES: EnemyClassData[] = [
     highAttributes: ['speed', 'mind'],
     lowAttributes: ['strength', 'spirit'],
     large: true,
-    baseHp: 50,
+    baseHp: 130,
     baseArmor: 26,
     resistances: { poison: 30 },
     passives: {
-      movement: { name: 'Skitterer', flat: 1 }
+      movement: { flat: 1 }
     },
     passiveEffects: [
-      { name: 'Potent Venom', damageElement: 'poison', effect: { type: 'buff', trigger: {
+      { name: 'Potent Venom', damageElement: 'poison', trigger: {
         when: 'attacking', on: 'hit', categories: ['melee'], chance: 50,
         effects: [
-          {type: 'dot', appliesTo: 'target', damageElement: 'poison', damagePerTurn: 6, turns: 3, maxStacks: 3 }]
-      }}}
+          {type: 'dot', appliesTo: 'target', damageElement: 'poison', damagePerTurn: 18, turns: 3, maxStacks: 3 }]
+      }}
     ],
     abilities: [
       {
         name: 'Spawn Pale Creeper',
-        mpCost: 5,
-        apCost: 1,
-        range: 1,
+        mpCost: 15, apCost: 1, range: 1,
         target: 'tile',
         effects: [
           { type: 'summon', appliesTo: 'caster', creature: 'pale-creeper', turns: 3, max: 3 }
@@ -272,29 +251,25 @@ export const BOSS_CLASSES: EnemyClassData[] = [
       },
       {
         name: 'Pale Fangs',
-        mpCost: 0,
-        apCost: 2,
-        range: 1,
+        mpCost: 0, apCost: 2, range: 1,
         target: 'enemy',
         displayElement: 'physical',
         attackCategory: 'melee',
         effects: [
-          { type: 'damage', appliesTo: 'target', damageElement: 'physical', minDamage: 4, maxDamage: 5 },
-          { type: 'damage', appliesTo: 'target', damageElement: 'poison', minDamage: 1, maxDamage: 2 },
+          { type: 'damage', appliesTo: 'target', damageElement: 'physical', minDamage: 12, maxDamage: 15 },
+          { type: 'damage', appliesTo: 'target', damageElement: 'poison', minDamage: 3, maxDamage: 6 },
         ]
       },
       {
         name: 'Brood Screech',
-        mpCost: 8,
-        apCost: 1,
-        range: 4,
+        mpCost: 24, apCost: 1, range: 4,
         target: 'ally',
         area: 'blast2',
         displayElement: 'physical',
         effects: [
           { type: 'buff', appliesTo: 'target', turns: 5, trigger: {
             when: 'attacked', on: 'hit', effects: [
-              { type: 'buff', appliesTo: 'source', stats: { meleeDamage: 3 }, turns: 5 }
+              { type: 'buff', appliesTo: 'source', stats: { meleeDamage: 15 }, turns: 5 }
             ]
           }}
         ]

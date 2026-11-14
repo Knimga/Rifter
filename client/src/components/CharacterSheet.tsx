@@ -9,11 +9,12 @@
 // spend is marked on the rail, gets a header banner (Reset, Confirm) and + / - on their attribute and skill
 // rows. Placed points stay pending (kept by GameScreen, so closing the window keeps them) until Confirm.
 import { lazy, Suspense, useMemo, useState, type MouseEvent } from 'react';
-import { FaSortAmountDown } from 'react-icons/fa';
+import SortItemsButton from './ui/SortItemsButton';
 import { CLASSES } from '../data/units/classes';
+import { proficienciesOf } from '../data/units/subclasses';
 import { ATTRIBUTE_KEYS, SKILL_KEYS, isPassiveEntry, recomputeStats, type ActiveBuff, type BuffableStat, type Stats } from '../data/units/stats';
 import { GEAR_SLOTS, getGearBuffs, heldWeapon, type GearSlot, type Item } from '../data/gear';
-import { equipCompare, hasPointsToSpend, memberStatInput, memberStats, noPendingPoints, pointsLeft, spendPoints, type PartyMemberConfig, type PendingPoints } from '../data/units/party';
+import { equipCompare, hasPointsToSpend, memberStatInput, memberStats, memberSubclass, noPendingPoints, pointsLeft, spendPoints, type PartyMemberConfig, type PendingPoints } from '../data/units/party';
 import { xpToNext, type PartyProgress } from '../data/units/xp';
 import { INVENTORY_COLS, INVENTORY_SIZE, canEquip, canSwapGear, canUnequip, isProficient, type Inventory } from '../data/gear/inventory';
 import { AttributeTooltips, SkillTooltips, ATTR_LABEL, SLOT_LABEL, capitalize } from '../data/detailStrings';
@@ -187,6 +188,7 @@ export default function CharacterSheet({ party, partyHp, partyMp, partyStats, pa
   const shown = placed ? spendPoints(member, pending) : member;
   const stats = placed ? memberStats(shown, partyStats[selectedIdx].level, buffs) : partyStats[selectedIdx];
   const classData = CLASSES[selectedClass];
+  const proficiencies = proficienciesOf(member);
   // Dragging items. From the inventory: onto another slot (it moves, or trades places), or onto a gear slot of the
   // selected member's it fits and they can wear (it is equipped there). From the member's gear: onto an empty
   // inventory slot (unequipped there), onto an item there that can take its place (they trade places), or onto
@@ -194,11 +196,11 @@ export default function CharacterSheet({ party, partyHp, partyMp, partyStats, pa
   const drag = useItemDrag({
     canDrop: (from, to) => {
       if (from.kind === 'inventory') {
-        return to.kind === 'inventory' ? !!onMoveItem : !!onEquipItem && canEquip(classData, inventory[from.idx], inventory, gear, to.slot);
+        return to.kind === 'inventory' ? !!onMoveItem : !!onEquipItem && canEquip(proficiencies, inventory[from.idx], inventory, gear, to.slot);
       }
       if (to.kind === 'gear') return !!onSwapGear && canSwapGear(gear, from.slot, to.slot);
       const there = inventory[to.idx];
-      return there ? !!onEquipItem && canEquip(classData, there, inventory, gear, from.slot) : !!onUnequipItem;
+      return there ? !!onEquipItem && canEquip(proficiencies, there, inventory, gear, from.slot) : !!onUnequipItem;
     },
     onDrop: (from, to) => {
       if (from.kind === 'inventory') {
@@ -221,13 +223,11 @@ export default function CharacterSheet({ party, partyHp, partyMp, partyStats, pa
   // numbers: +Block counts toward Block, Evasion or Finesse on gear doesn't, though they raise it through their formulas);
   // the effects', the buffs and debuffs on that stat over that. Yellow: the placed, unconfirmed points change it (from
   // the member's confirmed stats).
-  // The class's passive effects (isPassiveEntry) are part of the class, like its flat passives: they count in the base
-  // and in every value below, never as an effect that raises or lowers
+  // The class's passive effects (isPassiveEntry: triggers and auras) change no stat, so they are no effect here
   const statInput = memberStatInput(shown, stats.level);
-  const passives = buffs.filter(isPassiveEntry);
   const effects = buffs.filter(b => !isPassiveEntry(b));
-  const baseStats = recomputeStats(statInput, passives);
-  const unlowered = memberStats(shown, stats.level, [...passives, ...effects.filter(b => b.amount >= 0 && (b.percent ?? 0) >= 0)]);
+  const baseStats = recomputeStats(statInput, []);
+  const unlowered = memberStats(shown, stats.level, effects.filter(b => b.amount >= 0 && (b.percent ?? 0) >= 0));
   const gearBuffs = getGearBuffs(gear);
   const raised = new Set([...gearBuffs, ...effects].filter(b => b.amount > 0 || (b.percent ?? 0) > 0).map(b => b.stat));
   /**
@@ -236,26 +236,28 @@ export default function CharacterSheet({ party, partyHp, partyMp, partyStats, pa
    */
   // The stats with only the gear on a stat, and with the gear and effects on it, built once per stat (the panel asks
   // for the same stat many times: a stat with no gear or effects on it is just the base, rebuilding nothing)
-  const statViews = new Map<BuffableStat, { gearOnly: Stats; withEffects: Stats }>();
-  const viewsOf = (stat: BuffableStat) => {
-    let views = statViews.get(stat);
+  const statViews = new Map<string, { gearOnly: Stats; withEffects: Stats }>();
+  const viewsOf = (on: readonly BuffableStat[]) => {
+    const key = on.join();
+    let views = statViews.get(key);
     if (!views) {
-      const onGear = gearBuffs.filter(b => b.stat === stat);
-      const onEffects = effects.filter(b => b.stat === stat);
-      const gearOnly = onGear.length ? recomputeStats(statInput, [...passives, ...onGear]) : baseStats;
-      const withEffects = onEffects.length ? recomputeStats(statInput, [...passives, ...onGear, ...onEffects]) : gearOnly;
-      statViews.set(stat, views = { gearOnly, withEffects });
+      const onGear = gearBuffs.filter(b => on.includes(b.stat));
+      const onEffects = effects.filter(b => on.includes(b.stat));
+      const gearOnly = onGear.length ? recomputeStats(statInput, onGear) : baseStats;
+      const withEffects = onEffects.length ? recomputeStats(statInput, [...onGear, ...onEffects]) : gearOnly;
+      statViews.set(key, views = { gearOnly, withEffects });
     }
     return views;
   };
   const shift: StatShift = (stat, get) => {
+    const on: readonly BuffableStat[] = typeof stat === 'string' ? [stat] : stat;
     const value = get(stats);
-    const views = viewsOf(stat);
+    const views = viewsOf(on);
     const gearOnly = get(views.gearOnly);
     const withEffects = get(views.withEffects);
     return {
       value,
-      dir: value < get(unlowered) ? -1 : raised.has(stat) && value > get(baseStats) ? 1 : 0,
+      dir: value < get(unlowered) ? -1 : on.some(s => raised.has(s)) && value > get(baseStats) ? 1 : 0,
       gear: gearOnly - get(baseStats),
       effects: withEffects - gearOnly,
       pending: placed && value !== get(partyStats[selectedIdx]),
@@ -391,13 +393,7 @@ export default function CharacterSheet({ party, partyHp, partyMp, partyStats, pa
                     ? <span className="text-xs text-rift-muted">{keys.length} {keys.length === 1 ? 'key' : 'keys'}</span>
                     : (
                       <span className="flex items-center gap-2.5">
-                        {tab === 'items' && onSortItems && (
-                          <Hint text="Auto-sort Inventory">
-                            <button type="button" className="rf-pt" aria-label="Auto-sort Inventory" onClick={onSortItems}>
-                              <FaSortAmountDown aria-hidden="true" className="w-2.5 h-2.5" />
-                            </button>
-                          </Hint>
-                        )}
+                        {tab === 'items' && onSortItems && <SortItemsButton onSort={onSortItems} />}
                         <GoldAmount amount={gold} label="Party gold" className="text-xs text-rift-soft" />
                       </span>
                     )}
@@ -406,8 +402,8 @@ export default function CharacterSheet({ party, partyHp, partyMp, partyStats, pa
                   <ShardsTab counts={shards} category={shardCategory} onCategory={setShardCategory} showAll={shardsAll} onShowAll={setShardsAll} />
                 ) : tab === 'items' ? (
                   <ItemGrid items={inventory} cols={INVENTORY_COLS} size={INVENTORY_SIZE} stats={stats}
-                    canUse={(item) => isProficient(classData, item)}
-                    action={(item) => (onEquipItem && canEquip(classData, item, inventory, gear) ? 'Equip' : null)}
+                    canUse={(item) => isProficient(proficiencies, item)}
+                    action={(item) => (onEquipItem && canEquip(proficiencies, item, inventory, gear) ? 'Equip' : null)}
                     onAction={(i) => onEquipItem?.(i, selectedIdx)} unusableNote=", not proficient"
                     compareWith={(item, other) => equipCompare(shown, item, stats, other)} drag={drag} />
                 ) : <Keyring keys={keys} />}
@@ -456,7 +452,7 @@ export default function CharacterSheet({ party, partyHp, partyMp, partyStats, pa
                   </div>
                   {detailsTab === 'stats'
                     ? <StatsPanel stats={stats} hp={hp} mp={mp} shift={shift} />
-                    : <ClassKit classData={classData} level={stats.level} weapon={heldWeapon(gear)} />}
+                    : <ClassKit classData={classData} subclass={memberSubclass(member)} level={stats.level} weapon={heldWeapon(gear)} />}
                 </section>
               </div>
             </GearChange>

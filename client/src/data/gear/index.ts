@@ -65,7 +65,7 @@ export function getGearBuffs(gear: GearSlots): ActiveBuff[] {
     return mods.map((mod, i) => ({
       id: `gear_${slotIdx}_${i}`,
       stat: mod.stat,
-      amount: mod.value,
+      ...(mod.percent ? { amount: 0, percent: mod.value } : { amount: mod.value }),
       turnsLeft: Infinity,
     }));
   });
@@ -97,7 +97,7 @@ function pickSeriesForLevel<T extends { requiredLevel: number }>(series: T[], le
 }
 
 function resolveImplicit(def: ImplicitDef, level: number): Affix {
-  return { stat: def.stat, value: Math.round(def.baseValue + def.growthPerLevel * (level - 1)) };
+  return { stat: def.stat, value: Math.round(def.baseValue + def.growthPerLevel * (level - 1)), ...(def.percent && { percent: true }) };
 }
 
 // Every item type must be able to fill both affix groups: warn (once, at load) about any whose excluded

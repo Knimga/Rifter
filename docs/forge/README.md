@@ -50,7 +50,7 @@ The forge folder holds the forge UI and the link between its models and game dat
 1. Same `(design, seed)` always produces the identical mesh.
 2. Game logic never imports three.js and never reads model geometry. Facing is view state only.
 3. Nothing from `drafts/` or `dev/` ships in the production bundle (`main.tsx` gates the builder page behind `import.meta.env.DEV`).
-4. Item rarity glow (Superior and up) is applied by the renderer, never baked into a mesh. Loot never animates.
+4. Item rarity glow (every rarity but Common) is applied by the renderer, never baked into a mesh. Loot never animates.
 
 ## Linking designs to game data
 Every enemy class, item base (weapon, armor slot, shield, ring, amulet), class, interactive object, decorative object, loot and NPC has a required `model` field on its own data entry: the id of its design. The Rift and the Keystone are one tinted model each (`data/world/rifts.ts`): every rift and key is drawn with them, painted in its dungeon's `riftColor` (or, for a rift back to the Sanctum, `SANCTUM_RIFT_COLOR`; see the contract's Rifts & Keys).
@@ -74,7 +74,7 @@ model: 'creature.zombie',
    Requested changes and new designs always go to `drafts/`: **never edit `designs/` directly** for a requested change (exceptions: contract "Changes").
 2. You open **`/dev/forge`** on the dev server (`npm run dev`, then `http://localhost:5173/dev/forge`).
    - Left: designs by category with approved / draft / new badges, and whether the data entry links the design.
-   - Center: items show their one look; creatures show a page of seeds (each a possible instance); classes show one row per hold. Tinted models (Rifts & Keys, the active Rifter) get a dungeon menu and a color picker for the color they are shown in. Game camera (or icon / top / side), a turntable and an 8-direction walk test, wireframe, and a tile reference (1×1, or 2×2 for a large creature). Click a cell to focus it.
+   - Center: items show their one look; creatures show a page of seeds (each a possible instance); classes show one row per hold. Tinted models (Rifts & Keys, the active Rifter, the Affix Shard) get a color menu (each dungeon's `riftColor`, each shard category's tint: `forge/tintChoices.ts`) and a color picker for the color they are shown in. Game camera (or icon / top / side), a turntable and an 8-direction walk test, wireframe, and a tile reference (1×1, or 2×2 for a large creature). Click a cell to focus it.
    - Right: **Approve / Discard** when a draft exists (Current vs Draft side by side), and the focused model's name, seed and triangle count.
    - **Snapshot** writes the current view to `client/forge-snapshots/` so Claude Code can look at it.
    - The URL keeps the state (`?design=creature.skeleton&seed=7&count=12&cam=game`), so a view can be shared in one line.

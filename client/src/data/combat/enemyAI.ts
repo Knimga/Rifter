@@ -1,10 +1,11 @@
-import { bodySize, isArmed, type EnemyInstance } from '../units/enemies';
+import { bodySize, isArmed, isImmobile, type EnemyInstance } from '../units/enemies';
 import { mpCostAt, summonsForever, type Ability, type Effect } from './abilities';
 import { aimedArea, isArea, isSelfBurst, unitsInArea } from './areas';
 import { bodyDistance, bodySight, covers, fits, footprint, footprintKeys, inRangeAndSight, posKey, reachableTiles, samePos, type Body, type Pos } from '../world/grid';
 import { shuffle } from '../random';
 import type { ZoneData } from '../world/gen';
 import { moveBudget, moveCost } from './combat';
+import { planAbilityMove, rootBlocks, type MovePlan, type MoveWorld } from './abilityMoves';
 import { isRooted, stackCap, stackCount, stackKey, type ActiveBuff } from '../units/stats';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -44,6 +45,11 @@ export interface EnemyAction {
   abilityTargetPos: Pos | null;     // tile the ability is aimed at (its own for self, the target's, or a summon's tile)
   apSpent: number;                  // AP the step costs: its move (combat.ts moveCost) plus its ability
   tilesLeft: number;                // tiles paid for and not walked after it
+  /**
+   * Set when `abilityUsed` is a movement ability (Ability.move): where it takes its caster, from where it stands (`moveTo`
+   * is then null: the move is the ability's, resolved with executeMoveAction). `abilityTargetPos` is its aim.
+   */
+  move?: MovePlan;
 }
 
 /** Below this share of its max HP a unit is worth healing (the AI heals before anything else). */
@@ -129,12 +135,19 @@ const summonOf = (a: Ability) => a.effects.find((e): e is Extract<Effect, { type
  *     Otherwise area attacks are never used on a single foe: it saves them (and their MP) for a better chance.
  *     An attack that puts a capped buff or debuff on its target (maxStacks) is never aimed at a foe that already
  *     has all its stacks, and an area one doesn't count such foes among its hits.
+ *     Movement abilities (Ability.move) with an enemy target are attacks like the rest, used from where it stands
+ *     (never after a walk), aimed where planAbilityMove allows: a single-target one (a charge) at a foe, only if it
+ *     actually moves it (when it has a plain attack too), and it replaces a plain attack on the same foe only when it
+ *     costs less AP; an area one (a line, a blast) is aimed like any area attack, at the tile (any in range) whose
+ *     area takes in the most foes, so a line is aimed to run through as many as it can.
  *  2. If its preferred ability this turn is a buff (a self one not yet active, or an ally one with a unit of its
  *     side in reach that hasn't got it: the one nearest its foes; an area one only where it takes in another
  *     unit of its side, as many as it can), it uses that instead, so buffs and attacks
  *     share its turns by chance. If it can attack no one, it uses a usable self ability or ally buff if it has
  *     one.
- *  3. Otherwise it closes in on the highest-priority foe it can get nearer to.
+ *  3. Otherwise it closes in on the highest-priority foe it can get nearer to: by walking, or by a 'tile' movement
+ *     ability (a leap, a blink, a flight) when that gets it nearer for less AP per tile than walking would (walking
+ *     tiles already paid for is free, so it wins). A rooted creature uses neither.
  * All within its AP, by the party's rules (combat.ts): 1 AP buys a move's worth of tiles (unused ones carry
  * over to its next step), an ability costs its apCost.
  */
@@ -160,13 +173,13 @@ export function computeEnemyTurn(
   focus?: string,
 ): EnemyAction {
   const { ap, paidTiles } = budget;
-  // NOT YET: movement abilities (Ability.move: a teleport, a charge, a dash) are left out, so a creature never uses
-  // one (warnCreatureMoves warns when a creature has one). Everything else they need is shared with the party's and
-  // ready: abilityMoves.ts (moveAims / planAbilityMove: where one may be aimed, rootBlocks: a rooted unit can't;
-  // executeMoveAction: resolving it), and useActionOutcomes already lands a creature's move (position, dash or
-  // blink). What's left is choosing: when to use one (to close in, to get at a foe a wall hides, to flee) and from
-  // what aim, then giving EnemyAction the move's plan for useEnemyTurn to resolve with executeMoveAction.
-  const abilities = enemy.classData.abilities.filter(a => !a.move);
+  // Movement abilities (Ability.move: a teleport, a charge, a dash) share the party's rules (abilityMoves.ts); a rooted
+  // creature can't use one (rootBlocks), nor an immobile one (a totem). An enemy-target one is an attack (charges, line
+  // or blast rushes); a 'tile' one only closes the distance (`movers`). Any other (an 'ally' or 'self' one) is never
+  // used (warnCreatureMoves).
+  const owned = enemy.classData.abilities.filter(a => !a.summonsOnly && !(a.move && isImmobile(enemy)) && !rootBlocks(a, enemy.buffs));
+  const movers = owned.filter(a => a.move && a.target === 'tile');
+  const abilities = owned.filter(a => !a.move || a.target === 'enemy');
   const noAction: EnemyAction = { moveTo: null, targetKey: null, abilityUsed: null, abilityTargetPos: null, apSpent: 0, tilesLeft: paidTiles };
 
   // Targets by priority: its focus → highest threat → closest if tied → random if still tied
@@ -188,7 +201,7 @@ export function computeEnemyTurn(
   const isFloor = (p: Pos) => floors.has(posKey(p)) && !objectTiles.has(posKey(p));
   const units = new Set(occupied.flatMap(footprintKeys));
   const foeTiles = new Set(occupied.filter(u => !u.passable).flatMap(footprintKeys));
-  const reachIn = (apUsed: number) => reachableTiles(enemy.pos, moveBudget(paidTiles, apUsed, movement, isRooted(enemy.buffs)), isFloor, p => foeTiles.has(posKey(p)), size);
+  const reachIn = (apUsed: number) => reachableTiles(enemy.pos, moveBudget(paidTiles, apUsed, movement, isRooted(enemy.buffs) || isImmobile(enemy)), isFloor, p => foeTiles.has(posKey(p)), size);
   const standsAt = (r: { pos: Pos }) => fits(r.pos, size, p => isFloor(p) && !units.has(posKey(p)));
   const reachMap = reachIn(Math.min(ap, 1));
   const reach = [...reachMap.values()].filter(standsAt);
@@ -199,9 +212,24 @@ export function computeEnemyTurn(
   const moveTo = (pos: Pos) => (samePos(pos, enemy.pos) ? null : pos);
 
   // A step: where it moves (null = stays), then the ability it uses there, if any; what that costs
-  const act = (moveTo: Pos | null, ability: Ability | null, targetKey: string | null, abilityTargetPos: Pos | null): EnemyAction => {
+  const act = (moveTo: Pos | null, ability: Ability | null, targetKey: string | null, abilityTargetPos: Pos | null, plan?: MovePlan): EnemyAction => {
     const move = moveTo ? moveOf(moveTo) : { apSpent: 0, tilesLeft: paidTiles };
-    return { moveTo, targetKey, abilityUsed: ability, abilityTargetPos, apSpent: move.apSpent + (ability?.apCost ?? 0), tilesLeft: move.tilesLeft };
+    return { moveTo, targetKey, abilityUsed: ability, abilityTargetPos, apSpent: move.apSpent + (ability?.apCost ?? 0), tilesLeft: move.tilesLeft, ...(plan && { move: plan }) };
+  };
+  // Movement abilities, from where it stands: the units that block or bar a path (its foes, and its own side)
+  const moveWorld: MoveWorld = { sight, isWalkable: isFloor, hostiles: occupied.filter(u => !u.passable), allies: occupied.filter(u => u.passable) };
+  const planFor = (a: Ability, aim: Pos) => planAbilityMove(me(enemy.pos), aim, a, moveWorld);
+  // The tiles in sight within a movement ability's range of it: where it may be aimed
+  const aimsOf = (a: Ability): Pos[] => {
+    const out: Pos[] = [];
+    const body = me(enemy.pos);
+    for (let dx = -a.range; dx < size + a.range; dx++) {
+      for (let dy = -a.range; dy < size + a.range; dy++) {
+        const p = { x: enemy.pos.x + dx, y: enemy.pos.y + dy };
+        if (!covers(body, p) && sight.has(posKey(p))) out.push(p);
+      }
+    }
+    return out;
   };
   // Can it move to `pos` and use `a` there, on what it has left?
   const affordableFrom = (a: Ability, pos: Pos) => a.apCost + moveOf(pos).apSpent <= ap;
@@ -225,11 +253,11 @@ export function computeEnemyTurn(
   //    Already beside a target it can't get nearer to that one, so it stays rather than turn to the next one
   //    (which, on its next step, would leave it no longer beside the first: back and forth until its AP is out).
   const closeIn = (): EnemyAction => {
-    const allAttacks = abilities.filter(a => a.target === 'enemy');
+    const allAttacks = abilities.filter(a => a.target === 'enemy' && !a.move);
     const affordable = allAttacks.filter(a => mpCostAt(a, enemy.level) <= enemy.currentMp);
-    const inRangeNow = (affordable.length > 0 ? affordable : allAttacks).some(a =>
-      targets.some(t => inReach(enemy.pos, t, a.range) && !atStackCap(t.buffs, a)));
-    if (inRangeNow) return noAction;
+    const counted = affordable.length > 0 ? affordable : allAttacks;
+    const attacksFrom = (pos: Pos, t: Foe) => counted.some(a => inReach(pos, t, a.range) && !atStackCap(t.buffs, a));
+    if (targets.some(t => attacksFrom(enemy.pos, t))) return noAction;
     // One move's worth first; a large creature with nowhere nearer it fits on that, as far as its AP takes it
     const reaches = longMap === reachMap ? [reach] : [reach, [...longMap.values()].filter(standsAt)];
     for (const stops of reaches) {
@@ -238,11 +266,39 @@ export function computeEnemyTurn(
         const toTarget = reachableTiles(target.pos, Infinity, isFloor);
         // A large body is as near as its nearest tile
         const stepsFrom = (p: Pos) => Math.min(...footprint(me(p)).map(t => toTarget.get(posKey(t))?.steps ?? Infinity));
-        let best: Pos | null = null, bestSteps = stepsFrom(enemy.pos);
+        const here = stepsFrom(enemy.pos);
+        let best: Pos | null = null, bestSteps = here;
         for (const { pos } of stops) {
           const s = stepsFrom(pos);
           if (s < bestSteps) { best = pos; bestSteps = s; }
         }
+        // A movement ability that gets it nearer for less AP per tile than the walk (a free walk, on tiles already
+        // paid for, always wins), of the ability that gains the most per AP. Its landing: one from which an attack of
+        // its reaches the target, the farthest of those (a ranged creature keeps its distance, as it does walking),
+        // else the nearest; then the shortest move.
+        // (no walk nearer, e.g. walled off or blocked by units: any jump that gains beats it)
+        const walkAp = best ? moveOf(best).apSpent : 0;
+        const walkRate = !best ? 0 : walkAp > 0 ? (here - bestSteps) / walkAp : Infinity;
+        let jump: { a: Ability; aim: Pos; plan: MovePlan; rate: number } | null = null;
+        for (const a of movers.filter(canUse)) {
+          let landing: { aim: Pos; plan: MovePlan; steps: number; attacks: boolean } | null = null;
+          for (const aim of aimsOf(a)) {
+            const plan = planFor(a, aim);
+            if (!plan || plan.path.length === 0) continue;
+            const steps = stepsFrom(plan.landing);
+            if (steps >= here) continue;
+            const attacks = attacksFrom(plan.landing, target);
+            const better = !landing ? true
+              : attacks !== landing.attacks ? attacks
+              : steps !== landing.steps ? (attacks ? steps > landing.steps : steps < landing.steps)
+              : plan.path.length < landing.plan.path.length;
+            if (better) landing = { aim, plan, steps, attacks };
+          }
+          if (!landing) continue;
+          const rate = (here - landing.steps) / a.apCost;
+          if (rate > walkRate && rate > (jump?.rate ?? 0)) jump = { a, aim: landing.aim, plan: landing.plan, rate };
+        }
+        if (jump) return act(null, jump.a, null, jump.aim, jump.plan);
         if (best) return act(best, null, null, null);
       }
     }
@@ -355,31 +411,54 @@ export function computeEnemyTurn(
   //     stands on; other area attacks at a foe in range and sight.
   //     A unit whose abilities are all area attacks uses them on one foe too (it has nothing else).
   const minAoeHits = abilities.filter(a => a.target === 'enemy').every(isArea) ? 1 : 2;
-  let bestAoe: { pos: Pos; a: Ability; aim: Pos; hits: typeof targets } | null = null;
+  //     A movement ability (a line or blast rush) is used from where it stands, aimed at any tile it may go to
+  //     (planAbilityMove), the one whose area takes in the most foes (a line runs from its tile to the aim).
+  let bestAoe: { pos: Pos; a: Ability; aim: Pos; hits: typeof targets; plan?: MovePlan } | null = null;
   for (const a of attacks.filter(isArea)) {
-    for (const { pos } of reach) {
+    for (const { pos } of a.move ? [{ pos: enemy.pos }] : reach) {
       if (!affordableFrom(a, pos)) continue;
-      const aims = isSelfBurst(a) ? [pos]
-        : targets.filter(t => inReach(pos, t, a.range)).map(t => t.pos);
-      for (const aim of aims) {
+      const aims: { aim: Pos; plan?: MovePlan }[] = a.move
+        ? aimsOf(a).flatMap(aim => { const plan = planFor(a, aim); return plan ? [{ aim, plan }] : []; })
+        : (isSelfBurst(a) ? [pos] : targets.filter(t => inReach(pos, t, a.range)).map(t => t.pos)).map(aim => ({ aim }));
+      for (const { aim, plan } of aims) {
         // Foes that already have all the stacks of its buff or debuff don't count (atStackCap)
         const hits = unitsInArea(areaFrom(a, pos, aim), targets).filter(t => !atStackCap(t.buffs, a));
-        if (hits.length >= minAoeHits && hits.length > (bestAoe?.hits.length ?? 0)) bestAoe = { pos, a, aim, hits };
+        if (hits.length >= minAoeHits && hits.length > (bestAoe?.hits.length ?? 0)) bestAoe = { pos, a, aim, hits, plan };
       }
     }
   }
   // The highest-priority foe it hits is the one shown as targeted
-  if (bestAoe) return act(moveTo(bestAoe.pos), bestAoe.a, bestAoe.hits[0].key, bestAoe.aim);
+  if (bestAoe) return act(moveTo(bestAoe.pos), bestAoe.a, bestAoe.hits[0].key, bestAoe.aim, bestAoe.plan);
 
   // 1b. Otherwise the first target + single-target attack it can land this turn, from the nearest tile that works
-  //     (never one whose buff or debuff the target already has all the stacks of: atStackCap)
+  //     (never one whose buff or debuff the target already has all the stacks of: atStackCap). A charge (a
+  //     single-target movement ability) takes the place of that attack only if it costs less AP, and is never used
+  //     when it wouldn't move it, unless it has no plain attack.
+  const hasPlainAttack = abilities.some(a => a.target === 'enemy' && !a.move);
   for (const target of targets) {
-    for (const a of attacks.filter(a => !isArea(a) && !atStackCap(target.buffs, a))) {
+    const options: EnemyAction[] = [];
+    const landable = attacks.filter(a => !isArea(a) && !atStackCap(target.buffs, a));
+    plain: for (const a of landable.filter(a => !a.move)) {
       for (const { pos } of reach) {
         if (!affordableFrom(a, pos) || !inReach(pos, target, a.range)) continue;
-        return act(moveTo(pos), a, target.key, target.pos);
+        options.push(act(moveTo(pos), a, target.key, target.pos));
+        break plain;
       }
     }
+    for (const a of landable.filter(a => a.move)) {
+      const plan = planFor(a, target.pos);
+      if (plan && (plan.path.length > 0 || !hasPlainAttack)) options.push(act(null, a, target.key, target.pos, plan));
+    }
+    // No attack lands as it is: an area movement ability that takes in this foe closes in and hits it (the area itself
+    // is saved for 2+ foes otherwise, above)
+    if (options.length === 0) {
+      for (const a of attacks.filter(a => isArea(a) && a.move && !atStackCap(target.buffs, a))) {
+        const plan = planFor(a, target.pos);
+        if (plan && plan.path.length > 0 && unitsInArea(areaFrom(a, enemy.pos, target.pos), [target]).length > 0) options.push(act(null, a, target.key, target.pos, plan));
+      }
+    }
+    // The cheapest in AP; the plain attack (first) when equal
+    if (options.length > 0) return options.reduce((best, o) => (o.apSpent < best.apSpent ? o : best));
   }
 
   // 2. No attack lands this turn: a self ability or ally buff, if it has one it can use

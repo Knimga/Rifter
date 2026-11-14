@@ -87,17 +87,17 @@ const FOCUS_INVALID_AFFIXES: BuffableStat[] = [
 export const QUIVERS: OffhandTemplate[] = [
   {
     id: 'leather-quiver', name: 'Leather Quiver', requiredLevel: 1, valueMultiplier: 1,
-    implicit: { stat: 'rangedDamage', baseValue: 2, growthPerLevel: 0 },
+    implicit: { stat: 'rangedDamage', baseValue: 6, growthPerLevel: 0 },
     invalidAffixes: QUIVER_INVALID_AFFIXES,
     model: 'offhand.leather-quiver',
   },
 ];
 
-/** Starting gear only: never drops, so even a common first drop is an upgrade (+1 ranged damage, not +2). */
+/** Starting gear only: never drops, so even a common first drop is an upgrade (+3 ranged damage, not +6). */
 export const STARTER_QUIVERS: OffhandTemplate[] = [
   {
     id: 'worn-quiver', name: 'Worn Quiver', requiredLevel: 1, valueMultiplier: 1,
-    implicit: { stat: 'rangedDamage', baseValue: 1, growthPerLevel: 0 },
+    implicit: { stat: 'rangedDamage', baseValue: 3, growthPerLevel: 0 },
     invalidAffixes: QUIVER_INVALID_AFFIXES,
     model: 'offhand.leather-quiver', // the Leather Quiver's (starting gear borrows the model of what it is a worn version of)
   },

@@ -54,7 +54,7 @@ export const iconCameraFor = (designId: string): IconCamera =>
 export const CHARACTER_HEIGHT = 1.12;
 
 /**
- * Items on the map (loot) lie FLAT on their tile, face up: rotate the model -90Â° about X (its +z face
+ * Items on the map (loot) lie FLAT on their tile, face up: rotate the model -90° about X (its +z face
  * turns up, its +y "tip" points north), then lift it so it rests on the floor, and turn it by lootYaw so
  * it keeps its icon's screen orientation. Used by the game renderer, the forge game view and forge:sheet.
  * A design can lie less tipped (fit.groundPitchDeg), or on its side (fit.groundRollDeg: turned about its front

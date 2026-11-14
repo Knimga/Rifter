@@ -14,11 +14,11 @@
 import type { Affix, GearSlot, GearSlots, Item } from './types';
 import type { Inventory } from './inventory';
 import { itemAffixRules } from '.';
-import { AFFIX_GROUP, AFFIX_ROLLS, AFFIX_SLOTS_PER_GROUP, MAX_TIER, RarityPerAffixCount, itemTierSum, rollAffixValue, tierRange, tierSumCap, type AffixGroup, type AffixStat } from './affixes';
+import { AFFIX_GROUP, AFFIX_ROLLS, AFFIX_SLOTS_PER_GROUP, MAX_TIER, RarityPerAffixCount, itemTierSum, affixSuffix, newAffix, rollAffixValue, tierRange, tierSumCap, type AffixGroup, type AffixStat } from './affixes';
 import { RARITY_VALUE } from './value';
 import { SHARDS, addShards, shardCount, shardName, type ShardCounts } from './shards';
 import { formatSigned } from '../detailStrings';
-import { shownStatValue, statSuffix } from '../units/stats';
+import { shownStatValue } from '../units/stats';
 import { randInt, shuffle } from '../random';
 
 // ─── Prices ───────────────────────────────────────────────────────────────────
@@ -67,14 +67,14 @@ export function benchRows(item: Item): (number | null)[] {
 }
 
 /** A stat's value as the bench shows it: '+3', '+2%'. */
-export const affixValueText = (stat: string, value: number) => `${formatSigned(shownStatValue(stat, value))}${statSuffix(stat)}`;
+export const affixValueText = (stat: string, value: number) => `${formatSigned(shownStatValue(stat, value))}${affixSuffix(stat)}`;
 
 /** What a tier of a stat rolls on this item, as the bench shows it: '+4–6', '+3%' (one value). */
 export function tierValueText(item: Item, stat: AffixStat, tier: number): string {
   const [lo, hi] = tierRange(AFFIX_ROLLS[stat], tier, itemAffixRules(item).kind);
   if (lo === hi) return affixValueText(stat, lo);
   // A reduction runs the other way: −1 to −4, shown '−1–4' (its largest first)
-  return `${formatSigned(shownStatValue(stat, lo))}–${Math.abs(shownStatValue(stat, hi))}${statSuffix(stat)}`;
+  return `${formatSigned(shownStatValue(stat, lo))}–${Math.abs(shownStatValue(stat, hi))}${affixSuffix(stat)}`;
 }
 
 /** What the party brings to the bench: its level (the tier cap), shards and gold. */
@@ -148,7 +148,7 @@ export function upgradeAffix(item: Item, idx: number): Item {
 
 /** The item with a new affix of `stat` at tier 1. */
 export function addAffix(item: Item, stat: AffixStat): Item {
-  return withAffixes(item, [...item.affixes, { stat, tier: 1, value: rollAffixValue(stat, 1, itemAffixRules(item).kind) }]);
+  return withAffixes(item, [...item.affixes, newAffix(stat, 1, itemAffixRules(item).kind)]);
 }
 
 /** One shard for each of the affixes (item.affixes indexes). */

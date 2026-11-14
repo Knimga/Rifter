@@ -176,15 +176,15 @@ function ItemTip({ item, type, proficient, clickAction, canCompare, canCompareOt
       <div className={`mt-[3px] text-[11px] capitalize ${proficient === false ? 'text-rift-unusable' : 'text-rift-muted'}`}>
         {type}{proficient === false && <span className="normal-case"> · Not proficient</span>} · Level {item.level}
       </div>
-      {item.implicit && <div className="mt-1.5 text-rift-ink">{formatModifier(item.implicit.stat, item.implicit.value)}</div>}
+      {item.implicit && <div className="mt-1.5 text-rift-ink">{formatModifier(item.implicit.stat, item.implicit.value, item.implicit.percent)}</div>}
       <div className="mt-1.5 flex flex-col gap-0.5 text-rift-soft">{children}</div>
       {item.affixes.length > 0 && (
         <div className="mt-2 pt-2 border-t border-rift-line leading-[1.6] text-rift-affix">
           {item.affixes.map((affix, i) => affixTiers ? (
             <div key={i} className="flex justify-between" style={{ color: AFFIX_GROUP_COLOR[affixGroup(affix)] }}>
-              <span>{formatModifier(affix.stat, affix.value)}</span><span className="text-rift-off">T{affix.tier ?? 1}</span>
+              <span>{formatModifier(affix.stat, affix.value, affix.percent)}</span><span className="text-rift-off">T{affix.tier ?? 1}</span>
             </div>
-          ) : <div key={i}>{formatModifier(affix.stat, affix.value)}</div>)}
+          ) : <div key={i}>{formatModifier(affix.stat, affix.value, affix.percent)}</div>)}
         </div>
       )}
       {trade ? (
@@ -212,7 +212,7 @@ function ItemTip({ item, type, proficient, clickAction, canCompare, canCompareOt
         <div className="mt-2 pt-2 border-t border-rift-line text-[11px] leading-[1.6]">
           {compare.damage && <DamageDelta {...compare.damage} />}
           {compare.deltas.length === 0 && !compare.damage ? <div className="text-rift-muted">No stat changes</div>
-            : compare.deltas.map(({ stat, delta }) => <div key={stat} className={stat === 'increasedThreat' ? 'text-rift-ink' : delta > 0 ? 'text-rift-up' : 'text-rift-down'}>{formatModifier(stat, delta)}</div>)}
+            : compare.deltas.map(({ stat, delta, percent }) => <div key={`${stat}${percent ? '%' : ''}`} className={stat === 'increasedThreat' ? 'text-rift-ink' : delta > 0 ? 'text-rift-up' : 'text-rift-down'}>{formatModifier(stat, delta, percent)}</div>)}
         </div>
       )}
     </div>
@@ -232,10 +232,10 @@ export function itemTypeLine(item: Item): string {
 }
 
 function WeaponTooltipContent({ item, stats, ...rest }: ItemTooltipProps & { item: WeaponItem }) {
-  const bonus = stats ? getOffense(stats, item.attackCategory, item.damageElement).damage : 0;
+  const factor = stats ? getOffense(stats, item.attackCategory, item.damageElement).factor : 1;
   return (
     <ItemTip item={item} type={itemTypeLine(item)} {...rest}>
-      {weaponDamageLines(weaponDamageEffect(item), bonus).map((line, i) => (
+      {weaponDamageLines(weaponDamageEffect(item), factor).map((line, i) => (
         <EffectRow key={i} label={line.label} value={line.value} tone={line.tone} element={line.element} />
       ))}
       <EffectRow label="Range" value={String(item.range)} tone="base" />

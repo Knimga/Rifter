@@ -7,25 +7,28 @@ import { SANCTUM, type NpcPlacement } from '../data/world/sanctum';
 import { npc } from '../data/world/npcs';
 import { conversationOf, npcQuestMark, type Conversation, type DialogueEffect, type DialogueTopic, type QuestMark } from '../data/world/dialogue';
 import { quest, questsFinishedBy, stepIndex, type QuestEvent } from '../data/world/quests';
-import { DUNGEONS, type DungeonKey } from '../data/world/dungeons';
-import { riftGlowCss } from '../data/world/rifts';
+import type { DungeonKey } from '../data/world/dungeons';
+import { keyReceived } from '../data/world/rifts';
 import type { UnitAim } from '../components/ModelLayer';
 import type { useQuests } from './useQuests';
-import type { useFloatingText } from './useFloatingText';
+import type { Announce } from './useAnnouncements';
 import { useGreeting, type useScenes } from './useScenes';
 
 type Scenes = ReturnType<typeof useScenes>;
+
+/** The color a quest's news is announced in. */
+const QUEST_NEWS_COLOR = 'var(--rift-quest-pale)';
 
 export function useDialogue({ quests, scenes, location, playerPos, otherWindowOpen, announce, addKey, endVisit }: {
   quests: ReturnType<typeof useQuests>;
   scenes: Pick<Scenes, 'scene' | 'greetingDue' | 'end'>;
   location: 'sanctum' | 'dungeon';
-  /** The leader's tile: a talk lasts while it stays beside the NPC, and what dialogue does is named over it. */
+  /** The leader's tile: a talk lasts while it stays beside the NPC. */
   playerPos: Pos;
   /** Another window is open (the party's, the Rifter's, the testing tools'): it ends the talk. */
   otherWindowOpen: boolean;
-  /** Floating text that names something (useFloatingText). */
-  announce: ReturnType<typeof useFloatingText>['announce'];
+  /** Announces a quest's news or a key received, over the map (useAnnouncements). */
+  announce: Announce;
   /** Put a rift key on the keyring (useKeyring). */
   addKey: (key: DungeonKey) => void;
   /** The vendor's visit is over (useVendor). */
@@ -64,23 +67,24 @@ export function useDialogue({ quests, scenes, location, playerPos, otherWindowOp
 
   /**
    * What finishing a conversation or topic does: a quest taken, moved on or completed, a rift key put on the keyring
-   * (each named in floating text over the leader).
+   * (each announced over the map).
    */
   const runDialogueEffects = (effects: readonly DialogueEffect[] | undefined) => {
     for (const e of effects ?? []) {
       if (e.kind === 'giveQuest') {
         quests.take(e.quest);
-        announce(playerPos.x, playerPos.y, `New quest: ${quest(e.quest).name}`, 'var(--rift-quest)');
+        announce(`New quest: ${quest(e.quest).name}`, QUEST_NEWS_COLOR);
       } else if (e.kind === 'advanceQuest') {
         const next = quest(e.quest).steps?.[stepIndex(quests.log, e.quest) + 1];
         quests.advance(e.quest);
-        if (next) announce(playerPos.x, playerPos.y, `New objective: ${next.objective}`, 'var(--rift-quest)');
+        if (next) announce(`New objective: ${next.objective}`, QUEST_NEWS_COLOR);
       } else if (e.kind === 'completeQuest') {
         quests.complete(e.quest);
-        announce(playerPos.x, playerPos.y, `Quest complete: ${quest(e.quest).name}`, 'var(--rift-quest)');
+        announce(`Quest complete: ${quest(e.quest).name}`, QUEST_NEWS_COLOR);
       } else if (e.kind === 'giveKey') {
         addKey(e.key);
-        announce(playerPos.x, playerPos.y, DUNGEONS[e.key].keyName, riftGlowCss(DUNGEONS[e.key].riftColor));
+        const received = keyReceived(e.key);
+        announce(received.text, received.color);
       }
     }
   };
@@ -96,12 +100,12 @@ export function useDialogue({ quests, scenes, location, playerPos, otherWindowOp
 
   /**
    * The party did something (entered a dungeon, picked up a key there): the quests waiting on it move on, their next
-   * objective floating over the leader.
+   * objective announced over the map.
    */
   const questDid = (event: QuestEvent) => {
     for (const id of questsFinishedBy(quests.log, event)) {
       const next = quest(id).steps?.[stepIndex(quests.log, id) + 1];
-      if (next) announce(playerPos.x, playerPos.y, `New objective: ${next.objective}`, 'var(--rift-quest)');
+      if (next) announce(`New objective: ${next.objective}`, QUEST_NEWS_COLOR);
     }
     quests.event(event);
   };

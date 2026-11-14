@@ -44,8 +44,8 @@ export class Mesh {
   partNames: string[] = ['body'];
   pivots: Record<string, Vec3> = {};
   anchors: Record<string, Vec3> = {};
-  /** Halos so far (Mesh.halo); their color in 0..255 until bake. */
-  halos: { p: Vec3; r: number; c: RGB; t?: Tone; from?: RGB; part: number }[] = [];
+  /** Halos so far (Mesh.halo, Mesh.flare); their color in 0..255 until bake. */
+  halos: { p: Vec3; r: number; c: RGB; t?: Tone; from?: RGB; s?: [number, number]; part: number }[] = [];
   private cur = 0;
 
   constructor(readonly R: Rng) {}
@@ -82,6 +82,16 @@ export class Mesh {
    */
   halo(p: Vec3, r: number, c: RGB, tint?: Tone, from?: RGB): void {
     this.halos.push({ p: [p[0], p[1], p[2]], r, c, ...(tint && { t: tint }), ...(from && { from }), part: this.cur });
+  }
+
+  /**
+   * A halo stretched on screen (Halo.s): an oval glow `w` wide and `h` tall (half-widths, model units) around `p`,
+   * always upright on screen whatever way the model faces. A long thin one is a streak of light: two crossed make
+   * diffraction spikes (the Mote of Light). Otherwise as `halo`.
+   */
+  flare(p: Vec3, w: number, h: number, c: RGB): void {
+    const r = Math.max(w, h);
+    this.halos.push({ p: [p[0], p[1], p[2]], r, c, s: [w / r, h / r], part: this.cur });
   }
 
   /**
@@ -195,7 +205,8 @@ export function bake(m: Mesh): MeshData {
     anchors: { ...m.anchors },
     halos: m.halos.map((h): Halo => ({
       p: h.p, r: h.r, c: [h.c[0] / 255, h.c[1] / 255, h.c[2] / 255], ...(h.t && { t: h.t }),
-      ...(h.from && { from: [h.from[0] / 255, h.from[1] / 255, h.from[2] / 255] as [number, number, number] }), part: h.part,
+      ...(h.from && { from: [h.from[0] / 255, h.from[1] / 255, h.from[2] / 255] as [number, number, number] }),
+      ...(h.s && { s: h.s }), part: h.part,
     })),
     bounds: m.bounds(),
   };

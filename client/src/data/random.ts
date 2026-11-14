@@ -6,19 +6,17 @@ export function randInt(min: number, max: number): number {
 }
 
 /**
- * An authored range [min, max] with a flat `bonus` added, stretched around its average so its spread stays the
- * same share of it: 7–11 (avg 9) +18 → 21–33 (avg 27). The average gains exactly `bonus`; a range whose average is
- * 0 or less just shifts; a penalty that leaves nothing gives 0–0. Damage and heals roll it, and tooltips show it.
+ * An authored range [min, max] multiplied by `factor` (a unit's level scale and its % bonuses: attackResolution.ts
+ * damageFactor), each end rounded: 7–11 ×1.5 → 11–17 (rounded half up). A factor of 0 or less gives 0–0. Damage and heals roll it,
+ * and tooltips show it.
  */
-export function scaledRange(min: number, max: number, bonus: number): [number, number] {
-  const avg = (min + max) / 2;
-  if (avg <= 0) return [min + bonus, max + bonus];
-  const k = Math.max(0, (avg + bonus) / avg);
+export function scaledRange(min: number, max: number, factor: number): [number, number] {
+  const k = Math.max(0, factor);
   return [Math.round(min * k), Math.round(max * k)];
 }
 
 /** A roll of `scaledRange`. */
-export const rollScaled = (min: number, max: number, bonus: number): number => randInt(...scaledRange(min, max, bonus));
+export const rollScaled = (min: number, max: number, factor: number): number => randInt(...scaledRange(min, max, factor));
 
 /** Random real number in [min, max). */
 export const randFloat = (min: number, max: number): number => min + Math.random() * (max - min);

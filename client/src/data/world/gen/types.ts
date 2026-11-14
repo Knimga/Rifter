@@ -210,6 +210,16 @@ export interface DungeonConfig extends DungeonLook {
   riftColor: RGB;
   /** Its rift key's name ("Necrotic Key"): the key that opens a rift to it (data/world/rifts.ts), painted in riftColor. */
   keyName: string;
+  /**
+   * Its tier: the group of dungeons whose keys drop together (1: the first five, the game's first keys), each tier's
+   * keys dropping before the next's (bossKeyDrop, data/world/rifts.ts).
+   */
+  tier: number;
+  /**
+   * Its tier's stronghold (one at most a tier): its key drops only once the party has every other key of the tier, and
+   * its boss drops the next tier's first key (bossKeyDrop).
+   */
+  stronghold?: true;
 }
 
 // ─── Passages ────────────────────────────────────────────────────────────────

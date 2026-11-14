@@ -2,7 +2,8 @@ import { ARMOR_SLOTS, JEWELRY_KINDS, gearSlotsFor, type GearSlot, type GearSlots
 import { isWeaponItem, isShieldItem, isOffhandItem, isArmorItem, isJewelryItem } from '.';
 import { OFFHAND_PROFICIENCY } from './offhands';
 import { WEAPON_TYPE_DATA } from './weapons';
-import { CLASSES, type ClassData, type ClassKey } from '../units/classes';
+import type { ClassKey } from '../units/classes';
+import { proficienciesOf, type Proficiencies } from '../units/subclasses';
 
 export const INVENTORY_COLS = 12;
 export const INVENTORY_ROWS = 5;
@@ -84,20 +85,21 @@ export function takeIntoInventory(inventory: Inventory, items: Item[]): { invent
   return { inventory: items.slice(0, taken).reduce(addItem, inventory), taken, left: items.slice(taken) };
 }
 
-export function isProficient(classData: ClassData, item: Item): boolean {
-  if (isWeaponItem(item)) return (classData.weaponProficiencies as string[]).includes(item.weaponType);
+/** Whether gear can be used with these proficiencies (a class's, or a member's with its subclass's: proficienciesOf). */
+export function isProficient(p: Proficiencies, item: Item): boolean {
+  if (isWeaponItem(item)) return (p.weaponProficiencies as readonly string[]).includes(item.weaponType);
   // A shield also needs its armor type: a Heavy shield takes Heavy armor proficiency
-  if (isShieldItem(item)) return classData.weaponProficiencies.includes('Shields') && classData.armorProficiencies.includes(item.armorType);
-  if (isOffhandItem(item)) return classData.weaponProficiencies.includes(OFFHAND_PROFICIENCY[item.offhandKind]);
-  if (isArmorItem(item)) return classData.armorProficiencies.includes(item.armorType);
+  if (isShieldItem(item)) return p.weaponProficiencies.includes('Shields') && p.armorProficiencies.includes(item.armorType);
+  if (isOffhandItem(item)) return p.weaponProficiencies.includes(OFFHAND_PROFICIENCY[item.offhandKind]);
+  if (isArmorItem(item)) return p.armorProficiencies.includes(item.armorType);
   // Rings and amulets: every class wears them
   if (isJewelryItem(item)) return true;
   return false;
 }
 
-/** Whether someone in the party (their classes) can use the item: loot favours such items, and windows tint the rest red. */
-export const partyCanUseItem = (party: { selectedClass: ClassKey }[], item: Item): boolean =>
-  party.some((m) => isProficient(CLASSES[m.selectedClass], item));
+/** Whether someone in the party (their classes and subclasses) can use the item: loot favours such items, and windows tint the rest red. */
+export const partyCanUseItem = (party: { selectedClass: ClassKey; subclass?: string }[], item: Item): boolean =>
+  party.some((m) => isProficient(proficienciesOf(m), item));
 
 // ─── Equip / unequip ──────────────────────────────────────────────────────────
 
@@ -142,12 +144,12 @@ function handsClash(gear: GearSlots, item: Item): GearSlot | null {
 }
 
 /**
- * True if the item at `inventoryIdx` can be equipped (in `slot`, if given: it must fit there): the member is
+ * True if `item` (an inventory item) can be equipped (in `slot`, if given: it must fit there): the member is
  * proficient with it, and the inventory has room for what it displaces (the item in its slot trades places with it;
  * an item in the other hand it can't be held with comes off too: handsFit).
  */
-export function canEquip(classData: ClassData, item: Item | null | undefined, inventory: Inventory, gear: GearSlots, slot?: GearSlot): item is Item {
-  if (!item || !isProficient(classData, item) || (slot && !fitsGearSlot(item, slot))) return false;
+export function canEquip(p: Proficiencies, item: Item | null | undefined, inventory: Inventory, gear: GearSlots, slot?: GearSlot): item is Item {
+  if (!item || !isProficient(p, item) || (slot && !fitsGearSlot(item, slot))) return false;
   const clash = handsClash(gear, item);
   const returned = (gear[equipSlotFor(gear, item, slot)] ? 1 : 0) + (clash && gear[clash] ? 1 : 0);
   // The item's own slot frees up as it is equipped

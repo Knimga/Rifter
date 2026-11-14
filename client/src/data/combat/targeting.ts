@@ -1,6 +1,6 @@
 // Aiming a party member's action: who it lands on when used on a tile, or that it can't be used there.
 import type { Ability, AreaType } from './abilities';
-import { affectedKeys, areaCenter, isArea, unitsInArea } from './areas';
+import { affectedKeys, areaAim, areaCenter, isArea, unitsInArea } from './areas';
 import { unitKey, type CombatUnit } from './abilityExecution';
 import type { MovePlan } from './abilityMoves';
 import { inRangeAndSight, posKey, samePos, type Pos } from '../world/grid';
@@ -18,7 +18,8 @@ export interface AimedAction {
  * - self: only on the caster's own tile.
  * - tile: only on one of `tileTargets` (an empty tile in range and sight; the outcome gets the tile).
  * - ally (in or out of combat, in range and sight): the party member or summoned ally on the tile (`allyAt`), or,
- *   for an area ability, every unit of the party's side in its area. Nobody there: null.
+ *   for an area ability, every unit of the party's side in its area. Nobody there: null. A summons-only ability
+ *   (action.summonsOnly) takes only the caster's own summons among them.
  * - enemy (in combat only, in range and sight): the hostile units in its area (never the party's allies), with
  *   the party's side in the area as `allies`. A single-target attack on an empty tile: null.
  * A movement ability (action.move) can only be aimed at one of `moveAims` (where it may go: planAbilityMove), whatever
@@ -40,8 +41,8 @@ export function aimPartyAction(action: Ability, o: {
   tileTargets: ReadonlySet<string> | null;
   /** For a movement ability: where it may be aimed now, with the move each makes (null: nowhere). */
   moveAims?: ReadonlyMap<string, MovePlan> | null;
-  /** The caster, for a movement ability (it stands on the landing tile for the units its area takes in). */
-  caster?: CombatUnit;
+  /** The caster: whose summons a summons-only ability takes; for a movement ability, it stands on the landing tile for the units its area takes in. */
+  caster: CombatUnit;
 }): AimedAction | null {
   const none: AimedAction = { targets: [], allies: [] };
   if (action.target === 'self') return samePos(o.at, o.casterPos) ? none : null;
@@ -53,17 +54,20 @@ export function aimPartyAction(action: Ability, o: {
   // The party's side, with a mover on the tile it lands on
   const partySide = () => {
     const side = o.partySide();
-    const mover = o.caster && move ? unitKey(o.caster.ref) : null;
+    const mover = move ? unitKey(o.caster.ref) : null;
     return mover ? side.map(u => (unitKey(u.ref) === mover ? { ...u, pos: move!.landing } : u)) : side;
   };
   // Aimed at any tile of a large creature, it is aimed at all of it: in range and sight of any of its tiles, and an
-  // area centered on its whole square (areaCenter)
-  const center = areaCenter(o.at, [...partySide(), ...o.hostiles]);
-  if (!inRangeAndSight(o.casterPos, center, action.range, o.sight)) return null;
-  const areaOf = (area: AreaType | undefined) => affectedKeys(o.casterPos, center, area, o.sight);
+  // a non-blast area centered on its whole square (areaCenter; a blast stays round the aimed tile: areaAim)
+  const units = [...partySide(), ...o.hostiles];
+  if (!inRangeAndSight(o.casterPos, areaCenter(o.at, units), action.range, o.sight)) return null;
+  const areaOf = (area: AreaType | undefined) => affectedKeys(o.casterPos, areaAim(o.casterPos, o.at, area, units), area, o.sight);
   if (action.target === 'ally') {
+    // A summons-only ability takes only the caster's own summons
+    const casterKey = unitKey(o.caster.ref);
+    const takes = (u: CombatUnit) => !action.summonsOnly || (!!u.allied && u.owner === casterKey);
     const ally = isArea(action) ? null : o.allyAt(o.at);
-    const targets = isArea(action) ? unitsInArea(areaOf(action.area), partySide()) : ally ? [ally] : [];
+    const targets = isArea(action) ? unitsInArea(areaOf(action.area), partySide().filter(takes)) : ally && takes(ally) ? [ally] : [];
     // An area one's units are its targets and its 'allies' both (its 'allies' effects land on them too)
     return targets.length ? found({ targets, allies: isArea(action) ? targets : [] }) : null;
   }

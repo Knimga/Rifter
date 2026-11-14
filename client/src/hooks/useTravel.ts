@@ -2,7 +2,7 @@
 // through a door into another zone. Every change first fades the map to black (useFadeOut); the new one fades in once
 // its 3D layer has drawn (useSceneReady). Where everyone is stays the screen's: this sets it on arrival.
 import type { Dispatch, SetStateAction } from 'react';
-import { bodyOf, isForeverSummon, type EnemyInstance } from '../data/units/enemies';
+import { bodyOf, followsParty, type EnemyInstance } from '../data/units/enemies';
 import { findOpenTilesNear, posKey, samePos, type Pos } from '../data/world/grid';
 import { findFollowerSpawns, placeBodiesNear } from '../data/world/movement';
 import { SANCTUM } from '../data/world/sanctum';
@@ -96,12 +96,12 @@ export function useTravel(p: {
     if (!pairedDoor) return;
 
     // Arrive on the free floor tile closest to the paired door (never on an enemy), followers around it, and the
-    // party's forever summons come through too, beside them
+    // party's forever summons come through too, beside them (an immobile one stays in its zone)
     const isFree = isFreeFloor(dungeon, targetZone, enemies);
     const spawnPos = findOpenTilesNear(pairedDoor.pos, isFree, 1, 4)[0];
     if (!spawnPos) return;
     const followers = findFollowerSpawns(spawnPos, isFree, 2);
-    const forever = enemies.filter(e => e.zoneId === currentZone && e.currentHp > 0 && isForeverSummon(e));
+    const forever = enemies.filter(e => e.zoneId === currentZone && e.currentHp > 0 && followsParty(e));
     const spots = placeBodiesNear(spawnPos, forever.map(e => bodyOf(e).size ?? 1), isFree, [spawnPos, ...followers].map(posKey), forever.map(() => spawnPos));
     const moved = forever.map((e, i) => ({ ...e, zoneId, pos: spots[i] }));
 

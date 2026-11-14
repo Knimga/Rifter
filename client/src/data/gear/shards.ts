@@ -36,9 +36,11 @@ export interface ShardCategory {
 export const shardName = (stat: AffixStat): string =>
   stat === 'increasedThreat' ? 'Increased Threat' : stat === 'reducedThreat' ? 'Reduced Threat' : formatStatLabel(stat);
 
-/** An element's stats for each of `suffixes` (fireDamage, iceDamage...), element by element. */
+/** An element's stats for each of `suffixes` (fireDamage, iceDamage...), element by element; the ones that
+ *  never roll on gear (NON_AFFIX_STATS, e.g. holyResistance) have no shard. */
 const elementStats = (suffixes: readonly string[]) =>
-  DAMAGE_ELEMENTS.flatMap((el) => suffixes.map((s) => `${el}${s}` as AffixStat));
+  DAMAGE_ELEMENTS.flatMap((el) => suffixes.map((s) => `${el}${s}`))
+    .filter((s): s is AffixStat => (AFFIX_STATS as readonly string[]).includes(s));
 
 /** Sorted by display name, so related shards sit together (all the Melee ones, all the Fire ones). */
 const byName = (stats: AffixStat[]) => [...stats].sort((a, b) => shardName(a).localeCompare(shardName(b)));

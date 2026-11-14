@@ -5,7 +5,7 @@
 export const FALLING_LINES: readonly string[] = [
   'You remember things going black...',
   'And then you were falling...',
-  'Or... more like sliding. Slipping through a place between places. Sinking deeper into a dense otherness that wiped everything away.',
+  'Or... more like sliding. Through a place between places. Sinking deeper into a dense otherness that wiped everything away.',
   'Who you once were is all forgotten. You are only here now. But where is here?',
 ];
 

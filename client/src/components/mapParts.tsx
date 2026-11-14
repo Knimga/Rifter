@@ -22,6 +22,8 @@ export interface PartyTokenData {
   maxHp: number;
   mp: number;
   maxMp: number;
+  /** The party's level: what its status markers' amounts are shown at (statusMarkers). */
+  level: number;
   partyIndex: number;
   /** The member whose turn it is (in combat) or whose action bar is shown (out of combat). */
   active: boolean;
@@ -324,7 +326,7 @@ export function TileHighlight({ kind, className = '' }: { kind: keyof typeof TIL
 // ─── Floating text ────────────────────────────────────────────────────────────
 
 /**
- * A map's floating text (damage, heals, "Level N!", gold), rising from its tile; `shown` (optional) picks which are
+ * A map's floating text (damage, heals, gold), rising from its tile; `shown` (optional) picks which are
  * drawn (a dungeon's: only those over tiles the party sees). The others still run out on time, unseen, so none plays
  * late once its tile comes into sight. A large creature's float rises from its center (between tiles).
  */

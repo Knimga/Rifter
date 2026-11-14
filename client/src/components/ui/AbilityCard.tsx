@@ -1,7 +1,7 @@
 // An ability, shown in the UI theme's tooltip style: name, a
 // small-caps line (category · MP · target · range), then its effects as short sentences (abilitySentences), their
 // key numbers highlighted. Used as a card in the character select dossier and the game's ability tooltips.
-import { mpCostAt, type Ability } from '../../data/combat/abilities';
+import { abilityAtLevel, mpCostAt, type Ability } from '../../data/combat/abilities';
 import { PHYSICAL_ELEMENTS, type DamageElement, type WeaponItem } from '../../data/gear';
 import { toAction } from '../../data/combat/abilityExecution';
 import { isArea } from '../../data/combat/areas';
@@ -32,7 +32,7 @@ export const elementTint = (element: DamageElement): string => (PHYSICAL_ELEMENT
  */
 export default function AbilityCard({ ability, weapon = null, weaponAttack = false, level = 1, warning, elevated = false, className = '' }: {
   ability: Ability;
-  /** The caster's level: its MP cost grows with it (mpCostAt). Default 1 (character select). */
+  /** The caster's level: its MP cost and its effects' amounts grow with it (mpCostAt, abilityAtLevel). Default 1 (character select). */
   level?: number;
   weapon?: WeaponItem | null;
   weaponAttack?: boolean;
@@ -73,7 +73,7 @@ export default function AbilityCard({ ability, weapon = null, weaponAttack = fal
       <div className="mt-1 text-[11px] tracking-[0.12em] uppercase text-rift-label">{meta}</div>
       <hr className="my-3 h-px border-0 bg-rift-line" />
       <div className="flex flex-col gap-1 text-xs leading-[1.55] text-rift-soft">
-        {abilitySentences(ability).map((s, i) => <EffectSentence key={i} parts={s} />)}
+        {abilitySentences(abilityAtLevel(ability, level)).map((s, i) => <EffectSentence key={i} parts={s} />)}
       </div>
       {warning && <div className="mt-2.5 text-xs text-rift-warn">{warning}</div>}
     </div>

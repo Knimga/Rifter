@@ -23,11 +23,15 @@ export const gearSlotsFor = (slot: ItemSlot): GearSlot[] => (slot === 'ring' ? [
 
 // ─── Item Interfaces ──────────────────────────────────────────────────────────
 
-/** Implicit template: value = baseValue + growthPerLevel × (item level − 1), rounded. */
+/**
+ * Implicit template: value = baseValue + growthPerLevel × (item level − 1), rounded. `percent`: the value is a % of
+ * the stat (as an armor affix's: Affix.percent), else it adds to it.
+ */
 export interface ImplicitDef {
   stat: BuffableStat;
   baseValue: number;
   growthPerLevel: number;
+  percent?: boolean;
 }
 
 export interface Item {
@@ -131,6 +135,11 @@ export interface Affix {
    * tier's range (affixes.ts). Kept for crafting (upgrading a tier, within tierSumCap). None on implicits.
    */
   tier?: number;
+  /**
+   * The value is a % of the stat rather than an amount added to it: an affix on armor, magic resistance, max HP or
+   * max MP (affixes.ts PERCENT_OF_STAT_AFFIXES), or an implicit whose ImplicitDef says so.
+   */
+  percent?: boolean;
 }
 
 /** An item's rarity: how many affixes it has (affixes.ts RarityPerAffixCount, where its odds are tuned too). */

@@ -1,7 +1,7 @@
 // The party's shared inventory: taking loot into it (piles, chests) and equipping from it / unequipping to it (never
 // in combat: gearLocked). And the party's gold, shared the same way.
 import { useCallback, useState } from 'react';
-import { CLASSES } from '../data/units/classes';
+import { proficienciesOf } from '../data/units/subclasses';
 import { COMBAT_TEXT_COLOR } from '../data/constants';
 import type { Pos } from '../data/world/grid';
 import type { GearSlot, GearSlots, Item } from '../data/gear';
@@ -49,7 +49,7 @@ export function useInventory({ party, setParty, spawnFloat, gearLocked }: {
   /** Equip the inventory item at `inventoryIdx` on a member: in its own slot, or `slot` (dropped on it) if it fits there. */
   const equipItem = useCallback((inventoryIdx: number, charIdx: number, slot?: GearSlot) => {
     const member = party[charIdx];
-    if (gearLocked || !member || !canEquip(CLASSES[member.selectedClass], inventory[inventoryIdx], inventory, member.gear, slot)) return;
+    if (gearLocked || !member || !canEquip(proficienciesOf(member), inventory[inventoryIdx], inventory, member.gear, slot)) return;
     applyGearChange(charIdx, equipFromInventory(inventory, member.gear, inventoryIdx, slot));
   }, [inventory, party, applyGearChange, gearLocked]);
 

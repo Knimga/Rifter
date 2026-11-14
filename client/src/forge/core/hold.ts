@@ -74,7 +74,7 @@ export function holdItems(body: Model, items: PlacedItem[]): Model {
   // Each item's halos move with it (and its part), their radius scaled with it
   const halos: Halo[] = [...body.mesh.halos, ...items.flatMap((item, i) => item.mesh.halos.map((h): Halo => {
     const q = placePoints(h.p, item.placement);
-    return { p: [q[0], q[1], q[2]], r: h.r * item.placement.scale, c: h.c, part: body.mesh.partNames.length + i };
+    return { p: [q[0], q[1], q[2]], r: h.r * item.placement.scale, c: h.c, ...(h.s && { s: h.s }), part: body.mesh.partNames.length + i };
   }))];
   const tris = meshes.reduce((n, m) => n + m.triCount, 0);
   const cat = <T extends Float32Array | Uint8Array>(make: (n: number) => T, get: (m: MeshData, i: number) => ArrayLike<number>, per: number): T => {

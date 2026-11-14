@@ -1,6 +1,7 @@
 import { PHYSICAL_ELEMENTS, type AttackCategory, type DamageElement } from '../gear';
 import { ELEMENT_RESISTANCE_FLOOR, type Stats } from '../units/stats';
 import { randInt, rollScaled } from '../random';
+import { levelScale } from './abilities';
 
 // ─── Tuning Constants ────────────────────────────────────────────────────────
 
@@ -20,10 +21,19 @@ export const GLANCING_MULTIPLIER = 0.7; // glancing blows deal 30% less damage
 export interface Offense {
   hit: number;                // category hit% + element hit%
   crit: number;               // category crit% + element crit%
-  damage: number;             // routed category damage + element damage
+  damage: number;             // routed category damage% + element damage%: the % bonus on the hit's damage
+  /** What the hit's data damage is multiplied by: the attacker's level scale and its damage % (damageFactor). */
+  factor: number;
   penetration: number;        // routed category penetration — % points off armor/MR DR
   elementPenetration: number; // % points off the target's element resistance
 }
+
+/**
+ * What a unit's data amounts are multiplied by: its level's scale (levelScale) and its % bonus on them (damage %,
+ * healing %). `share`: how much of the bonus counts (a DoT's or HoT's ticks get half). Never below 0.
+ */
+export const damageFactor = (level: number, percent: number, share = 1): number =>
+  levelScale(level) * Math.max(0, 1 + (percent * share) / 100);
 
 /** Outcomes that stop an attack before damage: miss, dodge, parry, block. */
 export type HitOutcome = 'miss' | 'dodge' | 'parry' | 'block' | 'hit';
@@ -35,8 +45,8 @@ export interface HitRoll {
 }
 
 export interface DamageRoll {
-  roll: number;               // random roll within min/max
-  raw: number;                // roll + offense damage, after crit/glancing multipliers
+  roll: number;               // random roll within min/max × the offense's factor
+  raw: number;                // the roll after crit/glancing multipliers
   final: number;              // after DR and element resistance
 }
 
@@ -56,10 +66,12 @@ export function getOffense(stats: Stats, category: AttackCategory, element: Dama
   const cat = stats[category];
   const routed = (!PHYSICAL_ELEMENTS.has(element) || category === 'magic') ? stats.magic : cat;
   const el = stats.elementalStats[element];
+  const damage = routed.damage + (el?.damage ?? 0);
   return {
     hit: cat.hit + (el?.hit ?? 0),
     crit: cat.crit + (el?.crit ?? 0),
-    damage: routed.damage + (el?.damage ?? 0),
+    damage,
+    factor: damageFactor(stats.level, damage),
     penetration: routed.penetration,
     elementPenetration: el?.penetration ?? 0,
   };
@@ -130,7 +142,7 @@ export function rollDamage(
   target: Stats,
   hit: HitRoll,
 ): DamageRoll {
-  const roll = rollScaled(minDamage, maxDamage, offense.damage);
+  const roll = rollScaled(minDamage, maxDamage, offense.factor);
   let raw = roll;
   if (hit.crit) raw *= CRIT_MULTIPLIER;
   if (hit.glancing) raw = Math.floor(raw * GLANCING_MULTIPLIER);

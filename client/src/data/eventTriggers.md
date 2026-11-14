@@ -15,24 +15,28 @@ The unit carrying the trigger is its **bearer**.
 
 ### Passive effects: always on
 
-A creature (enemy, boss or summon) or a player class has `passiveEffects` (`CreatureClassData` in [`units/enemies.ts`](units/enemies.ts), `ClassData` in [`units/classes.ts`](units/classes.ts)): a list of `PassiveEffect`, each a `name`, an optional `damageElement` (the element of an effect with none of its own) and the `effect`. The effect is a `buff`, `debuff` (stats and/or a `trigger`), `root`, `aura`, `hot` or `dot`, written as in an ability but with no `appliesTo`, `turns` or `maxStacks`. So a trigger is a buff with a `trigger`:
+A creature (enemy, boss or summon) or a player class has `passiveEffects` (`CreatureClassData` in [`units/enemies.ts`](units/enemies.ts), `ClassData` in [`units/classes.ts`](units/classes.ts)): a list of `PassiveEffect`, each a `name`, an optional `damageElement` (the color it shows in) and exactly one of a `trigger` (a `Trigger`, below) or an `aura` (an `Aura`, as on an ability's `aura` effect):
 
 ```ts
 passiveEffects: [
-  { name: 'Chitin Spines', damageElement: 'physical', effect: { type: 'buff', trigger: {
+  { name: 'Chitin Spines', damageElement: 'physical', trigger: {
     when: 'attacked', categories: ['melee'],
     effects: [{ type: 'damage', appliesTo: 'target', damageElement: 'physical', minDamage: 3, maxDamage: 3 }],
-  } } },
-  { name: 'Thick Hide', effect: { type: 'buff', stats: { armor: 10 } } },
-  { name: 'Regrowth', effect: { type: 'hot', damageElement: 'nature', healPerTurn: 3 } },
+  } },
+  { name: 'Acrid Stench', damageElement: 'poison', aura: {
+    area: 'blast1',
+    effects: [{ type: 'debuff', appliesTo: 'enemies', stats: { meleeHit: -5 } }],
+  } },
 ],
 ```
 
+- **Behavior only:** a passive effect is what `passives` can't express. Stat bonuses go in `passives` (and a creature's `resistances`), and regeneration goes in the `hpRegen` / `mpRegen` stats. There is one way to write each.
+
 - **Always on:** it never runs out, can't be removed (a dispel leaves it) and never shows as a status marker. A trigger's name floats over the bearer when it fires, like a buff's.
-- **Its own:** the bearer put it on itself. A trigger's effects on `'source'` land on the bearer, and its own bonuses count, as on a self-cast trigger buff.
+- **Its own:** the bearer put it on itself. A trigger's effects on `'source'` land on the bearer.
 - **Same rules otherwise:** chance, events, recipients, no chains and threat all work as for a trigger buff, and the same load warnings apply.
-- **How it's kept:** a unit starts with its passive effects in its buffs, HoTs and DoTs (`passiveEffectEntries` in [`units/stats.ts`](units/stats.ts)), as permanent entries (`turnsLeft` Infinity, like gear's bonuses; `isPassiveEntry` tells them from cast effects), so stats, triggers, roots, auras and turn ticks need no extra rules. A passive HoT or DoT is not scaled by the bearer's stats, and a DoT builds no threat. For plain flat stat bonuses, `passives` is still the shorter way.
-- **Party members:** a member's passive effects are decided in one place, `memberPassiveEffects` in [`units/party.ts`](units/party.ts) (its class's now; a subclass's will be added there). Their entries are stored in its `MemberState` like a creature's. When a member dies or the party leaves a location, what was cast on it ends (`withoutCastEffects`) but its passive entries stay. The party window counts them in a stat's base, not as an effect that raises or lowers it.
+- **How it's kept:** a unit starts with its passive effects in its buffs (`passiveEffectEntries` in [`units/stats.ts`](units/stats.ts)), as the same entries a cast trigger buff or aura makes, but permanent (`turnsLeft` Infinity, like gear's bonuses; `isPassiveEntry` tells them from cast effects), so triggers and auras need no extra rules.
+- **Party members:** a member's passive effects are decided in one place, `memberPassiveEffects` in [`units/party.ts`](units/party.ts) (its class's, then its subclass's once picked). Their entries are stored in its `MemberState` like a creature's. When a member dies or the party leaves a location, what was cast on it ends (`withoutCastEffects`) but its passive entries stay.
 - **Shown:** a class's passive effects are listed with its passives on the character select screen and the party window's Abilities tab, in words. A creature's are not shown.
 
 **Triggers never stack.** A buff or debuff with a trigger counts as `maxStacks: 1`, stats included: casting it again on the same unit, by anyone, replaces the one already there. The new one starts its full `turns` again, and its `source` is the newest caster. Setting `maxStacks` above 1 on it is warned about at load. (Without a trigger, a buff or debuff stacks without limit unless it sets `maxStacks`. At the cap, the oldest stack is replaced.)
@@ -86,13 +90,9 @@ Inside a trigger, `appliesTo` is read from the bearer's side:
 ### How effects land
 
 - **No hit roll:** every effect except `weaponAttack` lands directly. A debuff or root on the other unit always sticks.
-- **Damage and DoTs** use flat numbers. They are reduced by the recipient's armor/MR and element resistance, with no crit.
-- **Heals** are flat, plus the recipient's `healingReceived`. A `heal` with `restoresMP: true` restores MP instead of HP.
-- **Self-cast buffs scale.** When the bearer cast the buff on itself (a Rogue's poison proc), its own bonuses count, the same way as for its abilities:
-  - **Damage:** gets its damage bonus and penetration for that element. Physical damage counts as the category of the attack that set it off: melee, ranged, or magic for heal events.
-  - **DoTs:** get half the bonus per turn.
-  - **Heals:** get its healing stat (a HoT gets half).
-  - **Still no crit.** A buff someone else put on the bearer, and any debuff, stays flat.
+- **Damage and DoTs** use their data amounts at the bearer's level (`levelScale`, [`combat/abilities.ts`](combat/abilities.ts)), with no % bonus. They are reduced by the recipient's armor/MR and element resistance, with no crit.
+- **Heals** are flat: exactly the amount on the data at the bearer's level, not even the recipient's `healingReceived` % applies. (A HoT a trigger applies still gets the recipient's `healingReceived` per tick, like any HoT.) A `heal` with `restoresMP: true` restores MP instead of HP; so does a `hot` with it (each tick restores MP, added to the bearer's MP regen at the start of its turn).
+- **Never scaled.** No bonus of the bearer or of whoever cast the trigger is added to what a trigger does, whether the bearer cast it on itself or an ally did: no damage bonus, penetration or healing stat, on damage, DoTs, heals or HoTs. A triggered effect does exactly what its ability data reads at the bearer's level (a `weaponAttack` is the exception: it is a normal attack with the bearer's own stats).
 - **The bearer must still be alive** after the damage it has taken in this action so far. A defender killed by the hit doesn't strike back.
 - **Threat:** what a party member's or summon's trigger does builds that unit's own threat.
 - **No chains:** a trigger's effects never set off other triggers. The one exception is a triggered `weaponAttack`, whose hit roll is a normal attack event: it can set off thorns or a poison proc, but never another `weaponAttack`.
